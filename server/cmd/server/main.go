@@ -90,7 +90,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 	api.POST("/webhooks/alerts/:token", h.ReceiveAlert)
 
 	auth := api.Group("")
-	auth.Use(middleware.Auth(cfg.JWTSecret, gormDB), middleware.Audit(gormDB))
+	auth.Use(middleware.Auth(cfg.JWTSecret, gormDB), middleware.RequireTOTP(gormDB), middleware.Audit(gormDB))
 	{
 		auth.GET("/me", h.Profile)
 		auth.GET("/me/menus", h.MyMenus)
@@ -288,6 +288,12 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/certificates/:id", middleware.RequirePerm("cert:manage"), h.DeleteCertificate)
 		auth.POST("/certificates/:id/check", middleware.RequirePerm("cert:check"), h.CheckCertificate)
 		auth.POST("/certificates/check-all", middleware.RequirePerm("cert:check"), h.CheckAllCertificates)
+
+		auth.GET("/me/totp", h.GetMyTOTP)
+		auth.POST("/me/totp/setup", h.SetupMyTOTP)
+		auth.POST("/me/totp/confirm", h.ConfirmMyTOTP)
+		auth.POST("/me/totp/disable", h.DisableMyTOTP)
+		auth.POST("/system/users/:id/totp/reset", middleware.RequirePerm("totp:reset"), h.ResetUserTOTP)
 	}
 
 	return r

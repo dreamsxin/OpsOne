@@ -35,8 +35,16 @@ type User struct {
 	DeptID       uint       `gorm:"index;default:0" json:"deptId"`
 	Status       int        `gorm:"default:1" json:"status"` // 1 启用 0 禁用
 	LastLoginAt  *time.Time `json:"lastLoginAt"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+
+	// 双因子口令（TOTP）。Secret 明文存库，与主机凭据同等对待，接口不返回。
+	// 绑定流程：setup 写入 Secret（Enabled=false）→ confirm 校验通过后置 Enabled。
+	TOTPSecret      string     `gorm:"size:64" json:"-"`
+	TOTPEnabled     bool       `gorm:"default:false" json:"totpEnabled"`
+	TOTPBoundAt     *time.Time `json:"totpBoundAt"`
+	TOTPLastCounter int64      `json:"-"` // 已用过的时间窗，用于拒绝同一验证码重放
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	Roles []Role `gorm:"many2many:user_roles" json:"roles,omitempty"`
 }

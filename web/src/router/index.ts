@@ -31,7 +31,17 @@ const staticRoutes: RouteRecordRaw[] = [
     component: () => import('@/layouts/BasicLayout.vue'),
     redirect: '/dashboard/overview',
 
-    children: []
+    children: [
+      {
+        // 双因子绑定是自助页面，不能只靠菜单授权：强制模式下没有该菜单的用户
+        // 也必须能进来完成绑定。name 与内置菜单 503 的 Name 一致，
+        // 动态注册时会跳过，避免同一路径注册两次
+        path: '/security/twofa',
+        name: 'TwoFA',
+        component: () => import('@/views/security/twofa/index.vue'),
+        meta: { title: '双因子口令' }
+      }
+    ]
   },
   {
     path: '/403',
@@ -114,6 +124,10 @@ router.beforeEach(async (to) => {
   }
   if (!store.isLogin) {
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  // 强制双因子且未绑定：后端已经拦住了业务接口，这里只是把人引到绑定页
+  if (store.needBindTotp && to.path !== '/security/twofa') {
+    return { path: '/security/twofa' }
   }
   return true
 })

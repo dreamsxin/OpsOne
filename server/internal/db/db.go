@@ -126,7 +126,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 506, ParentID: 501, Title: "维护证书", Type: "button", AuthCode: "cert:manage", Sort: 1},
 		{ID: 507, ParentID: 501, Title: "执行巡检", Type: "button", AuthCode: "cert:check", Sort: 2},
 		{ID: 502, ParentID: 500, Name: "Firewall", Title: "防火墙策略", Path: "/security/firewall", Component: todo, Icon: "Lock", Sort: 2},
-		{ID: 503, ParentID: 500, Name: "TwoFA", Title: "双因子口令", Path: "/security/twofa", Component: todo, Icon: "Key", Sort: 3},
+		{ID: 503, ParentID: 500, Name: "TwoFA", Title: "双因子口令", Path: "/security/twofa", Component: "/security/twofa/index", Icon: "Key", Sort: 3},
+		{ID: 508, ParentID: 503, Title: "重置他人绑定", Type: "button", AuthCode: "totp:reset", Sort: 1},
 		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: todo, Icon: "Reading", Sort: 4},
 		{ID: 505, ParentID: 500, Name: "FeatureLibrary", Title: "特征库", Path: "/security/features", Component: todo, Icon: "Collection", Sort: 5},
 
@@ -343,6 +344,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "明文存储，与主机凭据同等对待", Builtin: true},
 		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
+		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
 	}
 
 	for i := range configs {

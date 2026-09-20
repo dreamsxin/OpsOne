@@ -15,6 +15,7 @@ import (
 type loginReq struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	Code     string `json:"code"` // 动态验证码，仅在账号绑定了双因子时需要
 }
 
 // Login 账号密码登录
@@ -38,6 +39,16 @@ func (h *Handler) Login(c *gin.Context) {
 	if user.Status != 1 {
 		response.Forbidden(c, "账号已被禁用")
 		return
+	}
+
+	// 口令通过后再要第二因子。口令错误时不暴露「这个账号开了双因子」这类信息。
+	if user.TOTPEnabled {
+		ok, detail := h.verifyLoginTOTP(&user, req.Code)
+		if !ok {
+			// 用 200 + totpRequired 表达「还缺一步」，避免与 401（口令错误，前端会清 token 跳登录）混在一起
+			response.OK(c, gin.H{"totpRequired": true, "detail": detail})
+			return
+		}
 	}
 
 	ttl := time.Duration(h.Cfg.TokenTTLHour) * time.Hour
@@ -80,6 +91,9 @@ func (h *Handler) Profile(c *gin.Context) {
 		"lastLoginAt": user.LastLoginAt,
 		"roles":       roles,
 		"permissions": codes,
+		"totpEnabled": user.TOTPEnabled,
+		// 强制模式下未绑定的账号，除 /me 系接口外都会被后端拦下，前端据此引导到绑定页
+		"totpEnforced": h.totpMode() == "required",
 	})
 }
 

@@ -11,7 +11,9 @@ const route = useRoute()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
-const form = ref({ username: '', password: '' })
+const form = ref({ username: '', password: '', code: '' })
+// 账号绑定了双因子时，后端会先要求补验证码，再提交一次
+const needCode = ref(false)
 
 // 平台名称与登录提示来自系统配置，支持不改代码做白标
 const platformName = ref('OpsOne 一体化运维平台')
@@ -40,7 +42,13 @@ async function submit() {
 
   loading.value = true
   try {
-    await store.login(form.value.username, form.value.password)
+    const res = await store.login(form.value.username, form.value.password, form.value.code)
+    if (res.totpRequired) {
+      needCode.value = true
+      ElMessage.warning(res.detail || '请输入动态验证码')
+      form.value.code = ''
+      return
+    }
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/dashboard/overview'
 
@@ -84,6 +92,15 @@ async function submit() {
             size="large"
             show-password
             :prefix-icon="'Lock'"
+          />
+        </el-form-item>
+        <el-form-item v-if="needCode" prop="code">
+          <el-input
+            v-model="form.code"
+            placeholder="验证器 6 位动态验证码"
+            size="large"
+            maxlength="6"
+            :prefix-icon="'Key'"
           />
         </el-form-item>
         <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="submit">

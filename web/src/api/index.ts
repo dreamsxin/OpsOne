@@ -7,6 +7,9 @@ export interface LoginResult {
   token: string
   expiresAt: number
   user: { id: number; username: string; nickname: string }
+  /** 口令正确但还缺动态验证码时，后端只返回这两个字段 */
+  totpRequired?: boolean
+  detail?: string
 }
 
 export interface Profile {
@@ -17,6 +20,8 @@ export interface Profile {
   lastLoginAt: string | null
   roles: { id: number; code: string; name: string }[]
   permissions: string[]
+  totpEnabled: boolean
+  totpEnforced: boolean
 }
 
 export interface MenuNode {
@@ -311,6 +316,8 @@ export interface User {
   deptId: number
   status: number
   lastLoginAt: string | null
+  totpEnabled: boolean
+  totpBoundAt: string | null
   roles?: Role[]
 }
 
@@ -597,8 +604,8 @@ export interface GrantDiagnosis {
 
 // ---------- 接口 ----------
 
-export const login = (username: string, password: string) =>
-  request<LoginResult>({ url: '/auth/login', method: 'POST', data: { username, password } })
+export const login = (username: string, password: string, code?: string) =>
+  request<LoginResult>({ url: '/auth/login', method: 'POST', data: { username, password, code } })
 
 export const getProfile = () => request<Profile>({ url: '/me' })
 export const getMyMenus = () => request<MenuNode[]>({ url: '/me/menus' })
@@ -1124,6 +1131,35 @@ export const checkCertificate = (id: number) =>
 export const checkAllCertificates = () =>
   request<{ checked: number; valid?: number; expiring?: number; expired?: number; error?: number; detail?: string }>({
     url: '/certificates/check-all',
+    method: 'POST'
+  })
+
+// ---------- 双因子口令（TOTP） ----------
+
+export interface TOTPStatus {
+  enabled: boolean
+  boundAt: string | null
+  pending: boolean
+  mode: 'optional' | 'required'
+  issuer: string
+}
+
+export interface TOTPSetup {
+  secret: string
+  uri: string
+  digits: number
+  period: number
+}
+
+export const getMyTOTP = () => request<TOTPStatus>({ url: '/me/totp' })
+export const setupMyTOTP = () => request<TOTPSetup>({ url: '/me/totp/setup', method: 'POST' })
+export const confirmMyTOTP = (code: string) =>
+  request<{ enabled: boolean; boundAt: string }>({ url: '/me/totp/confirm', method: 'POST', data: { code } })
+export const disableMyTOTP = (password: string, code: string) =>
+  request<{ enabled: boolean }>({ url: '/me/totp/disable', method: 'POST', data: { password, code } })
+export const resetUserTOTP = (id: number) =>
+  request<{ username: string; enabled: boolean }>({
+    url: `/system/users/${id}/totp/reset`,
     method: 'POST'
   })
 

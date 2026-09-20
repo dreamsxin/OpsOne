@@ -12,13 +12,23 @@ export const useUserStore = defineStore('user', {
   }),
   getters: {
     isLogin: (state) => !!state.token,
-    displayName: (state) => state.profile?.nickname || state.profile?.username || ''
+    displayName: (state) => state.profile?.nickname || state.profile?.username || '',
+    /** 平台强制双因子但当前账号还没绑定：此时后端只放行 /me 系接口 */
+    needBindTotp: (state) => !!state.profile?.totpEnforced && !state.profile?.totpEnabled
   },
   actions: {
-    async login(username: string, password: string) {
-      const res = await loginApi(username, password)
+    /**
+     * 登录。口令正确但账号开了双因子时，后端返回 totpRequired，
+     * 此处不写 token，交给页面补验证码后再调一次。
+     */
+    async login(username: string, password: string, code?: string) {
+      const res = await loginApi(username, password, code)
+      if (res.totpRequired) {
+        return res
+      }
       this.token = res.token
       localStorage.setItem(TOKEN_KEY, res.token)
+      return res
     },
     async loadProfile() {
       const profile = await getProfile()
