@@ -343,6 +343,35 @@ type Alert struct {
 	AckAt       *time.Time `json:"ackAt"`
 	ResolvedAt  *time.Time `json:"resolvedAt"`
 	HandleNote  string     `gorm:"size:255" json:"handleNote"`
+	// SuppressedBy 命中聚合策略而未发通知时记下策略名，用来解释「为什么没收到通知」
+	SuppressedBy string `gorm:"size:64" json:"suppressedBy"`
+}
+
+// AggregationPolicy 告警聚合策略：把同类告警按维度归到一个桶，
+// 对付「一台机器挂了刷出一堆告警」这类噪音。
+//
+// 归桶是实时计算的，不改动告警本身；只有显式打开「抑制通知」才会影响投递，
+// 被抑制的告警仍然入库、页面可见，并在告警上记下是哪条策略抑制的。
+type AggregationPolicy struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Dimensions 归桶维度，逗号分隔。取值：source | severity | title | label:<键名>
+	Dimensions string `gorm:"size:255;not null" json:"dimensions"`
+	// MatchSeverity 只处理这些级别，逗号分隔，空表示不限
+	MatchSeverity string `gorm:"size:64" json:"matchSeverity"`
+	// WindowMinutes 只把窗口内出现过的告警纳入同一个桶
+	WindowMinutes int `gorm:"default:60" json:"windowMinutes"`
+	// MinCount 桶内告警数达到该值才算「成桶」，低于此值按单条看
+	MinCount int `gorm:"default:2" json:"minCount"`
+	// SuppressNotify 同一桶内窗口期只通知首条，其余仅入库
+	SuppressNotify bool `gorm:"default:false" json:"suppressNotify"`
+	// Priority 越小越先匹配，一条告警只会被第一条命中的策略处理
+	Priority  int       `gorm:"default:100" json:"priority"`
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // NotifyChannel 通知渠道。webhook 走 HTTP POST，email 走 SMTP，silent 只落记录不外发。

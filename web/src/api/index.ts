@@ -1292,6 +1292,77 @@ export const runProbe = (id: number) =>
 export const listProbeRecords = (params: Record<string, any>) =>
   request<PageData<ProbeRecord>>({ url: '/monitor/probe-records', params })
 
+// ---------- 聚合策略 ----------
+
+export interface AggregationPolicy {
+  id: number
+  name: string
+  dimensions: string
+  matchSeverity: string
+  windowMinutes: number
+  minCount: number
+  suppressNotify: boolean
+  priority: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface AggregationDimension {
+  key: string
+  label: string
+  count?: number
+}
+
+export interface AggregationBucket {
+  key: string
+  dimensions: Record<string, string>
+  alertCount: number
+  totalCount: number
+  suppressed: number
+  severities: Record<string, number>
+  sampleIds: number[]
+  sampleTitle: string
+  firstSeenAt: string
+  lastSeenAt: string
+  grouped: boolean
+}
+
+export interface AggregationPreview {
+  policy: AggregationPolicy
+  buckets: AggregationBucket[]
+  matchedAlerts: number
+  bucketCount: number
+  groupedBuckets: number
+  groupedAlerts: number
+  detail: string
+}
+
+export interface AggregationOverlap {
+  policyA: string
+  priorityA: number
+  policyB: string
+  priorityB: number
+  alerts: number
+  sample: string
+  effective: string
+}
+
+export const listAggregationPolicies = () =>
+  request<AggregationPolicy[]>({ url: '/monitor/aggregation' })
+export const listAggregationDimensions = () =>
+  request<AggregationDimension[]>({ url: '/monitor/aggregation/dimensions' })
+export const createAggregationPolicy = (data: Record<string, any>) =>
+  request<AggregationPolicy>({ url: '/monitor/aggregation', method: 'POST', data })
+export const updateAggregationPolicy = (id: number, data: Record<string, any>) =>
+  request<AggregationPolicy>({ url: `/monitor/aggregation/${id}`, method: 'PUT', data })
+export const deleteAggregationPolicy = (id: number) =>
+  request({ url: `/monitor/aggregation/${id}`, method: 'DELETE' })
+export const previewAggregation = (id: number) =>
+  request<AggregationPreview>({ url: `/monitor/aggregation/${id}/preview` })
+export const detectAggregationOverlaps = () =>
+  request<{ overlaps: AggregationOverlap[]; detail: string }>({ url: '/monitor/aggregation/overlaps' })
+
 
 
 

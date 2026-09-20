@@ -37,6 +37,7 @@ func Migrate(g *gorm.DB) error {
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
 		&model.Certificate{}, &model.AlertRule{},
 		&model.Probe{}, &model.ProbeRecord{},
+		&model.AggregationPolicy{},
 	)
 }
 
@@ -112,7 +113,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 404, ParentID: 400, Name: "DetectionRule", Title: "检测规则", Path: "/monitor/detection-rules", Component: todo, Icon: "Aim", Sort: 4},
 		{ID: 405, ParentID: 400, Name: "NotifyRouting", Title: "通知路由", Path: "/monitor/routing", Component: "/monitor/routing/index", Icon: "Guide", Sort: 5},
 		{ID: 421, ParentID: 405, Title: "维护路由", Type: "button", AuthCode: "route:manage", Sort: 1},
-		{ID: 406, ParentID: 400, Name: "AggregationPolicy", Title: "聚合策略", Path: "/monitor/aggregation", Component: todo, Icon: "Operation", Sort: 6},
+		{ID: 406, ParentID: 400, Name: "AggregationPolicy", Title: "聚合策略", Path: "/monitor/aggregation", Component: "/monitor/aggregation/index", Icon: "Operation", Sort: 6},
+		{ID: 424, ParentID: 406, Title: "维护聚合策略", Type: "button", AuthCode: "aggregation:manage", Sort: 1},
 		{ID: 407, ParentID: 400, Name: "EventCenter", Title: "事件中心", Path: "/monitor/events", Component: todo, Icon: "Warning", Sort: 7},
 		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: todo, Icon: "Histogram", Sort: 8},
 		{ID: 409, ParentID: 400, Name: "LogQuery", Title: "日志查询", Path: "/monitor/logs", Component: todo, Icon: "Document", Sort: 9},

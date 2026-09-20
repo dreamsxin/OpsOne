@@ -118,6 +118,13 @@ func (h *Handler) ingestAlert(source *model.AlertSource, item alertPayload) {
 		return
 	}
 
+	// 聚合策略可能判定这条属于「同一批噪音」，此时只入库不通知，并记下是哪条策略拦的
+	if policyName, suppressed := h.suppressedByAggregation(alert); suppressed {
+		alert.SuppressedBy = policyName
+		h.DB.Model(&alert).Update("suppressed_by", policyName)
+		return
+	}
+
 	// 派发放到后台，避免拖慢接入方的请求
 	go h.dispatchAlert(alert)
 	if alert.Severity == "critical" {

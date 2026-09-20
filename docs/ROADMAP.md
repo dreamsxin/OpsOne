@@ -54,7 +54,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [ ] 检测规则 `/monitor/detection-rules` — 顺序链、并发窗、窗口 Join、降噪
 - [x] 通知路由 `/monitor/routing` — 优先级 + 级别/标签匹配、兜底路由、选路预演
 
-- [ ] 聚合策略 `/monitor/aggregation` — 聚合维度、归桶预览、重叠检测
+- [x] 聚合策略 `/monitor/aggregation` — 按接入源/级别/标题/任意标签维度实时归桶、成桶阈值、归桶预览、策略重叠检测；可选「抑制通知」（同桶窗口内只通知首条，其余仍入库并在告警上记录抑制来源）
 - [ ] 事件中心 `/monitor/events` — 事件确认/恢复、响应处置、诊断上下文
 - [ ] 指标查询 `/monitor/metrics` — 对接 Prometheus，即时/范围查询
 - [ ] 日志查询 `/monitor/logs` — 对接 Loki

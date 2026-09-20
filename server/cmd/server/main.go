@@ -326,6 +326,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/monitor/probes/:id", middleware.RequirePerm("probe:manage"), h.DeleteProbe)
 		auth.POST("/monitor/probes/:id/run", middleware.RequirePerm("probe:manage"), h.RunProbe)
 		auth.GET("/monitor/probe-records", h.ListProbeRecords)
+
+		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
+		auth.GET("/monitor/aggregation/overlaps", h.DetectAggregationOverlaps)
+		auth.GET("/monitor/aggregation", h.ListAggregationPolicies)
+		auth.POST("/monitor/aggregation", middleware.RequirePerm("aggregation:manage"), h.CreateAggregationPolicy)
+		auth.PUT("/monitor/aggregation/:id", middleware.RequirePerm("aggregation:manage"), h.UpdateAggregationPolicy)
+		auth.DELETE("/monitor/aggregation/:id", middleware.RequirePerm("aggregation:manage"), h.DeleteAggregationPolicy)
+		auth.GET("/monitor/aggregation/:id/preview", h.PreviewAggregation)
 	}
 
 	return r
