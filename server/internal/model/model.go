@@ -278,3 +278,30 @@ type NotifyRecord struct {
 	CostMs      int64     `json:"costMs"`
 	CreatedAt   time.Time `gorm:"index" json:"createdAt"`
 }
+
+// Announcement 平台公告。发布后对全员可见，并给每个启用用户投递一条站内消息。
+type Announcement struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Title       string     `gorm:"size:255;not null" json:"title"`
+	Content     string     `gorm:"type:text" json:"content"`
+	Level       string     `gorm:"size:16;default:info" json:"level"` // info | warning
+	Published   bool       `gorm:"default:false;index" json:"published"`
+	PublishedAt *time.Time `json:"publishedAt"`
+	Publisher   string     `gorm:"size:64" json:"publisher"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// Message 站内消息，按用户维度存储。来源为公告发布与严重告警。
+type Message struct {
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	UserID    uint       `gorm:"index;not null" json:"userId"`
+	Type      string     `gorm:"size:16;index" json:"type"` // announcement | alert
+	Title     string     `gorm:"size:255" json:"title"`
+	Content   string     `gorm:"type:text" json:"content"`
+	Level     string     `gorm:"size:16;default:info" json:"level"` // info | warning | critical
+	RefID     uint       `json:"refId"`                             // 关联的公告或告警 ID
+	Read      bool       `gorm:"default:false;index" json:"read"`
+	ReadAt    *time.Time `json:"readAt"`
+	CreatedAt time.Time  `gorm:"index" json:"createdAt"`
+}

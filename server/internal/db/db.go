@@ -29,6 +29,7 @@ func Migrate(g *gorm.DB) error {
 		&model.CronJob{}, &model.FileAudit{},
 		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
 		&model.NotifyRoute{}, &model.NotifyRecord{},
+		&model.Announcement{}, &model.Message{},
 	)
 }
 
@@ -88,7 +89,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},
-		{ID: 401, ParentID: 400, Name: "AlertSituation", Title: "告警态势", Path: "/monitor/situation", Component: todo, Icon: "DataAnalysis", Sort: 1},
+		{ID: 401, ParentID: 400, Name: "AlertSituation", Title: "告警态势", Path: "/monitor/situation", Component: "/monitor/situation/index", Icon: "DataAnalysis", Sort: 1},
 		{ID: 402, ParentID: 400, Name: "AlertList", Title: "告警列表", Path: "/monitor/alerts", Component: "/monitor/alerts/index", Icon: "Bell", Sort: 2},
 		{ID: 420, ParentID: 402, Title: "确认与恢复", Type: "button", AuthCode: "alert:handle", Sort: 1},
 		{ID: 403, ParentID: 400, Name: "AlertRule", Title: "告警规则", Path: "/monitor/alert-rules", Component: todo, Icon: "Tickets", Sort: 3},
@@ -144,7 +145,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 812, ParentID: 800, Name: "NotifyChannel", Title: "通知渠道", Path: "/system/notify-channel", Component: "/system/notify-channel/index", Icon: "Message", Sort: 8},
 		{ID: 823, ParentID: 812, Title: "维护渠道", Type: "button", AuthCode: "channel:manage", Sort: 1},
 		{ID: 813, ParentID: 800, Name: "NotifyRecord", Title: "通知记录", Path: "/system/notify-record", Component: "/system/notify-record/index", Icon: "MessageBox", Sort: 9},
-		{ID: 814, ParentID: 800, Name: "Announcement", Title: "公告管理", Path: "/system/announcement", Component: todo, Icon: "Bell", Sort: 10},
+		{ID: 814, ParentID: 800, Name: "Announcement", Title: "公告管理", Path: "/system/announcement", Component: "/system/announcement/index", Icon: "Bell", Sort: 10},
+		{ID: 824, ParentID: 814, Title: "维护与发布", Type: "button", AuthCode: "announcement:manage", Sort: 1},
 		{ID: 815, ParentID: 800, Name: "ImIntegration", Title: "IM 集成", Path: "/system/im", Component: todo, Icon: "ChatDotRound", Sort: 11},
 		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: todo, Icon: "Tools", Sort: 12},
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
@@ -153,8 +155,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 消息中心 ----------
 		{ID: 900, Name: "MessageCenter", Title: "消息中心", Path: "/message", Icon: "Message", Sort: 100},
-		{ID: 901, ParentID: 900, Name: "MessageInbox", Title: "我的消息", Path: "/message/inbox", Component: todo, Icon: "MessageBox", Sort: 1},
-		{ID: 902, ParentID: 900, Name: "AnnouncementFeed", Title: "公告中心", Path: "/message/announcement", Component: todo, Icon: "Bell", Sort: 2},
+		{ID: 901, ParentID: 900, Name: "MessageInbox", Title: "我的消息", Path: "/message/inbox", Component: "/message/inbox/index", Icon: "MessageBox", Sort: 1},
+		{ID: 902, ParentID: 900, Name: "AnnouncementFeed", Title: "公告中心", Path: "/message/announcement", Component: "/message/announcement/index", Icon: "Bell", Sort: 2},
 	}
 	// 菜单目前由种子数据统一维护（菜单管理模块尚未实现），因此以代码为准做全量覆盖：
 	// 按 ID upsert，并清掉不在清单里的历史菜单，避免版本升级后残留旧入口

@@ -120,6 +120,9 @@ func (h *Handler) ingestAlert(source *model.AlertSource, item alertPayload) {
 
 	// 派发放到后台，避免拖慢接入方的请求
 	go h.dispatchAlert(alert)
+	if alert.Severity == "critical" {
+		go h.notifyCriticalAlert(alert)
+	}
 }
 
 // alertFingerprint 用标题与标签生成稳定指纹

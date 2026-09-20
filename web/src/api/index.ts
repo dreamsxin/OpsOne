@@ -203,6 +203,59 @@ export interface NotifyRecord {
   createdAt: string
 }
 
+export interface NameCount {
+  name: string
+  count: number
+}
+
+export interface AlertSituation {
+  range: string
+  since: string
+  total: number
+  trend: { time: string; critical: number; warning: number; info: number }[]
+  bySeverity: NameCount[]
+  byStatus: NameCount[]
+  bySource: NameCount[]
+  topLabels: NameCount[]
+  handleStats: {
+    ackedNum: number
+    resolvedNum: number
+    avgAckSec: number
+    avgResolveSec: number
+  }
+}
+
+export interface Announcement {
+  id: number
+  title: string
+  content: string
+  level: 'info' | 'warning'
+  published: boolean
+  publishedAt: string | null
+  publisher: string
+  createdAt: string
+}
+
+export interface Message {
+  id: number
+  userId: number
+  type: 'announcement' | 'alert'
+  title: string
+  content: string
+  level: 'info' | 'warning' | 'critical'
+  refId: number
+  read: boolean
+  readAt: string | null
+  createdAt: string
+}
+
+export interface MessageSummary {
+  unread: number
+  unreadAlert: number
+  latest: Message[]
+}
+
+
 
 
 
@@ -460,5 +513,38 @@ export const testNotifyRoute = (data: { severity: string; labels: Record<string,
 
 export const listNotifyRecords = (params: Record<string, any>) =>
   request<PageData<NotifyRecord>>({ url: '/notify/records', params })
+
+export const getAlertSituation = (range: string) =>
+  request<AlertSituation>({ url: '/alerts/situation', params: { range } })
+
+// ---------- 公告与站内消息 ----------
+
+export const listAnnouncements = (params: Record<string, any>) =>
+  request<PageData<Announcement>>({ url: '/system/announcements', params })
+export const createAnnouncement = (data: Record<string, any>) =>
+  request<Announcement>({ url: '/system/announcements', method: 'POST', data })
+export const updateAnnouncement = (id: number, data: Record<string, any>) =>
+  request<Announcement>({ url: `/system/announcements/${id}`, method: 'PUT', data })
+export const deleteAnnouncement = (id: number) =>
+  request({ url: `/system/announcements/${id}`, method: 'DELETE' })
+export const publishAnnouncement = (id: number) =>
+  request<{ published: boolean; messageSent: number }>({
+    url: `/system/announcements/${id}/publish`,
+    method: 'POST'
+  })
+export const unpublishAnnouncement = (id: number) =>
+  request({ url: `/system/announcements/${id}/unpublish`, method: 'POST' })
+
+export const listPublishedAnnouncements = (params: Record<string, any>) =>
+  request<PageData<Announcement>>({ url: '/announcements/published', params })
+
+export const listMessages = (params: Record<string, any>) =>
+  request<PageData<Message>>({ url: '/me/messages', params })
+export const getMessageSummary = () => request<MessageSummary>({ url: '/me/messages/summary' })
+export const readMessage = (id: number) =>
+  request({ url: `/me/messages/${id}/read`, method: 'POST' })
+export const readAllMessages = () =>
+  request<{ updated: number }>({ url: '/me/messages/read-all', method: 'POST' })
+
 
 

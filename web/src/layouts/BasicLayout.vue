@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { changePassword, type MenuNode } from '@/api'
+import { changePassword, getMessageSummary, type MenuNode, type MessageSummary } from '@/api'
 
 const store = useUserStore()
 const route = useRoute()
@@ -13,6 +13,26 @@ const collapse = ref(false)
 const pwdVisible = ref(false)
 const pwdFormRef = ref<FormInstance>()
 const pwdForm = ref({ oldPassword: '', newPassword: '', confirm: '' })
+
+const summary = ref<MessageSummary>({ unread: 0, unreadAlert: 0, latest: [] })
+
+async function loadSummary() {
+  try {
+    summary.value = await getMessageSummary()
+  } catch {
+    // 未读汇总失败不影响主界面
+  }
+}
+
+// 打开铃铛时刷新，避免常驻轮询
+function onBellToggle(visible: boolean) {
+  if (visible) loadSummary()
+}
+
+function gotoInbox() {
+  router.push('/message/inbox')
+}
+
 
 const visibleMenus = computed(() => store.menus.filter((m) => !m.hidden))
 const activeMenu = computed(() => route.path)
@@ -60,7 +80,10 @@ async function handleLogout() {
   store.logout()
   router.push('/login')
 }
+
+onMounted(loadSummary)
 </script>
+
 
 <template>
   <el-container style="height: 100%">
@@ -131,7 +154,39 @@ async function handleLogout() {
           </el-breadcrumb-item>
         </el-breadcrumb>
         <div style="flex: 1"></div>
+        <el-dropdown trigger="click" @visible-change="onBellToggle">
+          <el-badge :value="summary.unread" :hidden="summary.unread === 0" :max="99">
+            <el-icon size="18" style="cursor: pointer; vertical-align: middle"><Bell /></el-icon>
+          </el-badge>
+          <template #dropdown>
+            <div style="width: 300px; padding: 8px 12px">
+              <div style="display: flex; align-items: center; margin-bottom: 6px">
+                <strong>未读消息 {{ summary.unread }}</strong>
+                <el-button link type="primary" style="margin-left: auto" @click="gotoInbox">
+                  查看全部
+                </el-button>
+              </div>
+              <el-empty v-if="!summary.latest.length" description="没有未读消息" :image-size="50" />
+              <div
+                v-for="item in summary.latest"
+                :key="item.id"
+                style="padding: 6px 0; border-top: 1px solid #f0f0f0; cursor: pointer"
+                @click="gotoInbox"
+              >
+                <div style="display: flex; gap: 6px; align-items: center">
+                  <el-tag size="small" :type="item.level === 'critical' ? 'danger' : 'info'">
+                    {{ item.type === 'alert' ? '告警' : '公告' }}
+                  </el-tag>
+                  <span style="font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                    {{ item.title }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </el-dropdown>
         <el-dropdown>
+
           <span style="cursor: pointer; display: flex; align-items: center; gap: 6px">
             <el-icon><UserFilled /></el-icon>
             {{ store.displayName }}

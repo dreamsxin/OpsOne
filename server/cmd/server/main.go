@@ -134,6 +134,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		auth.GET("/alerts", h.ListAlerts)
 		auth.GET("/alerts/stats", h.AlertStats)
+		auth.GET("/alerts/situation", h.AlertSituation)
 		auth.GET("/alerts/:id", h.GetAlert)
 		auth.POST("/alerts/:id/ack", middleware.RequirePerm("alert:handle"), h.AckAlert)
 		auth.POST("/alerts/:id/resolve", middleware.RequirePerm("alert:handle"), h.ResolveAlert)
@@ -157,6 +158,20 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/notify/routes/test", h.TestNotifyRoute)
 
 		auth.GET("/notify/records", h.ListNotifyRecords)
+
+		auth.GET("/system/announcements", h.ListAnnouncements)
+		auth.POST("/system/announcements", middleware.RequirePerm("announcement:manage"), h.CreateAnnouncement)
+		auth.PUT("/system/announcements/:id", middleware.RequirePerm("announcement:manage"), h.UpdateAnnouncement)
+		auth.DELETE("/system/announcements/:id", middleware.RequirePerm("announcement:manage"), h.DeleteAnnouncement)
+		auth.POST("/system/announcements/:id/publish", middleware.RequirePerm("announcement:manage"), h.PublishAnnouncement)
+		auth.POST("/system/announcements/:id/unpublish", middleware.RequirePerm("announcement:manage"), h.UnpublishAnnouncement)
+
+		auth.GET("/announcements/published", h.ListPublishedAnnouncements)
+
+		auth.GET("/me/messages", h.ListMessages)
+		auth.GET("/me/messages/summary", h.MessageSummary)
+		auth.POST("/me/messages/:id/read", h.ReadMessage)
+		auth.POST("/me/messages/read-all", h.ReadAllMessages)
 	}
 
 	return r
