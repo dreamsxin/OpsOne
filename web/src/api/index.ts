@@ -2504,6 +2504,61 @@ export const chatCompletion = (data: {
 export const listModelCalls = (params: Record<string, any>) =>
   request<PageData<ModelCall> & { summary: ModelCallSummary }>({ url: '/ai/calls', params })
 
+/** 一个时间桶的用量 */
+export interface ModelUsageBucket {
+  label: string
+  calls: number
+  failed: number
+  tokens: number
+  cost: number
+  avgLatencyMs: number
+}
+
+export interface ModelUsageRank {
+  name: string
+  calls: number
+  failed: number
+  tokens: number
+  cost: number
+  avgLatencyMs: number
+}
+
+export interface ModelUsageOverview {
+  summary: {
+    calls: number
+    failed: number
+    successRate: number
+    promptTokens: number
+    completionTokens: number
+    tokens: number
+    cost: number
+    avgLatencyMs: number
+    maxLatencyMs: number
+    usageMissing: number
+    retried: number
+  }
+  trend: ModelUsageBucket[]
+  byAlias: ModelUsageRank[]
+  byUpstream: ModelUsageRank[]
+  byUser: ModelUsageRank[]
+  bucket: 'day' | 'hour'
+  rowsScanned: number
+  truncated: boolean
+}
+
+export const getModelUsage = (params: Record<string, any>) =>
+  request<ModelUsageOverview>({ url: '/ai/usage', params })
+
+/** 导出调用流水：条件与界面一致，只有元数据、没有正文 */
+export const exportModelCallsCSV = (params: Record<string, any>) => {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== '' && value !== undefined && value !== null) search.append(key, String(value))
+  })
+  const query = search.toString()
+  return downloadBlob(`/ai/calls/export${query ? `?${query}` : ''}`, 'model-calls.csv')
+}
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

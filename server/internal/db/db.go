@@ -167,7 +167,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 601, ParentID: 600, Name: "ModelPool", Title: "模型资源池", Path: "/ai/model-pool", Component: "/ai/model-pool/index", Icon: "Cpu", Sort: 1},
 		{ID: 605, ParentID: 601, Title: "维护上游", Type: "button", AuthCode: "model:manage", Sort: 1},
 		{ID: 606, ParentID: 601, Title: "调用模型", Type: "button", AuthCode: "model:call", Sort: 2},
-		{ID: 602, ParentID: 600, Name: "ModelUsage", Title: "用量与成本", Path: "/ai/model-usage", Component: todo, Icon: "Money", Sort: 2},
+		{ID: 602, ParentID: 600, Name: "ModelUsage", Title: "用量与成本", Path: "/ai/model-usage", Component: "/ai/model-usage/index", Icon: "Money", Sort: 2},
 		{ID: 603, ParentID: 600, Name: "AgentRuns", Title: "Agent 运行", Path: "/ai/agent-runs", Component: todo, Icon: "Cpu", Sort: 3},
 		{ID: 604, ParentID: 600, Name: "AgentConfig", Title: "Agent 配置", Path: "/ai/agent-config", Component: todo, Icon: "SetUp", Sort: 4},
 
@@ -389,6 +389,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.kube_change_days", Value: "180", Type: "int", Label: "集群改动留痕保留天数", Remark: "对集群 apply / 改副本数的记录，含提交的 YAML 原文；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.session_days", Value: "180", Type: "int", Label: "会话记录保留天数", Remark: "删除会话流水会连带命令明细与录像文件；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.alert_days", Value: "180", Type: "int", Label: "已恢复告警保留天数", Remark: "只清理已恢复的告警，未恢复的不动；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.model_call_days", Value: "365", Type: "int", Label: "模型调用流水保留天数", Remark: "AI 网关的用量与成本就从这张表算；删了就算不出那段时间的账。0 表示永久保留", Builtin: true},
 	}
 
 	for i := range configs {

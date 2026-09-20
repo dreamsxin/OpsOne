@@ -24,6 +24,7 @@ const (
 	CfgRetentionKubeChange   = "retention.kube_change_days"
 	CfgRetentionSession      = "retention.session_days"
 	CfgRetentionAlert        = "retention.alert_days"
+	CfgRetentionModelCall    = "retention.model_call_days"
 )
 
 // retentionTarget 一类可清理的数据
@@ -201,6 +202,19 @@ var retentionSpecs = []retentionSpec{
 			}
 			h.DB.Where("alert_id IN ?", ids).Delete(&model.AlertEscalation{})
 			return h.DB.Where("id IN ?", ids).Delete(&model.Alert{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionModelCall, label: "模型调用流水",
+		note: "AI 网关每次调用一条（含探活与失败），用量与成本页的数据来源；删了这段时间的账就算不出来了",
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.ModelCall{}).Count(&total)
+			h.DB.Model(&model.ModelCall{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.ModelCall{}).RowsAffected
 		},
 	},
 }
