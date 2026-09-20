@@ -153,6 +153,43 @@ type EmailTemplate struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// HostMetric 主机性能采样点。
+//
+// 走已有的 SSH 通道跑一条只读命令采集，不装 agent、不依赖 Prometheus：
+// 平台既然已经握着主机凭据，再为了看 CPU 磁盘去铺一套采集体系不划算。
+// 代价也说清楚：采样间隔受定时任务控制（默认 5 分钟），不适合看秒级抖动。
+type HostMetric struct {
+	ID     uint `gorm:"primaryKey" json:"id"`
+	HostID uint `gorm:"index;not null" json:"hostId"`
+
+	// CPUPercent 采样瞬间的 CPU 使用率（0-100），由远端两次 /proc/stat 的差值算出
+	CPUPercent float64 `json:"cpuPercent"`
+	// MemPercent 用 MemAvailable 算，而不是 MemFree —— 后者会把可回收的缓存算成已用
+	MemPercent  float64 `json:"memPercent"`
+	SwapPercent float64 `json:"swapPercent"`
+	// DiskMaxPercent 各本地文件系统里最满那个的使用率，DiskMaxMount 是它的挂载点。
+	// 只留最满的一个：磁盘告警关心的是「哪里先满」，全量挂载点留着会把表撑大
+	DiskMaxPercent float64 `json:"diskMaxPercent"`
+	DiskMaxMount   string  `gorm:"size:128" json:"diskMaxMount"`
+
+	Load1  float64 `json:"load1"`
+	Load5  float64 `json:"load5"`
+	Load15 float64 `json:"load15"`
+	// CPUCores 核数，用来把负载换算成单核负载（load1/cores）后才好跨机型比较
+	CPUCores   int   `json:"cpuCores"`
+	MemTotalMB int64 `json:"memTotalMB"`
+	MemUsedMB  int64 `json:"memUsedMB"`
+	ProcCount  int   `json:"procCount"`
+	TCPConn    int   `json:"tcpConn"`
+	UptimeSec  int64 `json:"uptimeSec"`
+
+	// Status 采集本身是否成功；failed 时上面的数值全为 0，Error 记原因
+	Status    string    `gorm:"size:16;default:ok;index" json:"status"` // ok | failed
+	Error     string    `gorm:"size:255" json:"error"`
+	CostMs    int64     `json:"costMs"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // Host 主机资产
 type Host struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`

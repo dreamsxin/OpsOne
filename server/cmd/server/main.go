@@ -84,6 +84,14 @@ func main() {
 	} else {
 		log.Println("[kube] 定时检查未启用（OPS_KUBE_CHECK_SPEC 为空），只能手动检查")
 	}
+	if cfg.HostMetricSpec != "" {
+		if err := sched.AddFixed(cfg.HostMetricSpec, h.CollectHostMetricsForSchedule); err != nil {
+			log.Fatalf("主机指标采集 cron 表达式无效(%s): %v", cfg.HostMetricSpec, err)
+		}
+		log.Printf("[metric] 定时采集已启用: %s", cfg.HostMetricSpec)
+	} else {
+		log.Println("[metric] 定时采集未启用（OPS_HOST_METRIC_SPEC 为空），只能手动采集")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -143,6 +151,10 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/hosts/:id", middleware.RequirePerm("host:update"), h.UpdateHost)
 		auth.DELETE("/hosts/:id", middleware.RequirePerm("host:delete"), h.DeleteHost)
 		auth.POST("/hosts/:id/check", middleware.RequirePerm("host:check"), h.CheckHost)
+		auth.GET("/hosts/metrics", h.ListHostMetrics)
+		auth.POST("/hosts/metrics/collect", middleware.RequirePerm("host:check"), h.CollectAllHostMetrics)
+		auth.GET("/hosts/:id/metrics", h.HostMetricHistory)
+		auth.POST("/hosts/:id/metrics/collect", middleware.RequirePerm("host:check"), h.CollectHostMetric)
 		auth.GET("/hosts/:id/terminal", middleware.RequirePerm("terminal:connect"), h.Terminal)
 
 		auth.GET("/hosts/:id/files", middleware.RequirePerm("file:read"), h.ListFiles)

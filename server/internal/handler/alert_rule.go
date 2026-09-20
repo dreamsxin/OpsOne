@@ -148,6 +148,66 @@ var builtinMetrics = []metricDef{
 			return countWithNames(h, &model.Probe{}, &names, "last_status = ?", "down")
 		},
 	},
+	{
+		Key: "host.cpu_max", Label: "主机 CPU 使用率最高值", Unit: "%", Windowed: true,
+		Hint: "取窗口内每台主机最新一次采样里的最高值；窗口外的旧采样不参与，避免拿半天前的数据报警",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			return h.maxHostMetric(window, "%", func(m model.HostMetric) float64 { return m.CPUPercent })
+		},
+	},
+	{
+		Key: "host.mem_max", Label: "主机内存使用率最高值", Unit: "%", Windowed: true,
+		Hint: "按 MemAvailable 计算，可回收的缓存不算已用",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			return h.maxHostMetric(window, "%", func(m model.HostMetric) float64 { return m.MemPercent })
+		},
+	},
+	{
+		Key: "host.disk_max", Label: "主机磁盘使用率最高值", Unit: "%", Windowed: true,
+		Hint: "每台主机只取它最满的那个挂载点，明细里会带上是哪一台",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			return h.maxHostMetric(window, "%", func(m model.HostMetric) float64 { return m.DiskMaxPercent })
+		},
+	},
+	{
+		Key: "host.load_per_core_max", Label: "主机单核负载最高值", Unit: "", Windowed: true,
+		Hint: "load1 除以核数，跨机型可比；经验上超过 1 说明 CPU 已经排队",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			return h.maxHostMetric(window, "", func(m model.HostMetric) float64 {
+				if m.CPUCores <= 0 {
+					return m.Load1
+				}
+				// 收到两位小数：这个值会直接显示在规则页与告警里，长尾浮点没意义
+				return round2(m.Load1 / float64(m.CPUCores))
+			})
+		},
+	},
+	{
+		Key: "host.metric_failed", Label: "指标采集失败的主机数", Unit: "台", Windowed: true,
+		Hint: "采不到本身就是问题（SSH 不通、凭据失效、不是 Linux）；没有任何采样的主机不计入",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			metrics := h.freshHostMetrics(window)
+			names := make([]string, 0, 3)
+			failed := 0
+			for _, item := range metrics {
+				if item.Status == "ok" {
+					continue
+				}
+				failed++
+				if len(names) < 3 {
+					names = append(names, h.hostNameOf(item.HostID))
+				}
+			}
+			if failed == 0 {
+				return 0, fmt.Sprintf("窗口内 %d 台有采样，全部成功", len(metrics))
+			}
+			detail := strings.Join(names, "、")
+			if failed > len(names) {
+				detail += fmt.Sprintf(" 等 %d 台", failed)
+			}
+			return float64(failed), detail
+		},
+	},
 }
 
 func findMetric(key string) *metricDef {

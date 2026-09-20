@@ -43,6 +43,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
 		&model.KubeCluster{},
+		&model.HostMetric{},
 	)
 }
 
@@ -135,6 +136,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 426, ParentID: 412, Title: "维护拓扑", Type: "button", AuthCode: "topology:manage", Sort: 1},
 		{ID: 413, ParentID: 400, Name: "PlatformHealth", Title: "平台健康", Path: "/monitor/health", Component: "/monitor/health/index", Icon: "FirstAidKit", Sort: 13},
 		{ID: 414, ParentID: 400, Name: "PublicIPMonitor", Title: "公网监测", Path: "/monitor/public-ip", Component: todo, Icon: "Compass", Sort: 14},
+		{ID: 415, ParentID: 400, Name: "HostMetric", Title: "主机指标", Path: "/monitor/host-metrics", Component: "/monitor/host-metrics/index", Icon: "Odometer", Sort: 15},
+		{ID: 428, ParentID: 415, Title: "手动采集", Type: "button", AuthCode: "host:check", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},
@@ -365,6 +368,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
 		{Group: "retention", Key: "retention.exec_job_days", Value: "90", Type: "int", Label: "执行记录保留天数", Remark: "批量执行/脚本/定时任务的作业与逐台结果；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.probe_record_days", Value: "7", Type: "int", Label: "拨测记录保留天数", Remark: "拨测频率高、增长快，建议保持较短；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.host_metric_days", Value: "14", Type: "int", Label: "主机指标保留天数", Remark: "每台主机每次采集一条，是增长最快的表；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.notify_record_days", Value: "90", Type: "int", Label: "通知投递记录保留天数", Remark: "0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.audit_log_days", Value: "180", Type: "int", Label: "操作审计保留天数", Remark: "写操作留痕，删除后无法追溯；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.session_days", Value: "180", Type: "int", Label: "会话记录保留天数", Remark: "删除会话流水会连带命令明细与录像文件；0 表示永久保留", Builtin: true},

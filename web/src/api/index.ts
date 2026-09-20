@@ -1908,6 +1908,68 @@ export const listKubeEvents = (id: number, namespace?: string, onlyWarning?: boo
     params: { ...(namespace ? { namespace } : {}), ...(onlyWarning ? { onlyWarning: 'true' } : {}) }
   })
 
+// ---------- 主机指标 ----------
+
+export interface HostMetric {
+  id: number
+  hostId: number
+  cpuPercent: number
+  memPercent: number
+  swapPercent: number
+  diskMaxPercent: number
+  diskMaxMount: string
+  load1: number
+  load5: number
+  load15: number
+  cpuCores: number
+  memTotalMB: number
+  memUsedMB: number
+  procCount: number
+  tcpConn: number
+  uptimeSec: number
+  status: 'ok' | 'failed'
+  error: string
+  costMs: number
+  createdAt: string
+}
+
+export interface HostMetricRow {
+  hostId: number
+  hostName: string
+  address: string
+  env: string
+  /** 为 null 表示这台还没采过 */
+  metric: HostMetric | null
+  loadPerCore: number
+  /** 最新采样已超过 staleMinutes，页面上要标出来 */
+  stale: boolean
+}
+
+export const listHostMetrics = (env?: string) =>
+  request<{
+    items: HostMetricRow[]
+    total: number
+    collected: number
+    failed: number
+    staleMinutes: number
+    spec: string
+  }>({ url: '/hosts/metrics', params: env ? { env } : {} })
+export const collectAllHostMetrics = () =>
+  request<{ total: number; ok: number; failed: number; detail: string }>({
+    url: '/hosts/metrics/collect',
+    method: 'POST'
+  })
+export const collectHostMetric = (hostId: number) =>
+  request<{ metric: HostMetric; detail: string }>({
+    url: `/hosts/${hostId}/metrics/collect`,
+    method: 'POST'
+  })
+export const listHostMetricHistory = (hostId: number, hours: number) =>
+  request<{ items: HostMetric[]; total: number; hours: number }>({
+    url: `/hosts/${hostId}/metrics`,
+    params: { hours }
+  })
+
 
 
 

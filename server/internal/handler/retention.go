@@ -17,6 +17,7 @@ import (
 const (
 	CfgRetentionExecJob      = "retention.exec_job_days"
 	CfgRetentionProbeRecord  = "retention.probe_record_days"
+	CfgRetentionHostMetric   = "retention.host_metric_days"
 	CfgRetentionNotifyRecord = "retention.notify_record_days"
 	CfgRetentionAuditLog     = "retention.audit_log_days"
 	CfgRetentionSession      = "retention.session_days"
@@ -81,6 +82,19 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.ProbeRecord{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionHostMetric, label: "主机指标",
+		note: "每台主机每次采集一条，台数多时增长最快",
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.HostMetric{}).Count(&total)
+			h.DB.Model(&model.HostMetric{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.HostMetric{}).RowsAffected
 		},
 	},
 	{

@@ -47,6 +47,10 @@ type Config struct {
 	// KubeCheckSpec 容器集群连通性检查的 cron 表达式。留空表示不做定时检查，
 	// 只能在界面上手动检查。
 	KubeCheckSpec string
+
+	// HostMetricSpec 主机性能采集的 cron 表达式。留空表示不做定时采集，
+	// 只能在界面上手动采集。采集走 SSH，节奏太密会给主机和平台都加压。
+	HostMetricSpec string
 }
 
 func Load() *Config {
@@ -65,6 +69,7 @@ func Load() *Config {
 		RetentionSpec:    strings.TrimSpace(env("OPS_RETENTION_SPEC", "30 3 * * *")),
 		DetectionSpec:    strings.TrimSpace(env("OPS_DETECTION_SPEC", "*/5 * * * *")),
 		KubeCheckSpec:    strings.TrimSpace(env("OPS_KUBE_CHECK_SPEC", "*/5 * * * *")),
+		HostMetricSpec:   strings.TrimSpace(env("OPS_HOST_METRIC_SPEC", "*/5 * * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {
