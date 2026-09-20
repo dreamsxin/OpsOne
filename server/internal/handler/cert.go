@@ -505,6 +505,9 @@ func (h *Handler) CheckAllCertificatesForSchedule() {
 		return
 	}
 	summary := h.checkCertificates(list)
+	h.markFixedRun("cert", fmt.Sprintf("共 %v，正常 %v，将到期 %v，已过期 %v，失败 %v",
+		summary["checked"], summary["valid"], summary["expiring"],
+		summary["expired"], summary["error"]))
 	log.Printf("[cert] 定时巡检完成: 共 %v，正常 %v，将到期 %v，已过期 %v，失败 %v",
 		summary["checked"], summary["valid"], summary["expiring"],
 		summary["expired"], summary["error"])

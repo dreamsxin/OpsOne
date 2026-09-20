@@ -2,6 +2,8 @@ package handler
 
 import (
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,10 +18,37 @@ type Handler struct {
 	Cfg *config.Config
 	// Sched 定时任务调度器，由 main 在构造后注入（调度回调需要 Handler 自身）
 	Sched *scheduler.Scheduler
+
+	// StartedAt 进程启动时间，平台健康页展示运行时长
+	StartedAt time.Time
+
+	// 内置固定任务（证书巡检、规则评估）的最近运行时间。
+	// 这类任务不落库，只记在内存里，重启后归零 —— 平台健康页会照实说明这一点。
+	fixedRunMu   sync.RWMutex
+	fixedRunAt   map[string]time.Time
+	fixedRunInfo map[string]string
 }
 
 func New(g *gorm.DB, cfg *config.Config) *Handler {
-	return &Handler{DB: g, Cfg: cfg}
+	return &Handler{
+		DB: g, Cfg: cfg, StartedAt: time.Now(),
+		fixedRunAt:   map[string]time.Time{},
+		fixedRunInfo: map[string]string{},
+	}
+}
+
+// markFixedRun 记录一次内置定时任务的运行结果
+func (h *Handler) markFixedRun(key, info string) {
+	h.fixedRunMu.Lock()
+	defer h.fixedRunMu.Unlock()
+	h.fixedRunAt[key] = time.Now()
+	h.fixedRunInfo[key] = info
+}
+
+func (h *Handler) lastFixedRun(key string) (time.Time, string) {
+	h.fixedRunMu.RLock()
+	defer h.fixedRunMu.RUnlock()
+	return h.fixedRunAt[key], h.fixedRunInfo[key]
 }
 
 func pageParams(c *gin.Context) (page, size int) {

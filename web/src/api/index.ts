@@ -1219,6 +1219,26 @@ export const deleteAlertRule = (id: number) =>
 export const evaluateAlertRule = (id: number) =>
   request<AlertRuleEvalResult>({ url: `/monitor/alert-rules/${id}/evaluate`, method: 'POST' })
 
+// ---------- 平台健康 ----------
+
+export interface HealthItem {
+  key: string
+  label: string
+  status: 'ok' | 'warn' | 'error'
+  value: string
+  detail: string
+}
+
+export interface HealthReport {
+  overall: 'ok' | 'warn' | 'error'
+  warnCount: number
+  errorCount: number
+  checkedAt: string
+  groups: { name: string; items: HealthItem[] }[]
+}
+
+export const getPlatformHealth = () => request<HealthReport>({ url: '/monitor/health' })
+
 
 
 

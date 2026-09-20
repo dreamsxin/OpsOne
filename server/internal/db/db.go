@@ -118,7 +118,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: todo, Icon: "Share", Sort: 10},
 		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: todo, Icon: "Position", Sort: 11},
 		{ID: 412, ParentID: 400, Name: "Topology", Title: "业务拓扑", Path: "/monitor/topology", Component: todo, Icon: "Connection", Sort: 12},
-		{ID: 413, ParentID: 400, Name: "PlatformHealth", Title: "平台健康", Path: "/monitor/health", Component: todo, Icon: "FirstAidKit", Sort: 13},
+		{ID: 413, ParentID: 400, Name: "PlatformHealth", Title: "平台健康", Path: "/monitor/health", Component: "/monitor/health/index", Icon: "FirstAidKit", Sort: 13},
 		{ID: 414, ParentID: 400, Name: "PublicIPMonitor", Title: "公网监测", Path: "/monitor/public-ip", Component: todo, Icon: "Compass", Sort: 14},
 
 		// ---------- 安全合规 ----------

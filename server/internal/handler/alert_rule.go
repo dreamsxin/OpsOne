@@ -457,5 +457,6 @@ func (h *Handler) EvaluateAlertRulesForSchedule() {
 			firing++
 		}
 	}
+	h.markFixedRun("rule", fmt.Sprintf("共 %d 条规则，触发 %d 条", len(rules), firing))
 	log.Printf("[rule] 定时评估完成: 共 %d 条规则，触发 %d 条", len(rules), firing)
 }

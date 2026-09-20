@@ -20,6 +20,7 @@ type Scheduler struct {
 	run     RunFunc
 	mu      sync.Mutex
 	entries map[uint]cron.EntryID
+	fixed   int // 代码内置的固定任务数量
 }
 
 func New(db *gorm.DB, run RunFunc) *Scheduler {
@@ -86,7 +87,20 @@ func ValidateSpec(spec string) error {
 // 这类任务不落库、不出现在定时任务列表里，也不能在界面上停用，只能通过配置关闭。
 func (s *Scheduler) AddFixed(spec string, fn func()) error {
 	_, err := s.cron.AddFunc(spec, fn)
-	return err
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.fixed++
+	s.mu.Unlock()
+	return nil
+}
+
+// Stats 当前调度器里的条目数，供平台健康页核对「库里启用的任务是否都真的在跑」
+func (s *Scheduler) Stats() (userJobs, fixedJobs, cronEntries int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries), s.fixed, len(s.cron.Entries())
 }
 
 func (s *Scheduler) register(job model.CronJob) error {

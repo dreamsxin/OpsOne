@@ -309,6 +309,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.UpdateAlertRule)
 		auth.DELETE("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.DeleteAlertRule)
 		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
+
+		auth.GET("/monitor/health", h.PlatformHealth)
 	}
 
 	return r
