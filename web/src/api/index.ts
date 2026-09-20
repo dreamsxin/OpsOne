@@ -1386,6 +1386,81 @@ export const createSavedMetricQuery = (data: Record<string, any>) =>
 export const deleteSavedMetricQuery = (id: number) =>
   request({ url: `/monitor/metrics/saved/${id}`, method: 'DELETE' })
 
+// ---------- 链路追踪 ----------
+
+export interface TraceSource {
+  id: number
+  name: string
+  type: string
+  baseUrl: string
+  headerKey: string
+  timeoutSec: number
+  isDefault: boolean
+  status: 'unknown' | 'healthy' | 'error'
+  serviceCount: number
+  lastError: string
+  lastCheckAt: string | null
+  enabled: boolean
+  remark: string
+}
+
+export interface TraceSummary {
+  traceId: string
+  rootService: string
+  rootOperation: string
+  spanCount: number
+  serviceCount: number
+  durationMs: number
+  startAt: number
+  errorCount: number
+  services: string[]
+}
+
+export interface TraceSpan {
+  spanId: string
+  parentId: string
+  service: string
+  operation: string
+  offsetMs: number
+  durationMs: number
+  depth: number
+  error: boolean
+  tags: Record<string, string>
+}
+
+export const listTraceSources = () => request<TraceSource[]>({ url: '/monitor/trace-sources' })
+export const createTraceSource = (data: Record<string, any>) =>
+  request<{ source: TraceSource; check: Record<string, any> }>({
+    url: '/monitor/trace-sources',
+    method: 'POST',
+    data
+  })
+export const updateTraceSource = (id: number, data: Record<string, any>) =>
+  request<TraceSource>({ url: `/monitor/trace-sources/${id}`, method: 'PUT', data })
+export const deleteTraceSource = (id: number) =>
+  request({ url: `/monitor/trace-sources/${id}`, method: 'DELETE' })
+export const checkTraceSource = (id: number) =>
+  request<Record<string, any>>({ url: `/monitor/trace-sources/${id}/check`, method: 'POST' })
+export const listTraceServices = (sourceId: number, service?: string) =>
+  request<{ values: string[]; total: number }>({
+    url: '/monitor/traces/services',
+    params: { sourceId, ...(service ? { service } : {}) }
+  })
+export const searchTraces = (params: Record<string, any>) =>
+  request<{
+    items: TraceSummary[]
+    total: number
+    limit: number
+    start: string
+    end: string
+    costMs: number
+  }>({ url: '/monitor/traces/search', params })
+export const getTraceDetail = (traceId: string, sourceId: number) =>
+  request<{ summary: TraceSummary; spans: TraceSpan[]; truncated: boolean; costMs: number }>({
+    url: `/monitor/traces/detail/${encodeURIComponent(traceId)}`,
+    params: { sourceId }
+  })
+
 // ---------- 日志查询 ----------
 
 export interface LogSource {

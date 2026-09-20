@@ -1175,6 +1175,35 @@ type LogSource struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// TraceSource 链路数据源（目前只支持 Jaeger Query 的 HTTP API）。
+//
+// 与指标、日志同一个路子：平台只做查询入口，不接收上报、不存链路数据。
+// 应用把 span 发给谁（Jaeger / OTel Collector）与平台无关。
+type TraceSource struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	Type string `gorm:"size:16;default:jaeger" json:"type"`
+	// BaseURL Jaeger Query 根地址，例如 http://jaeger:16686（不含 /api/...）
+	BaseURL     string `gorm:"size:255;not null" json:"baseUrl"`
+	HeaderKey   string `gorm:"size:64" json:"headerKey"`
+	HeaderValue string `gorm:"size:255" json:"-"`
+	TimeoutSec  int    `gorm:"default:20" json:"timeoutSec"`
+	IsDefault   bool   `gorm:"default:false" json:"isDefault"`
+
+	// 以下由连通性检查回填
+	Status string `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
+	// ServiceCount 上报过链路的服务数
+	ServiceCount int        `json:"serviceCount"`
+	LastError    string     `gorm:"size:500" json:"lastError"`
+	LastCheckAt  *time.Time `json:"lastCheckAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // SavedMetricQuery 常用查询。排查时反复敲同一串 PromQL 很费劲，存下来点一下就行。
 type SavedMetricQuery struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`
