@@ -624,3 +624,40 @@ type BuildRecord struct {
 	StartedAt   time.Time  `json:"startedAt"`
 	SyncedAt    *time.Time `json:"syncedAt"`
 }
+
+// Certificate TLS 证书巡检对象。
+//
+// 平台只做「探测 + 到期提醒」：连上目标端口读取对端证书，记录颁发者、有效期与
+// 链校验结果。不签发、不托管私钥、不做自动续签（ACME）。
+type Certificate struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	Name       string `gorm:"size:64;not null" json:"name"`
+	Domain     string `gorm:"size:128;not null" json:"domain"` // 探测目标主机名或 IP
+	Port       int    `gorm:"default:443" json:"port"`
+	ServerName string `gorm:"size:128" json:"serverName"` // SNI，留空则用 Domain
+
+	// 以下字段由巡检回填，不接受手工录入
+	Issuer       string     `gorm:"size:255" json:"issuer"`
+	Subject      string     `gorm:"size:255" json:"subject"`
+	DNSNames     string     `gorm:"type:text" json:"dnsNames"` // 逗号分隔的 SAN
+	SerialNumber string     `gorm:"size:64" json:"serialNumber"`
+	Fingerprint  string     `gorm:"size:95" json:"fingerprint"` // SHA256，冒号分隔
+	NotBefore    *time.Time `json:"notBefore"`
+	NotAfter     *time.Time `json:"notAfter"`
+	DaysLeft     int        `json:"daysLeft"`
+	Status       string     `gorm:"size:16;default:unknown" json:"status"` // unknown | valid | expiring | expired | error
+	Trusted      bool       `json:"trusted"`                               // 系统根证书链 + 主机名校验是否通过
+	VerifyError  string     `gorm:"size:255" json:"verifyError"`
+	LastCheckAt  *time.Time `json:"lastCheckAt"`
+	ErrorMsg     string     `gorm:"size:255" json:"errorMsg"`
+
+	AlertDays    int  `gorm:"default:30" json:"alertDays"`      // 剩余天数低于该值判为 expiring
+	AlertEnabled bool `gorm:"default:true" json:"alertEnabled"` // 是否把巡检结果送进告警通道
+
+	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	Enabled   bool      `gorm:"default:true" json:"enabled"` // 停用后不参与批量巡检
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

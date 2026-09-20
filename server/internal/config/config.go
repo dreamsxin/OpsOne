@@ -23,6 +23,10 @@ type Config struct {
 	// SSHStrictHostKey 为 true 时校验主机公钥：首次连接记录指纹（TOFU），
 	// 之后指纹变化即拒绝连接。默认关闭，便于批量纳管未预置指纹的内网主机。
 	SSHStrictHostKey bool
+
+	// CertCheckSpec 证书巡检的 cron 表达式（标准五段）。留空表示不做定时巡检，
+	// 只能在界面上手动触发。
+	CertCheckSpec string
 }
 
 func Load() *Config {
@@ -35,6 +39,7 @@ func Load() *Config {
 		Debug:            env("OPS_DEBUG", "true") == "true",
 		RecordDir:        env("OPS_RECORD_DIR", "recordings"),
 		SSHStrictHostKey: env("OPS_SSH_STRICT_HOST_KEY", "false") == "true",
+		CertCheckSpec:    strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

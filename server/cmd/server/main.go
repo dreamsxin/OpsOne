@@ -35,6 +35,15 @@ func main() {
 
 	sched := scheduler.New(gormDB, h.ExecuteCronJob)
 	h.Sched = sched
+	// 证书巡检是代码内置的固定任务，不在定时任务列表里，只能通过配置开关
+	if cfg.CertCheckSpec != "" {
+		if err := sched.AddFixed(cfg.CertCheckSpec, h.CheckAllCertificatesForSchedule); err != nil {
+			log.Fatalf("证书巡检 cron 表达式无效(%s): %v", cfg.CertCheckSpec, err)
+		}
+		log.Printf("[cert] 证书定时巡检已启用: %s", cfg.CertCheckSpec)
+	} else {
+		log.Println("[cert] 证书定时巡检未启用（OPS_CERT_CHECK_SPEC 为空），只能手动巡检")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -271,6 +280,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		auth.GET("/build/records", h.ListBuildRecords)
 		auth.POST("/build/records/:id/sync", middleware.RequirePerm("build:run"), h.SyncBuildRecord)
+
+		auth.GET("/certificates", h.ListCertificates)
+		auth.GET("/certificates/stats", h.CertificateStats)
+		auth.POST("/certificates", middleware.RequirePerm("cert:manage"), h.CreateCertificate)
+		auth.PUT("/certificates/:id", middleware.RequirePerm("cert:manage"), h.UpdateCertificate)
+		auth.DELETE("/certificates/:id", middleware.RequirePerm("cert:manage"), h.DeleteCertificate)
+		auth.POST("/certificates/:id/check", middleware.RequirePerm("cert:check"), h.CheckCertificate)
+		auth.POST("/certificates/check-all", middleware.RequirePerm("cert:check"), h.CheckAllCertificates)
 	}
 
 	return r

@@ -66,7 +66,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 ## 安全合规（ID 500-599）
 
-- [ ] 证书管理 `/security/ssl` — 到期提醒、自动续签
+- [x] 证书管理 `/security/ssl` — TLS 探测（颁发者/SAN/有效期/指纹/链校验）、按证书设置到期阈值、定时巡检、到期与失败自动写入告警并可恢复；**不含自动续签（ACME）**
 - [ ] 防火墙策略 `/security/firewall` — 边缘规则下发与审计
 - [ ] 双因子口令 `/security/twofa` — TOTP 分组与验证码
 - [ ] 安全意识 `/security/awareness` — 培训与考核

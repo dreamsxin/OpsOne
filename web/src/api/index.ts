@@ -1070,6 +1070,63 @@ export const syncBuildRecord = (id: number) =>
     method: 'POST'
   })
 
+// ---------- 证书管理 ----------
+
+export interface Certificate {
+  id: number
+  name: string
+  domain: string
+  port: number
+  serverName: string
+  issuer: string
+  subject: string
+  dnsNames: string
+  serialNumber: string
+  fingerprint: string
+  notBefore: string | null
+  notAfter: string | null
+  daysLeft: number
+  status: string
+  trusted: boolean
+  verifyError: string
+  lastCheckAt: string | null
+  errorMsg: string
+  alertDays: number
+  alertEnabled: boolean
+  deptId: number
+  createdBy: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface CertificateStats {
+  total: number
+  valid: number
+  expiring: number
+  expired: number
+  error: number
+  unchecked: number
+  untrusted: number
+}
+
+export const listCertificates = (params: Record<string, any>) =>
+  request<PageData<Certificate>>({ url: '/certificates', params })
+export const getCertificateStats = () => request<CertificateStats>({ url: '/certificates/stats' })
+export const createCertificate = (data: Record<string, any>) =>
+  request<Certificate>({ url: '/certificates', method: 'POST', data })
+export const updateCertificate = (id: number, data: Record<string, any>) =>
+  request<Certificate>({ url: `/certificates/${id}`, method: 'PUT', data })
+export const deleteCertificate = (id: number) =>
+  request({ url: `/certificates/${id}`, method: 'DELETE' })
+export const checkCertificate = (id: number) =>
+  request<Certificate>({ url: `/certificates/${id}/check`, method: 'POST' })
+export const checkAllCertificates = () =>
+  request<{ checked: number; valid?: number; expiring?: number; expired?: number; error?: number; detail?: string }>({
+    url: '/certificates/check-all',
+    method: 'POST'
+  })
+
 
 
 

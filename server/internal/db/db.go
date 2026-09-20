@@ -35,6 +35,7 @@ func Migrate(g *gorm.DB) error {
 		&model.CloudAccount{}, &model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
+		&model.Certificate{},
 	)
 }
 
@@ -121,7 +122,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},
-		{ID: 501, ParentID: 500, Name: "SSLCertificate", Title: "证书管理", Path: "/security/ssl", Component: todo, Icon: "Stamp", Sort: 1},
+		{ID: 501, ParentID: 500, Name: "SSLCertificate", Title: "证书管理", Path: "/security/ssl", Component: "/security/ssl/index", Icon: "Stamp", Sort: 1},
+		{ID: 506, ParentID: 501, Title: "维护证书", Type: "button", AuthCode: "cert:manage", Sort: 1},
+		{ID: 507, ParentID: 501, Title: "执行巡检", Type: "button", AuthCode: "cert:check", Sort: 2},
 		{ID: 502, ParentID: 500, Name: "Firewall", Title: "防火墙策略", Path: "/security/firewall", Component: todo, Icon: "Lock", Sort: 2},
 		{ID: 503, ParentID: 500, Name: "TwoFA", Title: "双因子口令", Path: "/security/twofa", Component: todo, Icon: "Key", Sort: 3},
 		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: todo, Icon: "Reading", Sort: 4},

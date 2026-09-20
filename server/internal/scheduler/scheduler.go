@@ -82,6 +82,13 @@ func ValidateSpec(spec string) error {
 	return err
 }
 
+// AddFixed 注册代码内置的固定任务（如证书巡检）。
+// 这类任务不落库、不出现在定时任务列表里，也不能在界面上停用，只能通过配置关闭。
+func (s *Scheduler) AddFixed(spec string, fn func()) error {
+	_, err := s.cron.AddFunc(spec, fn)
+	return err
+}
+
 func (s *Scheduler) register(job model.CronJob) error {
 	id, err := s.cron.AddFunc(job.Spec, func() {
 		// 每次触发都重新读库，避免用到注册时的旧配置
