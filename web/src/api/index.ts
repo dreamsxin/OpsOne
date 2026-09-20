@@ -2332,6 +2332,67 @@ export const scaleKubeResource = (
 export const listKubeChangeLogs = (params: Record<string, any>) =>
   request<PageData<KubeChangeLog>>({ url: '/kube/change-logs', params })
 
+// ---------- 集群服务转发 ----------
+
+export interface KubeForward {
+  id: number
+  clusterId: number
+  clusterName: string
+  namespace: string
+  targetKind: 'pod' | 'service'
+  targetName: string
+  targetPort: number
+  listenAddr: string
+  listenPort: number
+  status: 'running' | 'stopped' | 'error'
+  errorMsg: string
+  connTotal: number
+  connFailed: number
+  connActive: number
+  bytesIn: number
+  bytesOut: number
+  username: string
+  clientIp: string
+  expiresAt: string
+  lastActiveAt: string | null
+  closedAt: string | null
+  createdAt: string
+}
+
+/** 部署时定下的约束，界面上直接展示，免得用户靠报错去猜 */
+export interface KubeForwardLimits {
+  bind: string
+  portMin: number
+  portMax: number
+  maxTunnels: number
+  ttlMinutes: number
+  connMax: number
+  running: number
+}
+
+export interface KubeForwardPage extends PageData<KubeForward> {
+  limits: KubeForwardLimits
+}
+
+export const listKubeForwards = (params: Record<string, any>) =>
+  request<KubeForwardPage>({ url: '/kube/forwards', params })
+export const createKubeForward = (data: {
+  clusterId: number
+  namespace: string
+  targetKind: 'pod' | 'service'
+  targetName: string
+  targetPort: number
+  listenPort?: number
+  ttlMinutes?: number
+}) =>
+  request<{ id: number; listenAddr: string; listenPort: number; expiresAt: string }>({
+    url: '/kube/forwards',
+    method: 'POST',
+    data
+  })
+export const closeKubeForward = (id: number) =>
+  request<{ closed: boolean; reason?: string }>({ url: `/kube/forwards/${id}`, method: 'DELETE' })
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

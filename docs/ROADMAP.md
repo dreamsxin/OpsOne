@@ -44,9 +44,9 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 集群接入 `/kubernetes/source` — 粘贴 kubeconfig 纳管（解析上下文后选用哪个）、连通性与版本检查、节点就绪明细（角色/容量/kubelet/cordon）；不可达或有节点 NotReady 自动写告警并可恢复，定时检查由 `OPS_KUBE_CHECK_SPEC` 控制。**只接受内嵌凭据**，不支持路径式 kubeconfig；**kubeconfig 明文存库**，见 docs/SECURITY.md 第 16 节
 - [x] 工作负载 `/kubernetes/workload` — 按命名空间看 Deployment / StatefulSet / DaemonSet 的副本就绪情况、Pod 状态与容器异常原因、集群事件（可只看 Warning）；Pod 行可直接看**容器日志**（多容器/init 容器切换、行数 200~5000、时间戳、上一个容器、每 5 秒自动刷新、下载，单次 1MB 上限并标注截断）。**不做 follow 流式跟随**、**不提供 exec**；资源改动走「资源管理」
 - [x] 资源管理 `/kubernetes/resource` — 按类型列资源（带类型相关摘要）、看单个对象的可编辑 YAML（自动清掉 status 与 resourceVersion / uid / managedFields 等集群自维护字段）、服务端 apply（`fieldManager=opsone`）并可先 `dryRun=All` 预检、Deployment / StatefulSet 直接改副本数（`/scale`，同样可预检）；字段冲突返回 409 并带出冲突字段，可显式「强制接管」；每次改动（含预检与失败）写 `kube_change_logs` 留痕，记录提交的 YAML 原文与 API Server 原话，写操作绑 `kube:write`。**类型白名单**（Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / Ingress），**不提供删除**，**不开放 Secret / Namespace / RBAC**，**一次只提交一个对象**（多段 YAML 拒绝），也**不做版本回滚与 diff**
-- [ ] 服务转发 `/kubernetes/forward` — port-forward 通道管理
+- [x] 服务转发 `/kubernetes/forward` — 把 Pod / Service 端口映射到平台上的一个 TCP 端口（相当于把 `kubectl port-forward` 挪到平台跑）；走 API Server 的 **WebSocket** 通道（不引 client-go，也不自己实现 SPDY），每条本地连接单开一条 WebSocket；Service 目标每条连接重新解析后端 Pod，Pod 重建/扩缩容后隧道仍可用；实时展示活跃与累计连接、双向流量、剩余时长、拨号失败原因，到期自动关闭并把计数写回档案。约束由环境变量定死（监听地址、端口区间、隧道数、单隧道并发、TTL）。**隧道是进程内的活物，重启即消失**（启动时把残留记录标为已关闭）；**隧道端口不做认证**，见 docs/SECURITY.md 第 16 节；**不做 UDP 转发、不做多端口一条隧道、不做长连接复用（每条连接一条 WebSocket）**
 
-> 实现方式：手写 Kubernetes REST 客户端（`server/internal/k8s`），不引入 client-go —— 只读列表与服务端 apply / scale 都是普通 HTTP 请求（`application/apply-patch+yaml`、`application/merge-patch+json`），不值得为此背上几十兆依赖树。后面做 port-forward 要 SPDY / WebSocket 升级，届时再单独评估。
+> 实现方式：手写 Kubernetes REST 客户端（`server/internal/k8s`），不引入 client-go —— 只读列表与服务端 apply / scale 都是普通 HTTP 请求（`application/apply-patch+yaml`、`application/merge-patch+json`），不值得为此背上几十兆依赖树。port-forward 也没走 SPDY：kubelet 还支持一套朴素的 WebSocket 通道协议（通道号 + 2 字节端口号前缀），各语言客户端库用的就是它，已在 k3s v1.31 上实测打通。
 
 ## 监控告警（ID 400-499）
 

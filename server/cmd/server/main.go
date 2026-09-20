@@ -32,6 +32,8 @@ func main() {
 	}
 
 	h := handler.New(gormDB, cfg)
+	// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
+	h.ResetForwards()
 
 	sched := scheduler.New(gormDB, h.ExecuteCronJob)
 	h.Sched = sched
@@ -413,6 +415,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/kube/clusters/:id/resource/apply", middleware.RequirePerm("kube:write"), h.ApplyKubeResource)
 		auth.POST("/kube/clusters/:id/resource/scale", middleware.RequirePerm("kube:write"), h.ScaleKubeResource)
 		auth.GET("/kube/change-logs", h.ListKubeChangeLogs)
+		auth.GET("/kube/forwards", h.ListKubeForwards)
+		auth.POST("/kube/forwards", middleware.RequirePerm("kube:forward"), h.CreateKubeForward)
+		auth.DELETE("/kube/forwards/:id", middleware.RequirePerm("kube:forward"), h.CloseKubeForward)
 
 		auth.GET("/monitor/health", h.PlatformHealth)
 

@@ -59,6 +59,22 @@ type Config struct {
 	// ExposureSpec 暴露面扫描的 cron 表达式。留空表示不自动扫，
 	// 只能在界面上手动扫。扫描会对目标发起大量 TCP 连接，默认每天一次。
 	ExposureSpec string
+
+	// ---------- 集群服务转发 ----------
+
+	// ForwardBind 转发隧道的监听地址。默认 0.0.0.0（同网段的人都连得上），
+	// 想只给平台本机用就设 127.0.0.1。隧道本身不做认证，见 docs/SECURITY.md。
+	ForwardBind string
+	// ForwardPortMin / ForwardPortMax 允许占用的监听端口区间（含两端）
+	ForwardPortMin int
+	ForwardPortMax int
+	// ForwardMax 同时存在的隧道数上限
+	ForwardMax int
+	// ForwardTTLMinutes 隧道存活时长上限（分钟），到点自动关闭，防止忘了关
+	ForwardTTLMinutes int
+	// ForwardConnMax 单条隧道允许的并发连接数上限：每条连接都要向 API Server
+	// 单开一条 WebSocket，不设上限会把 API Server 当成压测目标
+	ForwardConnMax int
 }
 
 func Load() *Config {
@@ -80,6 +96,23 @@ func Load() *Config {
 		HostMetricSpec:   strings.TrimSpace(env("OPS_HOST_METRIC_SPEC", "*/5 * * * *")),
 		OnCallSpec:       strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
 		ExposureSpec:     strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
+
+		ForwardBind:       strings.TrimSpace(env("OPS_FORWARD_BIND", "0.0.0.0")),
+		ForwardPortMin:    envInt("OPS_FORWARD_PORT_MIN", 30000),
+		ForwardPortMax:    envInt("OPS_FORWARD_PORT_MAX", 30099),
+		ForwardMax:        envInt("OPS_FORWARD_MAX", 8),
+		ForwardTTLMinutes: envInt("OPS_FORWARD_TTL_MINUTES", 120),
+		ForwardConnMax:    envInt("OPS_FORWARD_CONN_MAX", 32),
+	}
+
+	if cfg.ForwardPortMin < 1 || cfg.ForwardPortMax > 65535 || cfg.ForwardPortMin > cfg.ForwardPortMax {
+		log.Printf("[warn] 转发端口区间 %d-%d 不合法，回退到 30000-30099",
+			cfg.ForwardPortMin, cfg.ForwardPortMax)
+		cfg.ForwardPortMin, cfg.ForwardPortMax = 30000, 30099
+	}
+	if cfg.ForwardBind == "0.0.0.0" {
+		log.Println("[warn] 集群服务转发监听 0.0.0.0，隧道本身不做认证，能连到该端口的人等同于能访问被转发的服务；" +
+			"可设置 OPS_FORWARD_BIND=127.0.0.1 只给平台本机使用")
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

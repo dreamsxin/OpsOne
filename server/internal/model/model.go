@@ -587,6 +587,44 @@ type NotifyRecord struct {
 	CreatedAt   time.Time `gorm:"index" json:"createdAt"`
 }
 
+// KubeForward 一条到集群内服务的转发隧道。
+//
+// 隧道是进程内的活物（一个 TCP 监听 + 若干条到 API Server 的 WebSocket），
+// 这张表只是它的档案：谁开的、转发到哪、用了多少、什么时候关的。
+// 进程重启后监听全没了，启动时会把残留的 running 行改成 stopped —— 不假装还活着。
+type KubeForward struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ClusterID   uint   `gorm:"index" json:"clusterId"`
+	ClusterName string `gorm:"size:64" json:"clusterName"`
+	Namespace   string `gorm:"size:128" json:"namespace"`
+	// TargetKind pod | service。service 每来一条连接重新解析后端 Pod，
+	// Pod 重建、扩缩容之后隧道还能继续用
+	TargetKind string `gorm:"size:16" json:"targetKind"`
+	TargetName string `gorm:"size:191" json:"targetName"`
+	TargetPort int    `json:"targetPort"`
+	ListenAddr string `gorm:"size:64" json:"listenAddr"`
+	ListenPort int    `gorm:"index" json:"listenPort"`
+	// ForwardStatus running | stopped | error
+	ForwardStatus string `gorm:"size:16;index" json:"status"`
+	ErrorMsg      string `gorm:"size:500" json:"errorMsg"`
+	// ConnTotal 累计接入的连接数；ConnFailed 拨号失败的次数
+	ConnTotal  int64 `json:"connTotal"`
+	ConnFailed int64 `json:"connFailed"`
+	// BytesIn 从本地流向 Pod 的字节数，BytesOut 反向
+	BytesIn  int64 `json:"bytesIn"`
+	BytesOut int64 `json:"bytesOut"`
+	UserID   uint  `gorm:"index;default:0" json:"userId"`
+	// Username 落冗余名字，开隧道的人改名或删号之后档案仍然可读
+	Username string `gorm:"size:64" json:"username"`
+	ClientIP string `gorm:"size:64" json:"clientIp"`
+	// ExpiresAt 到点自动关闭，避免有人开完忘了关
+	ExpiresAt    time.Time  `gorm:"index" json:"expiresAt"`
+	LastActiveAt *time.Time `json:"lastActiveAt"`
+	ClosedAt     *time.Time `json:"closedAt"`
+	CreatedAt    time.Time  `gorm:"index" json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
 // Announcement 平台公告。发布后对全员可见，并给每个启用用户投递一条站内消息。
 type Announcement struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`

@@ -18,6 +18,8 @@ import (
 type Client struct {
 	cfg  *Config
 	http *http.Client
+	// tls 留着给 WebSocket 拨号用（port-forward 不走 http.Client）
+	tls *tls.Config
 }
 
 // NewClient 按连接配置组装 HTTP 客户端（含 mTLS）
@@ -43,6 +45,7 @@ func NewClient(cfg *Config, timeout time.Duration) (*Client, error) {
 	}
 	return &Client{
 		cfg: cfg,
+		tls: tlsCfg,
 		http: &http.Client{
 			Timeout:   timeout,
 			Transport: &http.Transport{TLSClientConfig: tlsCfg},

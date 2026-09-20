@@ -42,7 +42,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
-		&model.KubeCluster{}, &model.KubeChangeLog{},
+		&model.KubeCluster{}, &model.KubeChangeLog{}, &model.KubeForward{},
 		&model.HostMetric{},
 		&model.OnCallSchedule{}, &model.OnCallOverride{}, &model.AlertEscalation{},
 		&model.ExposureTarget{}, &model.ExposureScan{},
@@ -114,7 +114,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 302, ParentID: 300, Name: "K8sWorkload", Title: "工作负载", Path: "/kubernetes/workload", Component: "/kubernetes/workload/index", Icon: "Grid", Sort: 2},
 		{ID: 303, ParentID: 300, Name: "K8sResource", Title: "资源管理", Path: "/kubernetes/resource", Component: "/kubernetes/resource/index", Icon: "Files", Sort: 3},
 		{ID: 306, ParentID: 303, Title: "改动集群资源", Type: "button", AuthCode: "kube:write", Sort: 1},
-		{ID: 304, ParentID: 300, Name: "K8sForward", Title: "服务转发", Path: "/kubernetes/forward", Component: todo, Icon: "Share", Sort: 4},
+		{ID: 304, ParentID: 300, Name: "K8sForward", Title: "服务转发", Path: "/kubernetes/forward", Component: "/kubernetes/forward/index", Icon: "Share", Sort: 4},
+		{ID: 307, ParentID: 304, Title: "开关转发隧道", Type: "button", AuthCode: "kube:forward", Sort: 1},
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},

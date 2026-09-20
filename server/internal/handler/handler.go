@@ -27,6 +27,9 @@ type Handler struct {
 	fixedRunMu   sync.RWMutex
 	fixedRunAt   map[string]time.Time
 	fixedRunInfo map[string]string
+
+	// forwards 运行中的集群转发隧道，只存在于进程内，重启即消失
+	forwards *forwardRegistry
 }
 
 func New(g *gorm.DB, cfg *config.Config) *Handler {
@@ -34,6 +37,7 @@ func New(g *gorm.DB, cfg *config.Config) *Handler {
 		DB: g, Cfg: cfg, StartedAt: time.Now(),
 		fixedRunAt:   map[string]time.Time{},
 		fixedRunInfo: map[string]string{},
+		forwards:     newForwardRegistry(),
 	}
 }
 
