@@ -178,11 +178,14 @@ export interface AlertSource {
 export interface NotifyChannel {
   id: number
   name: string
-  type: 'webhook' | 'email' | 'silent'
+  type: 'webhook' | 'email' | 'silent' | 'wecom' | 'dingtalk' | 'feishu'
   url: string
   headerKey: string
   recipients: string
   templateCode: string
+  /** 群机器人 @ 名单：企业微信填 userid、钉钉填手机号；飞书只支持 @所有人 */
+  mentionList: string
+  mentionAll: boolean
   enabled: boolean
   remark: string
 }

@@ -129,6 +129,18 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 		return
 	}
 
+	if isIMChannel(channel.Type) {
+		status, err := h.postIM(channel, imAlertText(alert))
+		record.HTTPStatus = status
+		record.CostMs = time.Since(start).Milliseconds()
+		if err != nil {
+			record.Status = "failed"
+			record.ErrorMsg = truncate(err.Error(), 240)
+		}
+		_ = h.DB.Create(&record).Error
+		return
+	}
+
 	status, err := postJSON(channel, alertMessage(alert))
 	record.HTTPStatus = status
 	record.CostMs = time.Since(start).Milliseconds()
@@ -210,8 +222,38 @@ type channelReq struct {
 	HeaderValue  string `json:"headerValue"`
 	Recipients   string `json:"recipients"`
 	TemplateCode string `json:"templateCode"`
+	Secret       string `json:"secret"`
+	MentionList  string `json:"mentionList"`
+	MentionAll   *bool  `json:"mentionAll"`
 	Remark       string `json:"remark"`
 	Enabled      *bool  `json:"enabled"`
+}
+
+// validateChannel 类型相关的必填校验。
+// 抽出来是因为原先只有新建时校验，编辑时可以把 webhook 的 URL 清空存进去。
+func validateChannel(channelType string, req channelReq) error {
+	switch channelType {
+	case "webhook":
+		if strings.TrimSpace(req.URL) == "" {
+			return fmt.Errorf("webhook 渠道必须填写 URL")
+		}
+	case "email":
+		if strings.TrimSpace(req.Recipients) == "" {
+			return fmt.Errorf("email 渠道必须填写收件人")
+		}
+	case channelWecom, channelDingTalk, channelFeishu:
+		if strings.TrimSpace(req.URL) == "" {
+			return fmt.Errorf("%s 渠道必须填写机器人 Webhook 地址", imChannelLabel(channelType))
+		}
+		if channelType == channelFeishu && strings.TrimSpace(req.MentionList) != "" {
+			return fmt.Errorf("飞书只支持 @所有人，请清空 @ 名单后勾选「@所有人」")
+		}
+	case "silent":
+		// 只落记录，什么都不用填
+	default:
+		return fmt.Errorf("不支持的渠道类型 %q", channelType)
+	}
+	return nil
 }
 
 func (h *Handler) ListNotifyChannels(c *gin.Context) {
@@ -230,12 +272,8 @@ func (h *Handler) CreateNotifyChannel(c *gin.Context) {
 		return
 	}
 	channelType := normalizeChannelType(req.Type)
-	if channelType == "webhook" && req.URL == "" {
-		response.BadRequest(c, "webhook 渠道必须填写 URL")
-		return
-	}
-	if channelType == "email" && strings.TrimSpace(req.Recipients) == "" {
-		response.BadRequest(c, "email 渠道必须填写收件人")
+	if err := validateChannel(channelType, req); err != nil {
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -243,7 +281,11 @@ func (h *Handler) CreateNotifyChannel(c *gin.Context) {
 		Name: req.Name, Type: channelType, URL: req.URL,
 		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
 		Recipients: req.Recipients, TemplateCode: req.TemplateCode,
+		Secret: req.Secret, MentionList: req.MentionList,
 		Remark: req.Remark, Enabled: true,
+	}
+	if req.MentionAll != nil {
+		channel.MentionAll = *req.MentionAll
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -267,11 +309,24 @@ func (h *Handler) UpdateNotifyChannel(c *gin.Context) {
 		return
 	}
 
-	channel.Name, channel.Type = req.Name, normalizeChannelType(req.Type)
+	channelType := normalizeChannelType(req.Type)
+	if err := validateChannel(channelType, req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	channel.Name, channel.Type = req.Name, channelType
 	channel.URL, channel.HeaderKey, channel.Remark = req.URL, req.HeaderKey, req.Remark
 	channel.Recipients, channel.TemplateCode = req.Recipients, req.TemplateCode
+	channel.MentionList = req.MentionList
 	if req.HeaderValue != "" {
 		channel.HeaderValue = req.HeaderValue // 留空表示不修改
+	}
+	if req.Secret != "" {
+		channel.Secret = req.Secret // 同上：签名密钥留空表示沿用旧值
+	}
+	if req.MentionAll != nil {
+		channel.MentionAll = *req.MentionAll
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -332,6 +387,28 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 		return
 	}
 
+	if isIMChannel(channel.Type) {
+		start := time.Now()
+		sample := model.Alert{
+			Title: "OpsOne 测试告警", Summary: "这是一条用于验证群机器人连通性的样例消息",
+			Severity: "info", Status: "firing", SourceName: "channel-test",
+			Labels: `{"test":"true"}`, LastSeenAt: time.Now(),
+		}
+		status, err := h.postIM(channel, imAlertText(sample))
+		if err != nil {
+			response.OK(c, gin.H{
+				"ok": false, "httpStatus": status,
+				"detail": err.Error(), "costMs": time.Since(start).Milliseconds(),
+			})
+			return
+		}
+		response.OK(c, gin.H{
+			"ok": true, "httpStatus": status, "detail": "群里应当已经收到消息",
+			"costMs": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
 	sample := map[string]any{
 		"alertId": 0, "title": "OpsOne 测试告警", "summary": "这是一条用于验证渠道连通性的样例消息",
 		"severity": "info", "status": "firing", "source": "channel-test",
@@ -352,13 +429,12 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 	})
 }
 
+// normalizeChannelType 已知类型原样返回，其余交给 validateChannel 拒绝。
+//
+// 原先这里把未知类型静默改成 webhook——类型多了之后这是个坑：
+// 把 dingtalk 写错成 dingding 会变成 webhook，报文发过去对端根本不认。
 func normalizeChannelType(t string) string {
-	switch t {
-	case "silent", "email":
-		return t
-	default:
-		return "webhook"
-	}
+	return strings.TrimSpace(t)
 }
 
 // ---------- 通知路由 ----------

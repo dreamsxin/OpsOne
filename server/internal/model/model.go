@@ -536,12 +536,20 @@ type NotifyChannel struct {
 	HeaderKey   string `gorm:"size:64" json:"headerKey"` // 可选的鉴权头名
 	HeaderValue string `gorm:"size:255" json:"-"`        // 鉴权头值，不出接口
 	// Recipients / TemplateCode 仅 email 类型使用
-	Recipients   string    `gorm:"size:512" json:"recipients"`  // 逗号分隔收件人
-	TemplateCode string    `gorm:"size:64" json:"templateCode"` // 邮件模板编码，空则用内置格式
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	Remark       string    `gorm:"size:255" json:"remark"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	Recipients   string `gorm:"size:512" json:"recipients"`  // 逗号分隔收件人
+	TemplateCode string `gorm:"size:64" json:"templateCode"` // 邮件模板编码，空则用内置格式
+	// Secret 群机器人的签名密钥：钉钉「加签」、飞书「签名校验」用，不出接口。
+	// 企业微信没有这个概念（密钥就在 URL 里）
+	Secret string `gorm:"size:255" json:"-"`
+	// MentionList @ 名单，逗号分隔。企业微信填 userid，钉钉填手机号；
+	// 飞书只支持 @所有人（@ 单人要 open_id，平台不做通讯录同步）
+	MentionList string `gorm:"size:255" json:"mentionList"`
+	MentionAll  bool   `gorm:"default:false" json:"mentionAll"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // NotifyRoute 通知路由：按告警级别与标签匹配，命中后投递到指定渠道。

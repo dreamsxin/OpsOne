@@ -16,17 +16,38 @@ const loading = ref(false)
 const rows = ref<NotifyChannel[]>([])
 const templates = ref<EmailTemplate[]>([])
 
+type ChannelType = 'webhook' | 'email' | 'silent' | 'wecom' | 'dingtalk' | 'feishu'
+const imTypes: ChannelType[] = ['wecom', 'dingtalk', 'feishu']
+const typeLabel: Record<string, string> = {
+  webhook: 'webhook',
+  email: 'email',
+  silent: 'silent',
+  wecom: '企业微信',
+  dingtalk: '钉钉',
+  feishu: '飞书'
+}
+const isIM = (type: string) => imTypes.includes(type as ChannelType)
+// 各家 @ 人的标识不一样，表单提示要跟着变
+const mentionHint: Record<string, string> = {
+  wecom: '逗号分隔的成员 userid，留空则不 @ 人',
+  dingtalk: '逗号分隔的手机号（钉钉按手机号 @ 人，号码会附在正文末尾才会高亮）',
+  feishu: '飞书 @ 单人需要 open_id，平台不做通讯录同步，只支持「@所有人」'
+}
+
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
 const form = reactive({
   name: '',
-  type: 'webhook' as 'webhook' | 'email' | 'silent',
+  type: 'webhook' as ChannelType,
   url: '',
   headerKey: '',
   headerValue: '',
   recipients: '',
   templateCode: '',
+  secret: '',
+  mentionList: '',
+  mentionAll: false,
   remark: '',
   enabled: true
 })
@@ -55,6 +76,9 @@ function openCreate() {
     headerValue: '',
     recipients: '',
     templateCode: '',
+    secret: '',
+    mentionList: '',
+    mentionAll: false,
     remark: '',
     enabled: true
   })
@@ -71,6 +95,9 @@ function openEdit(row: NotifyChannel) {
     headerValue: '',
     recipients: row.recipients,
     templateCode: row.templateCode,
+    secret: '',
+    mentionList: row.mentionList || '',
+    mentionAll: row.mentionAll || false,
     remark: row.remark,
     enabled: row.enabled
   })
@@ -80,21 +107,30 @@ function openEdit(row: NotifyChannel) {
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (form.type === 'webhook' && !form.url) {
-    ElMessage.warning('webhook 渠道必须填写 URL')
+  if ((form.type === 'webhook' || isIM(form.type)) && !form.url.trim()) {
+    ElMessage.warning(`${typeLabel[form.type]} 渠道必须填写地址`)
     return
   }
   if (form.type === 'email' && !form.recipients.trim()) {
     ElMessage.warning('email 渠道必须填写收件人')
     return
   }
+  if (form.type === 'feishu' && form.mentionList.trim()) {
+    ElMessage.warning('飞书只支持 @所有人，请清空 @ 名单')
+    return
+  }
 
-  if (editingId.value) {
-    await updateNotifyChannel(editingId.value, { ...form })
-    ElMessage.success('已更新')
-  } else {
-    await createNotifyChannel({ ...form })
-    ElMessage.success('已创建')
+  try {
+    if (editingId.value) {
+      await updateNotifyChannel(editingId.value, { ...form })
+      ElMessage.success('已更新')
+    } else {
+      await createNotifyChannel({ ...form })
+      ElMessage.success('已创建')
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '保存失败')
+    return
   }
   dialogVisible.value = false
   load()
@@ -109,6 +145,8 @@ async function toggleEnabled(row: NotifyChannel) {
     headerKey: row.headerKey,
     recipients: row.recipients,
     templateCode: row.templateCode,
+    mentionList: row.mentionList,
+    mentionAll: row.mentionAll,
     remark: row.remark,
     enabled: row.enabled
   })
@@ -146,7 +184,7 @@ onMounted(async () => {
         type="info"
         :closable="false"
         style="margin-bottom: 12px"
-        title="webhook 渠道以 HTTP POST 投递 JSON 报文；email 渠道走 SMTP 并套用邮件模板；silent 渠道只落通知记录、不外发，可用于灰度或临时静默"
+        title="webhook 以 HTTP POST 投递固定 JSON；企业微信 / 钉钉 / 飞书按各家群机器人报文发纯文本消息（HTTP 200 但 errcode 非零也算失败）；email 走 SMTP 并套用邮件模板；silent 只落通知记录、不外发，可用于灰度或临时静默"
 
       />
 
@@ -158,10 +196,13 @@ onMounted(async () => {
       <el-table v-loading="loading" :data="rows" border stripe>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="name" label="渠道" min-width="140" />
-        <el-table-column label="类型" width="100">
+        <el-table-column label="类型" width="110">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.type === 'webhook' ? 'primary' : row.type === 'email' ? 'success' : 'info'">
-              {{ row.type }}
+            <el-tag
+              size="small"
+              :type="row.type === 'email' ? 'success' : isIM(row.type) ? 'warning' : row.type === 'silent' ? 'info' : 'primary'"
+            >
+              {{ typeLabel[row.type] || row.type }}
             </el-tag>
           </template>
         </el-table-column>
@@ -173,11 +214,21 @@ onMounted(async () => {
                 {{ row.templateCode }}
               </el-tag>
             </span>
-            <span v-else-if="row.type === 'webhook'">{{ row.url }}</span>
-            <span v-else style="color: #9ca3af">不外发</span>
+            <span v-else-if="row.type === 'silent'" style="color: #9ca3af">不外发</span>
+            <span v-else>{{ row.url }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="headerKey" label="鉴权头" width="120" />
+        <el-table-column label="@ 提醒" width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="!isIM(row.type)">—</span>
+            <span v-else>
+              <el-tag v-if="row.mentionAll" size="small" type="danger">@所有人</el-tag>
+              <span v-if="row.mentionList" style="margin-left: 4px">{{ row.mentionList }}</span>
+              <span v-if="!row.mentionAll && !row.mentionList">不 @</span>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="headerKey" label="鉴权头" width="110" />
 
         <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
         <el-table-column label="启用" width="90">
@@ -203,6 +254,9 @@ onMounted(async () => {
         <el-form-item label="类型">
           <el-radio-group v-model="form.type">
             <el-radio value="webhook">webhook</el-radio>
+            <el-radio value="wecom">企业微信</el-radio>
+            <el-radio value="dingtalk">钉钉</el-radio>
+            <el-radio value="feishu">飞书</el-radio>
             <el-radio value="email">email</el-radio>
             <el-radio value="silent">silent（仅记录）</el-radio>
           </el-radio-group>
@@ -210,10 +264,39 @@ onMounted(async () => {
         <el-form-item v-if="form.type === 'webhook'" label="URL">
           <el-input v-model="form.url" placeholder="https://..." />
         </el-form-item>
-        <el-form-item v-if="form.type === 'webhook'" label="鉴权头名">
-          <el-input v-model="form.headerKey" placeholder="可选，如 X-Token" />
+        <el-form-item v-if="isIM(form.type)" label="机器人地址">
+          <el-input v-model="form.url" placeholder="群机器人的 Webhook 地址" />
+          <div class="hint">在群设置里添加机器人后复制，地址本身就是凭据，别外传</div>
         </el-form-item>
-        <el-form-item v-if="form.type === 'webhook'" label="鉴权头值">
+        <el-form-item v-if="form.type === 'dingtalk' || form.type === 'feishu'" label="签名密钥">
+          <el-input
+            v-model="form.secret"
+            type="password"
+            show-password
+            :placeholder="editingId ? '留空表示不修改' : '可选：钉钉「加签」/ 飞书「签名校验」的密钥'"
+          />
+          <div class="hint">
+            {{ form.type === 'dingtalk'
+              ? '钉钉若用「自定义关键词」校验，请把关键词写进告警标题，或改用加签'
+              : '飞书开启签名校验后必填，否则会返回 sign match fail' }}
+          </div>
+        </el-form-item>
+        <el-form-item v-if="isIM(form.type)" label="@ 名单">
+          <el-input
+            v-model="form.mentionList"
+            :disabled="form.type === 'feishu'"
+            placeholder="可选"
+          />
+          <div class="hint">{{ mentionHint[form.type] }}</div>
+        </el-form-item>
+        <el-form-item v-if="isIM(form.type)" label="@所有人">
+          <el-switch v-model="form.mentionAll" />
+          <span class="hint" style="margin-left: 8px">谨慎开启：每条告警都会 @ 全群</span>
+        </el-form-item>
+        <el-form-item v-if="form.type === 'webhook' || isIM(form.type)" label="鉴权头名">
+          <el-input v-model="form.headerKey" placeholder="可选，如 X-Token；机器人挂在自建网关后面时用" />
+        </el-form-item>
+        <el-form-item v-if="form.type === 'webhook' || isIM(form.type)" label="鉴权头值">
           <el-input
             v-model="form.headerValue"
             type="password"
@@ -256,3 +339,11 @@ onMounted(async () => {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+</style>
