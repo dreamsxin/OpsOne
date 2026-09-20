@@ -24,8 +24,6 @@ const (
 	probeAlertSourceName = "拨测探测"
 	// probeConcurrency 定时批量拨测的并发上限
 	probeConcurrency = 5
-	// probeRecordKeepDays 拨测记录保留天数，定时拨测时顺带清理，避免无界增长
-	probeRecordKeepDays = 7
 	// probeBodyLimit 关键字校验时读取响应体的上限
 	probeBodyLimit = 1 << 20
 )
@@ -399,10 +397,8 @@ func (h *Handler) RunProbesForSchedule() {
 		return
 	}
 
-	// 记录保留期之外的历史直接删掉，拨测频率高时这张表增长很快
-	deadline := time.Now().AddDate(0, 0, -probeRecordKeepDays)
-	h.DB.Where("created_at < ?", deadline).Delete(&model.ProbeRecord{})
-
+	// 记录的清理统一交给「数据留存」的定时任务（retention.probe_record_days），
+	// 这里不再各自为政
 	if len(list) == 0 {
 		return
 	}

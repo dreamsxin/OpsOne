@@ -60,6 +60,14 @@ func main() {
 	} else {
 		log.Println("[probe] 定时拨测未启用（OPS_PROBE_SPEC 为空），只能手动拨测")
 	}
+	if cfg.RetentionSpec != "" {
+		if err := sched.AddFixed(cfg.RetentionSpec, h.RunRetentionForSchedule); err != nil {
+			log.Fatalf("数据留存清理 cron 表达式无效(%s): %v", cfg.RetentionSpec, err)
+		}
+		log.Printf("[retention] 定时清理已启用: %s", cfg.RetentionSpec)
+	} else {
+		log.Println("[retention] 定时清理未启用（OPS_RETENTION_SPEC 为空），只能手动清理")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -357,6 +365,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/hosts/export", h.ExportHosts)
 		auth.GET("/hosts/import-template", h.HostImportTemplate)
 		auth.POST("/hosts/import", middleware.RequirePerm("host:create"), h.ImportHosts)
+
+		auth.GET("/system/retention", h.RetentionStatus)
+		auth.POST("/system/retention/run", middleware.RequirePerm("retention:run"), h.RunRetentionCleanup)
 	}
 
 	return r

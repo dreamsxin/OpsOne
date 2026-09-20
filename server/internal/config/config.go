@@ -35,6 +35,10 @@ type Config struct {
 	// ProbeSpec 拨测执行的 cron 表达式。留空表示不做定时拨测，
 	// 只能在界面上手动拨测。所有拨测共用这一个节奏。
 	ProbeSpec string
+
+	// RetentionSpec 数据留存清理的 cron 表达式。留空表示不自动清理，
+	// 只能在「数据留存」页面手动执行。
+	RetentionSpec string
 }
 
 func Load() *Config {
@@ -50,6 +54,7 @@ func Load() *Config {
 		CertCheckSpec:    strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 		AlertRuleSpec:    strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 		ProbeSpec:        strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),
+		RetentionSpec:    strings.TrimSpace(env("OPS_RETENTION_SPEC", "30 3 * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

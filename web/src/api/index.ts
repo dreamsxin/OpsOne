@@ -1443,6 +1443,45 @@ export const updateEventStatus = (
 export const deleteEvent = (id: number) =>
   request({ url: `/monitor/events/${id}`, method: 'DELETE' })
 
+// ---------- 数据留存 ----------
+
+export interface RetentionTarget {
+  key: string
+  label: string
+  days: number
+  total: number
+  expired: number
+  cascade: string
+  note: string
+  irreversible: boolean
+}
+
+export interface RetentionStatus {
+  targets: RetentionTarget[]
+  expiredTotal: number
+  permanentCount: number
+  spec: string
+  lastRun: { at: string | null; info: string }
+  detail: string
+}
+
+export interface RetentionRunItem {
+  key: string
+  label: string
+  days: number
+  deleted: number
+  skipped: boolean
+  reason?: string
+  deadline?: string
+}
+
+export const getRetentionStatus = () => request<RetentionStatus>({ url: '/system/retention' })
+export const runRetention = (dryRun: boolean) =>
+  request<{ dryRun: boolean; affected: number; items: RetentionRunItem[]; detail: string }>({
+    url: `/system/retention/run?dryRun=${dryRun}`,
+    method: 'POST'
+  })
+
 // ---------- 主机导入导出 ----------
 
 export interface HostImportRow {

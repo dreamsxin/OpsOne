@@ -183,6 +183,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},
 		{ID: 822, ParentID: 800, Name: "AuditLog", Title: "操作审计", Path: "/system/audit", Component: "/system/audit/index", Icon: "Document", Sort: 14},
+		{ID: 817, ParentID: 800, Name: "DataRetention", Title: "数据留存", Path: "/system/retention", Component: "/system/retention/index", Icon: "DeleteFilled", Sort: 15},
+		{ID: 828, ParentID: 817, Title: "执行清理", Type: "button", AuthCode: "retention:run", Sort: 1},
 
 		// ---------- 消息中心 ----------
 		{ID: 900, Name: "MessageCenter", Title: "消息中心", Path: "/message", Icon: "Message", Sort: 100},
@@ -355,6 +357,12 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
+		{Group: "retention", Key: "retention.exec_job_days", Value: "90", Type: "int", Label: "执行记录保留天数", Remark: "批量执行/脚本/定时任务的作业与逐台结果；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.probe_record_days", Value: "7", Type: "int", Label: "拨测记录保留天数", Remark: "拨测频率高、增长快，建议保持较短；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.notify_record_days", Value: "90", Type: "int", Label: "通知投递记录保留天数", Remark: "0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.audit_log_days", Value: "180", Type: "int", Label: "操作审计保留天数", Remark: "写操作留痕，删除后无法追溯；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.session_days", Value: "180", Type: "int", Label: "会话记录保留天数", Remark: "删除会话流水会连带命令明细与录像文件；0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.alert_days", Value: "180", Type: "int", Label: "已恢复告警保留天数", Remark: "只清理已恢复的告警，未恢复的不动；0 表示永久保留", Builtin: true},
 	}
 
 	for i := range configs {

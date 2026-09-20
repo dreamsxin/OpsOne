@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -341,6 +342,32 @@ func (h *Handler) healthStorage() []healthItem {
 		}
 	}
 	items = append(items, recordItem)
+
+	// 留存策略：有表设成永久保留时提示，避免库无声增长
+	targets := h.retentionOverview()
+	permanent := make([]string, 0, len(targets))
+	var expired int64
+	for _, target := range targets {
+		if target.Days <= 0 {
+			permanent = append(permanent, target.Label)
+		}
+		expired += target.Expired
+	}
+	retentionItem := healthItem{
+		Key: "retention", Label: "数据留存", Status: "ok",
+		Value:  fmt.Sprintf("可清理 %d 行", expired),
+		Detail: "清理策略见「系统管理 → 数据留存」，保留天数在系统配置的 retention 分组",
+	}
+	switch {
+	case h.Cfg.RetentionSpec == "":
+		retentionItem.Status = "warn"
+		retentionItem.Detail = "OPS_RETENTION_SPEC 为空，不会自动清理，只能手动执行"
+	case len(permanent) > 0:
+		retentionItem.Status = "warn"
+		retentionItem.Detail = fmt.Sprintf("%d 类设为永久保留（%s），这些表只会一直增长",
+			len(permanent), strings.Join(permanent, "、"))
+	}
+	items = append(items, retentionItem)
 	return items
 }
 
