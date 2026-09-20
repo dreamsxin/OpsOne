@@ -200,6 +200,23 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/me/activity", h.MyActivity)
 		auth.GET("/me/sessions", h.MySessions)
 		auth.GET("/me/exec-jobs", h.MyExecJobs)
+
+		auth.GET("/tags", h.ListTags)
+		auth.POST("/tags", middleware.RequirePerm("tag:manage"), h.CreateTag)
+		auth.PUT("/tags/:id", middleware.RequirePerm("tag:manage"), h.UpdateTag)
+		auth.DELETE("/tags/:id", middleware.RequirePerm("tag:manage"), h.DeleteTag)
+
+		auth.GET("/databases", h.ListDBInstances)
+		auth.POST("/databases", middleware.RequirePerm("db:manage"), h.CreateDBInstance)
+		auth.PUT("/databases/:id", middleware.RequirePerm("db:manage"), h.UpdateDBInstance)
+		auth.DELETE("/databases/:id", middleware.RequirePerm("db:manage"), h.DeleteDBInstance)
+		auth.POST("/databases/:id/check", h.CheckDBInstance)
+
+		auth.GET("/fixed-assets", h.ListFixedAssets)
+		auth.GET("/fixed-assets/stats", h.FixedAssetStats)
+		auth.POST("/fixed-assets", middleware.RequirePerm("asset:manage"), h.CreateFixedAsset)
+		auth.PUT("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.UpdateFixedAsset)
+		auth.DELETE("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.DeleteFixedAsset)
 	}
 
 	return r

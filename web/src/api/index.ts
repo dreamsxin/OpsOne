@@ -382,6 +382,67 @@ export interface MyResources {
   myCronJobs: number
 }
 
+export interface Tag {
+  id: number
+  name: string
+  category: string
+  color: string
+  remark: string
+  hostCount: number
+  dbCount: number
+}
+
+export interface DBInstance {
+  id: number
+  name: string
+  type: 'mysql' | 'postgres' | 'redis' | 'mongo' | 'other'
+  address: string
+  port: number
+  username: string
+  dbName: string
+  version: string
+  env: 'dev' | 'test' | 'prod'
+  deptId: number
+  createdBy: number
+  status: 'online' | 'offline' | 'unknown'
+  checkedAt: string | null
+  tags: string
+  remark: string
+  createdAt: string
+}
+
+export interface FixedAsset {
+  id: number
+  name: string
+  category: 'server' | 'network' | 'storage' | 'terminal' | 'other'
+  sn: string
+  model: string
+  vendor: string
+  location: string
+  owner: string
+  hostId: number
+  deptId: number
+  createdBy: number
+  status: 'in_use' | 'idle' | 'repair' | 'scrapped'
+  purchaseDate: string | null
+  purchasePrice: number
+  warrantyEnd: string | null
+  remark: string
+  createdAt: string
+}
+
+export interface FixedAssetStats {
+  total: number
+  inUse: number
+  idle: number
+  repair: number
+  scrapped: number
+  expiring30: number
+  expired: number
+  totalPrice: number
+}
+
+
 
 
 export interface AuditLog {
@@ -670,6 +731,44 @@ export const listMySessions = (params: Record<string, any>) =>
   request<PageData<TerminalSession>>({ url: '/me/sessions', params })
 export const listMyExecJobs = (params: Record<string, any>) =>
   request<PageData<ExecJob>>({ url: '/me/exec-jobs', params })
+
+// ---------- 标签字典 ----------
+
+export const listTags = () => request<Tag[]>({ url: '/tags' })
+export const createTag = (data: Record<string, any>) =>
+  request<Tag>({ url: '/tags', method: 'POST', data })
+export const updateTag = (id: number, data: Record<string, any>) =>
+  request<Tag>({ url: `/tags/${id}`, method: 'PUT', data })
+export const deleteTag = (id: number) => request({ url: `/tags/${id}`, method: 'DELETE' })
+
+// ---------- 数据库资产 ----------
+
+export const listDatabases = (params: Record<string, any>) =>
+  request<PageData<DBInstance>>({ url: '/databases', params })
+export const createDatabase = (data: Record<string, any>) =>
+  request<DBInstance>({ url: '/databases', method: 'POST', data })
+export const updateDatabase = (id: number, data: Record<string, any>) =>
+  request<DBInstance>({ url: `/databases/${id}`, method: 'PUT', data })
+export const deleteDatabase = (id: number) =>
+  request({ url: `/databases/${id}`, method: 'DELETE' })
+export const checkDatabase = (id: number) =>
+  request<{ status: string; costMs: number; detail: string; note: string }>({
+    url: `/databases/${id}/check`,
+    method: 'POST'
+  })
+
+// ---------- 固定资产 ----------
+
+export const listFixedAssets = (params: Record<string, any>) =>
+  request<PageData<FixedAsset>>({ url: '/fixed-assets', params })
+export const getFixedAssetStats = () => request<FixedAssetStats>({ url: '/fixed-assets/stats' })
+export const createFixedAsset = (data: Record<string, any>) =>
+  request<FixedAsset>({ url: '/fixed-assets', method: 'POST', data })
+export const updateFixedAsset = (id: number, data: Record<string, any>) =>
+  request<FixedAsset>({ url: `/fixed-assets/${id}`, method: 'PUT', data })
+export const deleteFixedAsset = (id: number) =>
+  request({ url: `/fixed-assets/${id}`, method: 'DELETE' })
+
 
 
 

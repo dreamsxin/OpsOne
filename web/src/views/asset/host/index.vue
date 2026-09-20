@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { checkHost, createHost, deleteHost, getDepartmentTree, listHosts, updateHost, type DeptNode, type Host } from '@/api'
+import { checkHost, createHost, deleteHost, getDepartmentTree, listHosts, listTags, updateHost, type DeptNode, type Host, type Tag } from '@/api'
+
 
 
 const loading = ref(false)
@@ -29,6 +30,15 @@ const form = reactive({
 
 // 部门树用于归属选择与列表展示
 const deptTree = ref<DeptNode[]>([])
+// 标签字典用于表单下拉建议
+const tagDict = ref<Tag[]>([])
+
+// tags 存的是逗号分隔文本，表单里用数组操作
+const tagList = computed({
+  get: () => (form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : []),
+  set: (value: string[]) => (form.tags = value.join(','))
+})
+
 const deptNameMap = computed(() => {
   const map = new Map<number, string>()
   const walk = (nodes: DeptNode[]) => {
@@ -160,7 +170,9 @@ onMounted(() => {
   load()
   loadAllHosts()
   getDepartmentTree().then((data) => (deptTree.value = data))
+  listTags().then((data) => (tagDict.value = data))
 })
+
 
 
 </script>
@@ -309,9 +321,19 @@ onMounted(() => {
           />
         </el-form-item>
         <el-form-item label="标签">
-
-          <el-input v-model="form.tags" placeholder="逗号分隔，如 web,nginx" />
+          <el-select
+            v-model="tagList"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="从标签字典选择或直接输入"
+          >
+            <el-option v-for="tag in tagDict" :key="tag.id" :label="tag.name" :value="tag.name" />
+          </el-select>
         </el-form-item>
+
         <el-form-item label="备注">
           <el-input v-model="form.remark" />
         </el-form-item>

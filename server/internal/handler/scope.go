@@ -90,8 +90,8 @@ func collectDescendants(children map[uint][]uint, root uint) []uint {
 	return result
 }
 
-// applyHostScope 给主机查询加上数据范围条件
-func (h *Handler) applyHostScope(q *gorm.DB, user *model.User) *gorm.DB {
+// applyScope 给任意带 dept_id / created_by 字段的资源查询加上数据范围条件
+func (h *Handler) applyScope(q *gorm.DB, user *model.User) *gorm.DB {
 	s := h.resolveScope(user)
 	switch {
 	case s.All:
@@ -108,21 +108,31 @@ func (h *Handler) applyHostScope(q *gorm.DB, user *model.User) *gorm.DB {
 	}
 }
 
-// hostVisible 判断用户是否有权访问指定主机
-func (h *Handler) hostVisible(user *model.User, host *model.Host) bool {
+// applyHostScope 主机查询的数据范围（与其他资产共用同一套字段约定）
+func (h *Handler) applyHostScope(q *gorm.DB, user *model.User) *gorm.DB {
+	return h.applyScope(q, user)
+}
+
+// resourceVisible 判断用户是否有权访问指定归属的资源
+func (h *Handler) resourceVisible(user *model.User, deptID, createdBy uint) bool {
 	s := h.resolveScope(user)
 	if s.All {
 		return true
 	}
-	if s.IncludeSelf && host.CreatedBy == user.ID {
+	if s.IncludeSelf && createdBy == user.ID {
 		return true
 	}
 	for _, id := range s.DeptIDs {
-		if id == host.DeptID {
+		if id == deptID {
 			return true
 		}
 	}
 	return false
+}
+
+// hostVisible 判断用户是否有权访问指定主机
+func (h *Handler) hostVisible(user *model.User, host *model.Host) bool {
+	return h.resourceVisible(user, host.DeptID, host.CreatedBy)
 }
 
 // filterVisibleHostIDs 从给定主机 ID 中筛出用户可见的部分

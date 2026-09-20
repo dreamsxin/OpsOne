@@ -360,3 +360,60 @@ type SysConfig struct {
 	UpdatedBy string    `gorm:"size:64" json:"updatedBy"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// Tag 资产标签字典。主机的 tags 字段仍是逗号分隔文本，这里提供统一词表与用量统计。
+type Tag struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	Category  string    `gorm:"size:32;default:general" json:"category"` // 用途分类，如 role / env / owner
+	Color     string    `gorm:"size:16;default:info" json:"color"`       // Element Plus 标签类型
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// DBInstance 数据库资产。凭据与主机一致为明文存储（见 docs/SECURITY.md）。
+type DBInstance struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Name     string `gorm:"size:64;not null" json:"name"`
+	Type     string `gorm:"size:16;default:mysql" json:"type"` // mysql | postgres | redis | mongo | other
+	Address  string `gorm:"size:128;not null" json:"address"`
+	Port     int    `gorm:"default:3306" json:"port"`
+	Username string `gorm:"size:64" json:"username"`
+	Secret   string `gorm:"type:text" json:"-"`
+	DBName   string `gorm:"size:64" json:"dbName"`
+	Version  string `gorm:"size:32" json:"version"`
+	Env      string `gorm:"size:16;default:dev" json:"env"`
+	// DeptID / CreatedBy 与主机一致，参与数据权限过滤
+	DeptID    uint       `gorm:"index;default:0" json:"deptId"`
+	CreatedBy uint       `gorm:"index;default:0" json:"createdBy"`
+	Status    string     `gorm:"size:16;default:unknown" json:"status"` // online | offline | unknown
+	CheckedAt *time.Time `json:"checkedAt"`
+	Tags      string     `gorm:"size:255" json:"tags"`
+	Remark    string     `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// FixedAsset 固定资产台账，用于设备盘点与到保跟踪
+type FixedAsset struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Name     string `gorm:"size:64;not null" json:"name"`
+	Category string `gorm:"size:16;default:server" json:"category"` // server | network | storage | terminal | other
+	SN       string `gorm:"size:64;index" json:"sn"`
+	Model    string `gorm:"size:64" json:"model"`
+	Vendor   string `gorm:"size:64" json:"vendor"`
+	Location string `gorm:"size:128" json:"location"`
+	Owner    string `gorm:"size:64" json:"owner"`
+	// HostID 关联的纳管主机，0 表示未关联
+	HostID        uint       `gorm:"index;default:0" json:"hostId"`
+	DeptID        uint       `gorm:"index;default:0" json:"deptId"`
+	CreatedBy     uint       `gorm:"index;default:0" json:"createdBy"`
+	Status        string     `gorm:"size:16;default:in_use" json:"status"` // in_use | idle | repair | scrapped
+	PurchaseDate  *time.Time `json:"purchaseDate"`
+	PurchasePrice float64    `json:"purchasePrice"`
+	WarrantyEnd   *time.Time `json:"warrantyEnd"`
+	Remark        string     `gorm:"size:255" json:"remark"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}

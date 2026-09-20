@@ -31,6 +31,7 @@ func Migrate(g *gorm.DB) error {
 		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
 		&model.NotifyRoute{}, &model.NotifyRecord{},
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
+		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
 	)
 }
 
@@ -57,10 +58,13 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 103, ParentID: 101, Title: "编辑主机", Type: "button", AuthCode: "host:update", Sort: 2},
 		{ID: 104, ParentID: 101, Title: "删除主机", Type: "button", AuthCode: "host:delete", Sort: 3},
 		{ID: 105, ParentID: 101, Title: "连通性探测", Type: "button", AuthCode: "host:check", Sort: 4},
-		{ID: 110, ParentID: 100, Name: "DatabaseAsset", Title: "数据库资产", Path: "/asset/database", Component: todo, Icon: "Coin", Sort: 2},
+		{ID: 110, ParentID: 100, Name: "DatabaseAsset", Title: "数据库资产", Path: "/asset/database", Component: "/asset/database/index", Icon: "Coin", Sort: 2},
+		{ID: 116, ParentID: 110, Title: "维护数据库资产", Type: "button", AuthCode: "db:manage", Sort: 1},
 		{ID: 111, ParentID: 100, Name: "CloudAccount", Title: "云账号", Path: "/asset/cloud", Component: todo, Icon: "Cloudy", Sort: 3},
-		{ID: 112, ParentID: 100, Name: "AssetTag", Title: "标签管理", Path: "/asset/tag", Component: todo, Icon: "PriceTag", Sort: 4},
-		{ID: 113, ParentID: 100, Name: "FixedAsset", Title: "固定资产", Path: "/asset/fixed", Component: todo, Icon: "Box", Sort: 5},
+		{ID: 112, ParentID: 100, Name: "AssetTag", Title: "标签管理", Path: "/asset/tag", Component: "/asset/tag/index", Icon: "PriceTag", Sort: 4},
+		{ID: 117, ParentID: 112, Title: "维护标签", Type: "button", AuthCode: "tag:manage", Sort: 1},
+		{ID: 113, ParentID: 100, Name: "FixedAsset", Title: "固定资产", Path: "/asset/fixed", Component: "/asset/fixed/index", Icon: "Box", Sort: 5},
+		{ID: 118, ParentID: 113, Title: "维护固定资产", Type: "button", AuthCode: "asset:manage", Sort: 1},
 		{ID: 114, ParentID: 100, Name: "AssetInventory", Title: "资产盘点", Path: "/asset/inventory", Component: todo, Icon: "Tickets", Sort: 6},
 		{ID: 115, ParentID: 100, Name: "AssetPurchase", Title: "采购记录", Path: "/asset/purchase", Component: todo, Icon: "ShoppingCart", Sort: 7},
 
