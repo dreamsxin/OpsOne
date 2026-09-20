@@ -39,6 +39,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Probe{}, &model.ProbeRecord{},
 		&model.AggregationPolicy{},
 		&model.Event{}, &model.EventLog{},
+		&model.Script{},
 	)
 }
 
@@ -96,6 +97,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 212, ParentID: 200, Name: "BuildDeploy", Title: "构建发布", Path: "/execute/build", Component: "/execute/build/index", Icon: "SetUp", Sort: 6},
 		{ID: 218, ParentID: 212, Title: "维护服务器与任务", Type: "button", AuthCode: "build:manage", Sort: 1},
 		{ID: 219, ParentID: 212, Title: "触发构建与同步", Type: "button", AuthCode: "build:run", Sort: 2},
+		{ID: 205, ParentID: 200, Name: "ScriptLibrary", Title: "脚本库", Path: "/execute/script", Component: "/execute/script/index", Icon: "Notebook", Sort: 7},
+		{ID: 220, ParentID: 205, Title: "维护脚本", Type: "button", AuthCode: "script:manage", Sort: 1},
 
 		// ---------- 容器平台 ----------
 		{ID: 300, Name: "Kubernetes", Title: "容器平台", Path: "/kubernetes", Icon: "Ship", Sort: 40},

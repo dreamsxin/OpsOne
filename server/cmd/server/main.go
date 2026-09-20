@@ -344,6 +344,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/events/:id/note", middleware.RequirePerm("event:manage"), h.AddEventNote)
 		auth.POST("/monitor/events/:id/status", middleware.RequirePerm("event:manage"), h.UpdateEventStatus)
 		auth.DELETE("/monitor/events/:id", middleware.RequirePerm("event:manage"), h.DeleteEvent)
+
+		auth.GET("/exec/scripts", h.ListScripts)
+		auth.GET("/exec/scripts/categories", h.ListScriptCategories)
+		auth.POST("/exec/scripts", middleware.RequirePerm("script:manage"), h.CreateScript)
+		auth.PUT("/exec/scripts/:id", middleware.RequirePerm("script:manage"), h.UpdateScript)
+		auth.DELETE("/exec/scripts/:id", middleware.RequirePerm("script:manage"), h.DeleteScript)
+		auth.POST("/exec/scripts/:id/precheck", h.PrecheckScript)
+		auth.POST("/exec/scripts/:id/render", h.RenderScript)
+		auth.POST("/exec/scripts/:id/run", middleware.RequirePerm("exec:run"), h.RunScript)
 	}
 
 	return r

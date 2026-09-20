@@ -1443,6 +1443,74 @@ export const updateEventStatus = (
 export const deleteEvent = (id: number) =>
   request({ url: `/monitor/events/${id}`, method: 'DELETE' })
 
+// ---------- 脚本库 ----------
+
+export interface ScriptParam {
+  name: string
+  label?: string
+  default?: string
+  required?: boolean
+}
+
+export interface PrecheckHit {
+  ruleId: number
+  pattern: string
+  action: string
+  description: string
+  line: number
+  snippet: string
+}
+
+export interface Script {
+  id: number
+  name: string
+  category: string
+  description: string
+  content: string
+  params: string
+  timeout: number
+  riskLevel: string
+  precheckStatus: string
+  precheckHits: string
+  precheckedAt: string | null
+  useCount: number
+  lastUsedAt: string | null
+  lastUsedBy: string
+  enabled: boolean
+  creatorName: string
+  createdAt: string
+}
+
+export const listScripts = (params: Record<string, any>) =>
+  request<PageData<Script>>({ url: '/exec/scripts', params })
+export const listScriptCategories = () => request<string[]>({ url: '/exec/scripts/categories' })
+export const createScript = (data: Record<string, any>) =>
+  request<{ script: Script; precheckHits: PrecheckHit[] }>({ url: '/exec/scripts', method: 'POST', data })
+export const updateScript = (id: number, data: Record<string, any>) =>
+  request<{ script: Script; precheckHits: PrecheckHit[] }>({ url: `/exec/scripts/${id}`, method: 'PUT', data })
+export const deleteScript = (id: number) =>
+  request({ url: `/exec/scripts/${id}`, method: 'DELETE' })
+export const precheckScript = (id: number) =>
+  request<{ precheckStatus: string; precheckHits: PrecheckHit[]; detail: string }>({
+    url: `/exec/scripts/${id}/precheck`,
+    method: 'POST'
+  })
+export const renderScript = (id: number, params: Record<string, string>) =>
+  request<{ command: string; timeout: number }>({
+    url: `/exec/scripts/${id}/render`,
+    method: 'POST',
+    data: { params }
+  })
+export const runScript = (
+  id: number,
+  data: { hostIds: number[]; params?: Record<string, string>; timeout?: number }
+) =>
+  request<{ job: ExecJob; command: string; precheckStatus: string; precheckHits: PrecheckHit[] }>({
+    url: `/exec/scripts/${id}/run`,
+    method: 'POST',
+    data
+  })
+
 
 
 

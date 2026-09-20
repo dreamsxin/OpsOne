@@ -816,3 +816,34 @@ type EventLog struct {
 	Operator  string    `gorm:"size:64" json:"operator"`
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
+
+// Script 脚本库条目：把散落在各人手里的运维命令收拢成可复用、可审阅的资产。
+//
+// 脚本内容在保存时会用「命令规则」跑一遍静态预检，命中拦截规则的脚本不允许下发。
+type Script struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:64;not null" json:"name"`
+	Category    string `gorm:"size:32;index" json:"category"`
+	Description string `gorm:"size:255" json:"description"`
+	Content     string `gorm:"type:text;not null" json:"content"`
+	// Params 参数定义，JSON 数组：[{"name":"PATH","label":"目录","default":"/tmp","required":true}]
+	// 脚本里用 ${NAME} 占位，下发前替换
+	Params  string `gorm:"type:text" json:"params"`
+	Timeout int    `gorm:"default:60" json:"timeout"`
+	// RiskLevel 由维护者声明，只作提示；真正的拦截看预检结果
+	RiskLevel string `gorm:"size:8;default:low" json:"riskLevel"` // low | medium | high
+
+	// 以下由预检回填
+	PrecheckStatus string     `gorm:"size:16;default:unknown" json:"precheckStatus"` // unknown | pass | warn | blocked
+	PrecheckHits   string     `gorm:"type:text" json:"precheckHits"`                 // JSON 数组，命中的规则
+	PrecheckedAt   *time.Time `json:"precheckedAt"`
+
+	UseCount    int        `json:"useCount"`
+	LastUsedAt  *time.Time `json:"lastUsedAt"`
+	LastUsedBy  string     `gorm:"size:64" json:"lastUsedBy"`
+	Enabled     bool       `gorm:"default:true" json:"enabled"`
+	CreatorName string     `gorm:"size:64" json:"creatorName"`
+	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
