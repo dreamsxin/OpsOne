@@ -573,3 +573,54 @@ type PurchaseItem struct {
 	UnitPrice float64 `json:"unitPrice"`
 	Remark    string  `gorm:"size:255" json:"remark"`
 }
+
+// BuildServer Jenkins 服务器登记。Token 用 Jenkins 的 API Token，不要用登录密码。
+type BuildServer struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	URL       string    `gorm:"size:255;not null" json:"url"` // 如 https://jenkins.example.com
+	Username  string    `gorm:"size:64" json:"username"`
+	Token     string    `gorm:"size:255" json:"-"` // 明文存储，不出接口
+	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// BuildJob 构建任务，映射到 Jenkins 上的一个 job
+type BuildJob struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Name        string     `gorm:"size:64;not null" json:"name"`
+	ServerID    uint       `gorm:"index;not null" json:"serverId"`
+	ServerName  string     `gorm:"size:64" json:"serverName"`
+	JobPath     string     `gorm:"size:255;not null" json:"jobPath"` // Jenkins job 名，支持 folder/job 形式
+	Params      string     `gorm:"type:text" json:"params"`          // 默认参数，JSON 对象
+	DeptID      uint       `gorm:"index;default:0" json:"deptId"`
+	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
+	Enabled     bool       `gorm:"default:true" json:"enabled"`
+	Remark      string     `gorm:"size:255" json:"remark"`
+	LastBuildNo int        `json:"lastBuildNo"`
+	LastStatus  string     `gorm:"size:16" json:"lastStatus"` // triggered | success | failure | unstable | aborted | unknown
+	LastRunAt   *time.Time `json:"lastRunAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// BuildRecord 一次构建触发的记录。状态需要主动同步，平台不做轮询。
+type BuildRecord struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	JobID       uint       `gorm:"index;not null" json:"jobId"`
+	JobName     string     `gorm:"size:64" json:"jobName"`
+	BuildNo     int        `json:"buildNo"` // 排队阶段为 0，同步后回填
+	Status      string     `gorm:"size:16;default:triggered" json:"status"`
+	Params      string     `gorm:"type:text" json:"params"`
+	QueueURL    string     `gorm:"size:255" json:"queueUrl"`
+	BuildURL    string     `gorm:"size:255" json:"buildUrl"`
+	TriggeredBy string     `gorm:"size:64" json:"triggeredBy"`
+	DurationMs  int64      `json:"durationMs"`
+	ErrorMsg    string     `gorm:"size:255" json:"errorMsg"`
+	StartedAt   time.Time  `json:"startedAt"`
+	SyncedAt    *time.Time `json:"syncedAt"`
+}

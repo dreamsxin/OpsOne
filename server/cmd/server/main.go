@@ -256,6 +256,21 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/purchase/orders/:id", middleware.RequirePerm("purchase:manage"), h.UpdatePurchaseOrder)
 		auth.DELETE("/purchase/orders/:id", middleware.RequirePerm("purchase:manage"), h.DeletePurchaseOrder)
 		auth.POST("/purchase/orders/:id/receive", middleware.RequirePerm("purchase:manage"), h.ReceivePurchaseOrder)
+
+		auth.GET("/build/servers", h.ListBuildServers)
+		auth.POST("/build/servers", middleware.RequirePerm("build:manage"), h.CreateBuildServer)
+		auth.PUT("/build/servers/:id", middleware.RequirePerm("build:manage"), h.UpdateBuildServer)
+		auth.DELETE("/build/servers/:id", middleware.RequirePerm("build:manage"), h.DeleteBuildServer)
+		auth.POST("/build/servers/:id/test", middleware.RequirePerm("build:manage"), h.TestBuildServer)
+
+		auth.GET("/build/jobs", h.ListBuildJobs)
+		auth.POST("/build/jobs", middleware.RequirePerm("build:manage"), h.CreateBuildJob)
+		auth.PUT("/build/jobs/:id", middleware.RequirePerm("build:manage"), h.UpdateBuildJob)
+		auth.DELETE("/build/jobs/:id", middleware.RequirePerm("build:manage"), h.DeleteBuildJob)
+		auth.POST("/build/jobs/:id/trigger", middleware.RequirePerm("build:run"), h.TriggerBuildJob)
+
+		auth.GET("/build/records", h.ListBuildRecords)
+		auth.POST("/build/records/:id/sync", middleware.RequirePerm("build:run"), h.SyncBuildRecord)
 	}
 
 	return r

@@ -987,6 +987,89 @@ export const receivePurchaseOrder = (id: number, data: Record<string, any>) =>
     data
   })
 
+// ---------- 构建发布（Jenkins） ----------
+
+export interface BuildServer {
+  id: number
+  name: string
+  url: string
+  username: string
+  deptId: number
+  createdBy: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface BuildJob {
+  id: number
+  name: string
+  serverId: number
+  serverName: string
+  jobPath: string
+  params: string
+  deptId: number
+  createdBy: number
+  enabled: boolean
+  lastBuildNo: number
+  lastStatus: string
+  lastRunAt: string | null
+  remark: string
+  createdAt: string
+}
+
+export interface BuildRecord {
+  id: number
+  jobId: number
+  jobName: string
+  buildNo: number
+  status: string
+  params: string
+  queueUrl: string
+  buildUrl: string
+  triggeredBy: string
+  durationMs: number
+  errorMsg: string
+  startedAt: string
+  syncedAt: string | null
+}
+
+export const listBuildServers = () => request<BuildServer[]>({ url: '/build/servers' })
+export const createBuildServer = (data: Record<string, any>) =>
+  request<BuildServer>({ url: '/build/servers', method: 'POST', data })
+export const updateBuildServer = (id: number, data: Record<string, any>) =>
+  request<BuildServer>({ url: `/build/servers/${id}`, method: 'PUT', data })
+export const deleteBuildServer = (id: number) =>
+  request({ url: `/build/servers/${id}`, method: 'DELETE' })
+export const testBuildServer = (id: number) =>
+  request<{ ok: boolean; costMs: number; version?: string; nodeName?: string; mode?: string; detail?: string }>({
+    url: `/build/servers/${id}/test`,
+    method: 'POST'
+  })
+
+export const listBuildJobs = (params: Record<string, any>) =>
+  request<PageData<BuildJob>>({ url: '/build/jobs', params })
+export const createBuildJob = (data: Record<string, any>) =>
+  request<BuildJob>({ url: '/build/jobs', method: 'POST', data })
+export const updateBuildJob = (id: number, data: Record<string, any>) =>
+  request<BuildJob>({ url: `/build/jobs/${id}`, method: 'PUT', data })
+export const deleteBuildJob = (id: number) =>
+  request({ url: `/build/jobs/${id}`, method: 'DELETE' })
+export const triggerBuildJob = (id: number, data: { params?: Record<string, string> }) =>
+  request<{ recordId: number; queueUrl: string; detail: string }>({
+    url: `/build/jobs/${id}/trigger`,
+    method: 'POST',
+    data
+  })
+
+export const listBuildRecords = (params: Record<string, any>) =>
+  request<PageData<BuildRecord>>({ url: '/build/records', params })
+export const syncBuildRecord = (id: number) =>
+  request<{ status: string; buildNo?: number; durationMs?: number; detail?: string }>({
+    url: `/build/records/${id}/sync`,
+    method: 'POST'
+  })
+
 
 
 

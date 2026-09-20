@@ -34,6 +34,7 @@ func Migrate(g *gorm.DB) error {
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
 		&model.CloudAccount{}, &model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
+		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
 	)
 }
 
@@ -88,7 +89,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 211, ParentID: 200, Name: "Scheduler", Title: "定时任务", Path: "/execute/scheduler", Component: "/execute/scheduler/index", Icon: "Timer", Sort: 5},
 		{ID: 216, ParentID: 211, Title: "维护任务", Type: "button", AuthCode: "cron:manage", Sort: 1},
 		{ID: 217, ParentID: 211, Title: "立即执行", Type: "button", AuthCode: "cron:run", Sort: 2},
-		{ID: 212, ParentID: 200, Name: "BuildDeploy", Title: "构建发布", Path: "/execute/build", Component: todo, Icon: "SetUp", Sort: 6},
+		{ID: 212, ParentID: 200, Name: "BuildDeploy", Title: "构建发布", Path: "/execute/build", Component: "/execute/build/index", Icon: "SetUp", Sort: 6},
+		{ID: 218, ParentID: 212, Title: "维护服务器与任务", Type: "button", AuthCode: "build:manage", Sort: 1},
+		{ID: 219, ParentID: 212, Title: "触发构建与同步", Type: "button", AuthCode: "build:run", Sort: 2},
 
 		// ---------- 容器平台 ----------
 		{ID: 300, Name: "Kubernetes", Title: "容器平台", Path: "/kubernetes", Icon: "Ship", Sort: 40},
