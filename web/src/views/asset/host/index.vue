@@ -2,7 +2,73 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { checkHost, createHost, deleteHost, getDepartmentTree, listHosts, listTags, updateHost, type DeptNode, type Host, type Tag } from '@/api'
+import {
+  checkHost,
+  createHost,
+  deleteHost,
+  downloadHostTemplate,
+  exportHostsCSV,
+  getDepartmentTree,
+  importHosts,
+  listHosts,
+  listTags,
+  updateHost,
+  type DeptNode,
+  type Host,
+  type HostImportResult,
+  type Tag
+} from '@/api'
+
+const importVisible = ref(false)
+const importFile = ref<File | null>(null)
+const importDryRun = ref(true)
+const importing = ref(false)
+const importResult = ref<HostImportResult | null>(null)
+
+const importActionMeta: Record<string, { text: string; type: 'success' | 'warning' | 'danger' }> = {
+  create: { text: '新建', type: 'success' },
+  update: { text: '更新', type: 'warning' },
+  skip: { text: '跳过', type: 'danger' }
+}
+
+function openImport() {
+  importFile.value = null
+  importResult.value = null
+  importDryRun.value = true
+  importVisible.value = true
+}
+
+// el-upload 设为手动上传，这里只接住文件对象
+function onImportFileChange(file: { raw: File }) {
+  importFile.value = file.raw
+  importResult.value = null
+}
+
+async function submitImport() {
+  if (!importFile.value) {
+    ElMessage.warning('请选择 CSV 文件')
+    return
+  }
+  importing.value = true
+  try {
+    const res = await importHosts(importFile.value, importDryRun.value)
+    importResult.value = res
+    if (res.dryRun) {
+      ElMessage.info(res.detail)
+    } else {
+      ElMessage.success(res.detail)
+      load()
+    }
+  } finally {
+    importing.value = false
+  }
+}
+
+async function doExport() {
+  await exportHostsCSV(query.env || undefined)
+  ElMessage.success('已导出（不含登录凭据）')
+}
+
 
 
 
@@ -201,6 +267,8 @@ onMounted(() => {
         <el-button type="primary" @click="((query.page = 1), load())">查询</el-button>
         <el-button @click="resetQuery">重置</el-button>
         <div class="grow"></div>
+        <el-button @click="doExport">导出 CSV</el-button>
+        <el-button v-perm="'host:create'" @click="openImport">批量导入</el-button>
         <el-button v-perm="'host:create'" type="primary" @click="openCreate">新增主机</el-button>
       </div>
 
@@ -341,6 +409,60 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="importVisible" title="批量导入主机" width="720px">
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="按 address + port 判定是否同一台机器：已存在则更新（secret 留空保持原凭据），不存在则新建（必须给 secret）。建议先勾选「试运行」看报告，确认无误再正式导入。单次最多 500 行。"
+      />
+
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+        <el-button @click="downloadHostTemplate">下载模板</el-button>
+        <el-upload
+          :auto-upload="false"
+          :limit="1"
+          accept=".csv"
+          :show-file-list="false"
+          :on-change="onImportFileChange"
+        >
+          <el-button type="primary">选择 CSV</el-button>
+        </el-upload>
+        <span v-if="importFile" style="color: #6b7280">{{ importFile.name }}</span>
+        <el-checkbox v-model="importDryRun">试运行（只校验不写入）</el-checkbox>
+        <el-button :loading="importing" type="primary" @click="submitImport">
+          {{ importDryRun ? '开始校验' : '确认导入' }}
+        </el-button>
+      </div>
+
+      <template v-if="importResult">
+        <el-divider />
+        <el-alert
+          :type="importResult.skipped ? 'warning' : 'success'"
+          :closable="false"
+          :title="importResult.detail"
+          style="margin-bottom: 12px"
+        />
+        <el-table :data="importResult.rows" border size="small" max-height="320">
+          <el-table-column prop="line" label="行号" width="70" />
+          <el-table-column label="结果" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="importActionMeta[row.action]?.type || 'info'">
+                {{ importActionMeta[row.action]?.text || row.action }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="120" />
+          <el-table-column prop="address" label="地址" min-width="120" />
+          <el-table-column prop="reason" label="说明" min-width="240" show-overflow-tooltip />
+        </el-table>
+      </template>
+
+      <template #footer>
+        <el-button @click="importVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>

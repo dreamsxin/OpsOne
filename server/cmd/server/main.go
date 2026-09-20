@@ -353,6 +353,10 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/exec/scripts/:id/precheck", h.PrecheckScript)
 		auth.POST("/exec/scripts/:id/render", h.RenderScript)
 		auth.POST("/exec/scripts/:id/run", middleware.RequirePerm("exec:run"), h.RunScript)
+
+		auth.GET("/hosts/export", h.ExportHosts)
+		auth.GET("/hosts/import-template", h.HostImportTemplate)
+		auth.POST("/hosts/import", middleware.RequirePerm("host:create"), h.ImportHosts)
 	}
 
 	return r

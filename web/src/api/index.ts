@@ -1,4 +1,4 @@
-import { request, TOKEN_KEY, type PageData } from './request'
+import http, { request, TOKEN_KEY, type ApiBody, type PageData } from './request'
 
 
 // ---------- 类型 ----------
@@ -1442,6 +1442,52 @@ export const updateEventStatus = (
   })
 export const deleteEvent = (id: number) =>
   request({ url: `/monitor/events/${id}`, method: 'DELETE' })
+
+// ---------- 主机导入导出 ----------
+
+export interface HostImportRow {
+  line: number
+  name: string
+  address: string
+  action: 'create' | 'update' | 'skip'
+  reason: string
+}
+
+export interface HostImportResult {
+  dryRun: boolean
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  rows: HostImportRow[]
+  detail: string
+}
+
+/** 导入主机 CSV。dryRun=true 时只校验不写入 */
+export async function importHosts(file: File, dryRun: boolean): Promise<HostImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await http.post<ApiBody<HostImportResult>>(`/hosts/import?dryRun=${dryRun}`, form)
+  if (res.data.code !== 0) {
+    throw new Error(res.data.msg)
+  }
+  return res.data.data
+}
+
+/** 下载 CSV 等文件：鉴权头不能走 <a href>，这里取 blob 再触发保存 */
+async function downloadBlob(url: string, filename: string) {
+  const res = await http.get(url, { responseType: 'blob' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(res.data as Blob)
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+export const downloadHostTemplate = () =>
+  downloadBlob('/hosts/import-template', 'host-import-template.csv')
+export const exportHostsCSV = (env?: string) =>
+  downloadBlob(env ? `/hosts/export?env=${env}` : '/hosts/export', 'hosts.csv')
 
 // ---------- 脚本库 ----------
 
