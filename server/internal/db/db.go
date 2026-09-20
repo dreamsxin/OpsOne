@@ -42,6 +42,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
+		&model.KubeCluster{},
 	)
 }
 
@@ -104,8 +105,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 容器平台 ----------
 		{ID: 300, Name: "Kubernetes", Title: "容器平台", Path: "/kubernetes", Icon: "Ship", Sort: 40},
-		{ID: 301, ParentID: 300, Name: "K8sSource", Title: "集群接入", Path: "/kubernetes/source", Component: todo, Icon: "Connection", Sort: 1},
-		{ID: 302, ParentID: 300, Name: "K8sWorkload", Title: "工作负载", Path: "/kubernetes/workload", Component: todo, Icon: "Grid", Sort: 2},
+		{ID: 301, ParentID: 300, Name: "K8sSource", Title: "集群接入", Path: "/kubernetes/source", Component: "/kubernetes/source/index", Icon: "Connection", Sort: 1},
+		{ID: 305, ParentID: 301, Title: "维护集群", Type: "button", AuthCode: "kube:manage", Sort: 1},
+		{ID: 302, ParentID: 300, Name: "K8sWorkload", Title: "工作负载", Path: "/kubernetes/workload", Component: "/kubernetes/workload/index", Icon: "Grid", Sort: 2},
 		{ID: 303, ParentID: 300, Name: "K8sResource", Title: "资源管理", Path: "/kubernetes/resource", Component: todo, Icon: "Files", Sort: 3},
 		{ID: 304, ParentID: 300, Name: "K8sForward", Title: "服务转发", Path: "/kubernetes/forward", Component: todo, Icon: "Share", Sort: 4},
 

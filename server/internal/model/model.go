@@ -918,3 +918,32 @@ type DetectionRule struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// KubeCluster 纳管的 Kubernetes 集群。
+//
+// 平台只存 kubeconfig 全文并按需发起只读 REST 调用，不在本地缓存集群资源 ——
+// 看到的永远是集群当下的状态，不存在「平台里还是旧的」这种问题。
+type KubeCluster struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Kubeconfig 全文，含 CA 与客户端私钥，等同于集群管理员凭据，不出接口
+	Kubeconfig string `gorm:"type:text" json:"-"`
+	// ContextName 选用的上下文，留空表示用 kubeconfig 的 current-context
+	ContextName string `gorm:"size:64" json:"contextName"`
+	// Server 由 kubeconfig 解析回填，只为展示
+	Server string `gorm:"size:255" json:"server"`
+
+	// 以下由连通性检查回填，不接受手工录入
+	Version     string     `gorm:"size:64" json:"version"`
+	Status      string     `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | degraded | error
+	NodeTotal   int        `json:"nodeTotal"`
+	NodeReady   int        `json:"nodeReady"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastError   string     `gorm:"size:500" json:"lastError"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

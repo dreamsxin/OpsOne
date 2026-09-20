@@ -41,10 +41,12 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 ## 容器平台（ID 300-399）
 
-- [ ] 集群接入 `/kubernetes/source` — 多集群 kubeconfig 纳管、健康检查
-- [ ] 工作负载 `/kubernetes/workload` — Deployment/StatefulSet/Pod 列表与事件
+- [x] 集群接入 `/kubernetes/source` — 粘贴 kubeconfig 纳管（解析上下文后选用哪个）、连通性与版本检查、节点就绪明细（角色/容量/kubelet/cordon）；不可达或有节点 NotReady 自动写告警并可恢复，定时检查由 `OPS_KUBE_CHECK_SPEC` 控制。**只接受内嵌凭据**，不支持路径式 kubeconfig；**kubeconfig 明文存库**，见 docs/SECURITY.md 第 16 节
+- [x] 工作负载 `/kubernetes/workload` — 按命名空间看 Deployment / StatefulSet / DaemonSet 的副本就绪情况、Pod 状态与容器异常原因、集群事件（可只看 Warning）。**纯只读**：不提供 apply / scale / delete / exec
 - [ ] 资源管理 `/kubernetes/resource` — YAML 编辑器、资源创建与保存
 - [ ] 服务转发 `/kubernetes/forward` — port-forward 通道管理
+
+> 实现方式：手写 Kubernetes REST 客户端（`server/internal/k8s`），不引入 client-go —— 当前只需要几个只读列表，不值得为此背上几十兆依赖树。后续做资源管理（YAML apply）时 API Server 也支持直接 POST/PUT `application/yaml`，同样不需要 client-go。
 
 ## 监控告警（ID 400-499）
 
@@ -124,7 +126,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 ## 建议实现顺序
 
-1. **容器平台** —— 集群接入 + 工作负载只读视图，再加 YAML 编辑
+1. **容器平台剩余项** —— 资源管理（YAML 编辑与 apply）、服务转发（port-forward）
 2. **指标 / 日志 / 链路查询** —— 需要先有 Prometheus、Loki、Jaeger 可连，否则只能做空壳
 3. **其余模块** —— 按实际需求插队
 

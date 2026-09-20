@@ -76,6 +76,14 @@ func main() {
 	} else {
 		log.Println("[detection] 定时评估未启用（OPS_DETECTION_SPEC 为空），只能手动试跑")
 	}
+	if cfg.KubeCheckSpec != "" {
+		if err := sched.AddFixed(cfg.KubeCheckSpec, h.CheckKubeClustersForSchedule); err != nil {
+			log.Fatalf("容器集群检查 cron 表达式无效(%s): %v", cfg.KubeCheckSpec, err)
+		}
+		log.Printf("[kube] 定时检查已启用: %s", cfg.KubeCheckSpec)
+	} else {
+		log.Println("[kube] 定时检查未启用（OPS_KUBE_CHECK_SPEC 为空），只能手动检查")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -343,6 +351,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.UpdateDetectionRule)
 		auth.DELETE("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.DeleteDetectionRule)
 		auth.POST("/monitor/detection-rules/:id/evaluate", middleware.RequirePerm("detection:manage"), h.EvaluateDetectionRule)
+
+		auth.POST("/kube/contexts", middleware.RequirePerm("kube:manage"), h.KubeconfigContexts)
+		auth.GET("/kube/clusters", h.ListKubeClusters)
+		auth.POST("/kube/clusters", middleware.RequirePerm("kube:manage"), h.CreateKubeCluster)
+		auth.PUT("/kube/clusters/:id", middleware.RequirePerm("kube:manage"), h.UpdateKubeCluster)
+		auth.DELETE("/kube/clusters/:id", middleware.RequirePerm("kube:manage"), h.DeleteKubeCluster)
+		auth.POST("/kube/clusters/:id/check", middleware.RequirePerm("kube:manage"), h.CheckKubeCluster)
+		auth.GET("/kube/clusters/:id/nodes", h.KubeNodes)
+		auth.GET("/kube/clusters/:id/namespaces", h.KubeNamespaces)
+		auth.GET("/kube/clusters/:id/workloads", h.KubeWorkloads)
+		auth.GET("/kube/clusters/:id/pods", h.KubePods)
+		auth.GET("/kube/clusters/:id/events", h.KubeEvents)
 
 		auth.GET("/monitor/health", h.PlatformHealth)
 

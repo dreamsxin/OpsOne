@@ -145,6 +145,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_PROBE_SPEC 为空，拨测只能手动执行"))
 	items = append(items, h.fixedTaskItem("detection", "检测规则评估", h.Cfg.DetectionSpec,
 		"OPS_DETECTION_SPEC 为空，检测规则只能手动试跑"))
+	items = append(items, h.fixedTaskItem("kube", "容器集群检查", h.Cfg.KubeCheckSpec,
+		"OPS_KUBE_CHECK_SPEC 为空，集群只能手动检查"))
 	return items
 }
 

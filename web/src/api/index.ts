@@ -1788,6 +1788,126 @@ export const evaluateDetectionRule = (id: number) =>
     method: 'POST'
   })
 
+// ---------- 容器平台 ----------
+
+export interface KubeCluster {
+  id: number
+  name: string
+  contextName: string
+  server: string
+  version: string
+  status: 'unknown' | 'healthy' | 'degraded' | 'error'
+  nodeTotal: number
+  nodeReady: number
+  lastCheckAt: string | null
+  lastError: string
+  enabled: boolean
+  remark: string
+}
+
+export interface KubeCheckResult {
+  status: string
+  detail: string
+  version?: string
+  platform?: string
+  nodeTotal?: number
+  nodeReady?: number
+}
+
+export interface KubeNode {
+  name: string
+  ready: boolean
+  roles: string[]
+  version: string
+  osImage: string
+  internalIP: string
+  cpu: string
+  memory: string
+  pods: string
+  unschedulable: boolean
+  createdAt: string
+}
+
+export interface KubeNamespace {
+  name: string
+  phase: string
+  createdAt: string
+}
+
+export interface KubeWorkload {
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet'
+  namespace: string
+  name: string
+  desired: number
+  ready: number
+  updated: number
+  available: number
+  images: string[]
+  healthy: boolean
+  createdAt: string
+}
+
+export interface KubePod {
+  namespace: string
+  name: string
+  phase: string
+  nodeName: string
+  podIP: string
+  ready: string
+  restarts: number
+  images: string[]
+  containerMsg: string
+  createdAt: string
+}
+
+export interface KubeEvent {
+  namespace: string
+  type: string
+  reason: string
+  object: string
+  message: string
+  count: number
+  lastSeen: string
+}
+
+export const listKubeClusters = () => request<KubeCluster[]>({ url: '/kube/clusters' })
+export const parseKubeconfigContexts = (kubeconfig: string) =>
+  request<{ contexts: string[]; currentContext: string }>({
+    url: '/kube/contexts',
+    method: 'POST',
+    data: { kubeconfig }
+  })
+export const createKubeCluster = (data: Record<string, any>) =>
+  request<{ cluster: KubeCluster; check: KubeCheckResult }>({
+    url: '/kube/clusters',
+    method: 'POST',
+    data
+  })
+export const updateKubeCluster = (id: number, data: Record<string, any>) =>
+  request<KubeCluster>({ url: `/kube/clusters/${id}`, method: 'PUT', data })
+export const deleteKubeCluster = (id: number) =>
+  request<{ detail: string }>({ url: `/kube/clusters/${id}`, method: 'DELETE' })
+export const checkKubeCluster = (id: number) =>
+  request<KubeCheckResult>({ url: `/kube/clusters/${id}/check`, method: 'POST' })
+export const listKubeNodes = (id: number) => request<KubeNode[]>({ url: `/kube/clusters/${id}/nodes` })
+export const listKubeNamespaces = (id: number) =>
+  request<KubeNamespace[]>({ url: `/kube/clusters/${id}/namespaces` })
+export const listKubeWorkloads = (id: number, namespace?: string) =>
+  request<{ items: KubeWorkload[]; total: number; unhealthy: number; warnings: string[] }>({
+    url: `/kube/clusters/${id}/workloads`,
+    params: namespace ? { namespace } : {}
+  })
+export const listKubePods = (id: number, namespace?: string) =>
+  request<{ items: KubePod[]; total: number; abnormal: number }>({
+    url: `/kube/clusters/${id}/pods`,
+    params: namespace ? { namespace } : {}
+  })
+export const listKubeEvents = (id: number, namespace?: string, onlyWarning?: boolean) =>
+  request<{ items: KubeEvent[]; total: number }>({
+    url: `/kube/clusters/${id}/events`,
+    params: { ...(namespace ? { namespace } : {}), ...(onlyWarning ? { onlyWarning: 'true' } : {}) }
+  })
+
 
 
 
