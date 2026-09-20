@@ -346,3 +346,17 @@ type Message struct {
 	ReadAt    *time.Time `json:"readAt"`
 	CreatedAt time.Time  `gorm:"index" json:"createdAt"`
 }
+
+// SysConfig 平台配置项。Builtin 为 true 的键由种子数据维护，不可删除只可改值。
+type SysConfig struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Group     string    `gorm:"size:32;index;default:general" json:"group"`
+	Key       string    `gorm:"size:64;uniqueIndex;not null" json:"key"`
+	Value     string    `gorm:"type:text" json:"value"`
+	Type      string    `gorm:"size:16;default:string" json:"type"` // string | int | bool | text
+	Label     string    `gorm:"size:64" json:"label"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	Builtin   bool      `gorm:"default:false" json:"builtin"`
+	UpdatedBy string    `gorm:"size:64" json:"updatedBy"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

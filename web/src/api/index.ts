@@ -341,6 +341,48 @@ export interface DataScopeDiagnosis {
   totalHosts: number
 }
 
+export interface SysConfig {
+  id: number
+  group: string
+  key: string
+  value: string
+  type: 'string' | 'int' | 'bool' | 'text'
+  label: string
+  remark: string
+  builtin: boolean
+  updatedBy: string
+  updatedAt: string
+}
+
+export interface Branding {
+  platformName: string
+  loginNotice: string
+}
+
+export interface NameCountRow {
+  name: string
+  count: number
+}
+
+export interface PersonalWorkbench {
+  profile: { username: string; nickname: string; deptId: number; lastLoginAt: string | null }
+  todo: { unreadMessages: number; firingAlerts: number; criticalAlerts: number }
+  mine: { hosts: number; cronJobs: number }
+  recentJobs: ExecJob[]
+  recentSessions: TerminalSession[]
+  cronJobList: CronJob[]
+}
+
+export interface MyResources {
+  scope: { all: boolean; deptIds: number[]; includeSelf: boolean }
+  hostStats: { total: number; online: number; offline: number; unknown: number; prod: number }
+  byEnv: NameCountRow[]
+  byDept: NameCountRow[]
+  hosts: Host[]
+  myCronJobs: number
+}
+
+
 
 export interface AuditLog {
   id: number
@@ -604,6 +646,31 @@ export const deleteDepartment = (id: number) =>
 
 export const diagnoseDataScope = (userId: number) =>
   request<DataScopeDiagnosis>({ url: `/system/data-permission/diagnose/${userId}` })
+
+// ---------- 平台配置 ----------
+
+export const getBranding = () => request<Branding>({ url: '/public/branding' })
+
+export const listConfigs = (group?: string) =>
+  request<SysConfig[]>({ url: '/system/configs', params: { group } })
+export const createConfig = (data: Record<string, any>) =>
+  request<SysConfig>({ url: '/system/configs', method: 'POST', data })
+export const updateConfigs = (items: { key: string; value: string }[]) =>
+  request<{ updated: number }>({ url: '/system/configs', method: 'PUT', data: { items } })
+export const deleteConfig = (id: number) =>
+  request({ url: `/system/configs/${id}`, method: 'DELETE' })
+
+// ---------- 个人工作台 ----------
+
+export const getPersonalWorkbench = () => request<PersonalWorkbench>({ url: '/me/workbench' })
+export const getMyResources = () => request<MyResources>({ url: '/me/resources' })
+export const listMyActivity = (params: Record<string, any>) =>
+  request<PageData<AuditLog>>({ url: '/me/activity', params })
+export const listMySessions = (params: Record<string, any>) =>
+  request<PageData<TerminalSession>>({ url: '/me/sessions', params })
+export const listMyExecJobs = (params: Record<string, any>) =>
+  request<PageData<ExecJob>>({ url: '/me/exec-jobs', params })
+
 
 
 

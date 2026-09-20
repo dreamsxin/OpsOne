@@ -3,7 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { changePassword, getMessageSummary, type MenuNode, type MessageSummary } from '@/api'
+import { changePassword, getBranding, getMessageSummary, type MenuNode, type MessageSummary } from '@/api'
+
 
 const store = useUserStore()
 const route = useRoute()
@@ -15,6 +16,20 @@ const pwdFormRef = ref<FormInstance>()
 const pwdForm = ref({ oldPassword: '', newPassword: '', confirm: '' })
 
 const summary = ref<MessageSummary>({ unread: 0, unreadAlert: 0, latest: [] })
+const platformName = ref('OpsOne 运维平台')
+
+async function loadBranding() {
+  try {
+    const branding = await getBranding()
+    if (branding.platformName) {
+      platformName.value = branding.platformName
+      document.title = branding.platformName
+    }
+  } catch {
+    // 品牌信息拿不到时保留默认名称
+  }
+}
+
 
 async function loadSummary() {
   try {
@@ -81,7 +96,11 @@ async function handleLogout() {
   router.push('/login')
 }
 
-onMounted(loadSummary)
+onMounted(() => {
+  loadSummary()
+  loadBranding()
+})
+
 </script>
 
 
@@ -99,7 +118,8 @@ onMounted(loadSummary)
           letter-spacing: 1px;
         "
       >
-        {{ collapse ? 'Ops' : 'OpsOne 运维平台' }}
+        {{ collapse ? 'Ops' : platformName }}
+
 
       </div>
       <el-menu

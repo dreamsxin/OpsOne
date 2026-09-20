@@ -18,8 +18,8 @@ import (
 	"ops-platform/server/internal/sshx"
 )
 
-// maxUploadSize 单文件上传上限，避免把平台内存与磁盘打满
-const maxUploadSize int64 = 512 << 20 // 512MB
+// defaultMaxUploadMB 上传上限缺省值，实际取值来自配置项 file.max_upload_mb
+const defaultMaxUploadMB = 512
 
 // fileEntry 目录项
 type fileEntry struct {
@@ -180,6 +180,7 @@ func (h *Handler) UploadFile(c *gin.Context) {
 		response.BadRequest(c, "未收到上传文件")
 		return
 	}
+	maxUploadSize := int64(h.configInt(CfgMaxUploadMB, defaultMaxUploadMB)) << 20
 	if header.Size > maxUploadSize {
 		response.BadRequest(c, fmt.Sprintf("文件超过上限 %d MB", maxUploadSize>>20))
 		return

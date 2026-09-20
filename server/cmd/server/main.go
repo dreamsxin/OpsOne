@@ -40,6 +40,9 @@ func main() {
 	}
 	defer sched.Stop()
 
+	// 启动时按配置清理过期录像
+	h.CleanupRecordings()
+
 	engine := buildRouter(h, cfg, gormDB)
 
 	srv := &http.Server{
@@ -72,6 +75,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 	api := r.Group("/api/v1")
 	api.POST("/auth/login", h.Login)
+	// 登录页需要的品牌信息，无需鉴权
+	api.GET("/public/branding", h.Branding)
 	// 告警接入走 Token 鉴权，供外部监控系统直接 POST
 	api.POST("/webhooks/alerts/:token", h.ReceiveAlert)
 
@@ -184,6 +189,17 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/system/departments/:id", middleware.RequirePerm("org:manage"), h.DeleteDepartment)
 
 		auth.GET("/system/data-permission/diagnose/:id", h.DiagnoseDataScope)
+
+		auth.GET("/system/configs", h.ListConfigs)
+		auth.POST("/system/configs", middleware.RequirePerm("config:manage"), h.CreateConfig)
+		auth.PUT("/system/configs", middleware.RequirePerm("config:manage"), h.UpdateConfigs)
+		auth.DELETE("/system/configs/:id", middleware.RequirePerm("config:manage"), h.DeleteConfig)
+
+		auth.GET("/me/workbench", h.PersonalWorkbench)
+		auth.GET("/me/resources", h.MyResources)
+		auth.GET("/me/activity", h.MyActivity)
+		auth.GET("/me/sessions", h.MySessions)
+		auth.GET("/me/exec-jobs", h.MyExecJobs)
 	}
 
 	return r

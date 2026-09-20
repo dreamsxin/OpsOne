@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { getBranding } from '@/api'
 
 const store = useUserStore()
 const router = useRouter()
@@ -11,6 +12,22 @@ const route = useRoute()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
 const form = ref({ username: '', password: '' })
+
+// 平台名称与登录提示来自系统配置，支持不改代码做白标
+const platformName = ref('OpsOne 一体化运维平台')
+const loginNotice = ref('')
+
+onMounted(async () => {
+  try {
+    const branding = await getBranding()
+    platformName.value = branding.platformName || platformName.value
+    loginNotice.value = branding.loginNotice || ''
+    document.title = platformName.value
+  } catch {
+    // 拿不到品牌信息时用内置默认值，不阻塞登录
+  }
+})
+
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -45,7 +62,15 @@ async function submit() {
     "
   >
     <el-card style="width: 380px; padding: 8px">
-      <h2 style="text-align: center; margin: 8px 0 20px">OpsOne 一体化运维平台</h2>
+      <h2 style="text-align: center; margin: 8px 0 20px">{{ platformName }}</h2>
+      <el-alert
+        v-if="loginNotice"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px"
+        :title="loginNotice"
+      />
+
 
       <el-form ref="formRef" :model="form" :rules="rules" @keyup.enter="submit">
         <el-form-item prop="username">

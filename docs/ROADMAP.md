@@ -10,9 +10,10 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 ## 工作台（ID 10-19）
 
 - [x] 平台总览 `/dashboard/overview` — 主机总数/在线离线、环境分布、最近执行
-- [ ] 个人工作台 `/dashboard/personal` — 我的待办、我的授权资源、近 7 日登录
-- [ ] 我的资源 `/dashboard/my-resources` — 按资源类型汇总当前用户可见资源
-- [ ] 我的活动 `/dashboard/my-activity` — 个人操作流水
+- [x] 个人工作台 `/dashboard/personal` — 待办（未读消息、未恢复告警）、我的主机与定时任务、我最近的执行与会话
+- [x] 我的资源 `/dashboard/my-resources` — 按数据范围过滤的主机统计、环境与部门分布、在线率、离线优先列表
+- [x] 我的活动 `/dashboard/my-activity` — 我的操作流水、我的终端会话、我发起的批量执行
+
 
 ## 资产管理（ID 100-199）
 
@@ -78,7 +79,8 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 ## 配置中心（ID 700-799）
 
-- [ ] 配置项 `/config/items` — 分环境键值、版本与回滚
+- [x] 配置项 `/config/items` — 分组键值、类型校验、内置键只可改值、自定义键可增删
+
 - [x] Webhook 接入 `/config/webhooks` — 接入源与 Token、推送示例、Token 重置、按指纹去重
 - [ ] 站点导航 `/config/site-navigation` — 内部站点导航大盘
 - [ ] 邮件模板 `/config/email-templates`
@@ -102,7 +104,8 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 
 - [ ] IM 集成 `/system/im` — 扫码登录、组织同步、审批事件
-- [ ] 系统配置 `/system/config` — 平台级参数
+- [x] 系统配置 `/system/config` — 内置平台参数的表单视图（平台名称、登录提示、并发、上传上限、录像保留）
+
 
 ## 消息中心（ID 900-999）
 

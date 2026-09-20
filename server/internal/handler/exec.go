@@ -14,8 +14,9 @@ import (
 	"ops-platform/server/internal/sshx"
 )
 
-// 并发上限，避免一次下发几百台把本机文件描述符打满
-const execConcurrency = 10
+// defaultExecConcurrency 并发缺省值，实际取值来自配置项 exec.concurrency，
+// 避免一次下发几百台把本机文件描述符打满
+const defaultExecConcurrency = 10
 
 // ExecRequest 一次批量执行的入参，手动下发与定时任务共用
 type ExecRequest struct {
@@ -123,7 +124,7 @@ func (h *Handler) RunExecJob(c *gin.Context) {
 
 func (h *Handler) fanOut(ctx context.Context, hosts []model.Host, command string, timeout int, jobID uint) []model.ExecResult {
 	results := make([]model.ExecResult, len(hosts))
-	sem := make(chan struct{}, execConcurrency)
+	sem := make(chan struct{}, h.configInt(CfgExecConcurr, defaultExecConcurrency))
 	var wg sync.WaitGroup
 
 	for i := range hosts {

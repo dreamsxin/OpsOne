@@ -30,7 +30,7 @@ func Migrate(g *gorm.DB) error {
 		&model.CronJob{}, &model.FileAudit{},
 		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
 		&model.NotifyRoute{}, &model.NotifyRecord{},
-		&model.Announcement{}, &model.Message{},
+		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 	)
 }
 
@@ -46,9 +46,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		// ---------- 工作台 ----------
 		{ID: 10, Name: "Workbench", Title: "工作台", Path: "/dashboard", Icon: "Odometer", Sort: 10},
 		{ID: 11, ParentID: 10, Name: "DashboardOverview", Title: "平台总览", Path: "/dashboard/overview", Component: "/dashboard/index", Icon: "PieChart", Sort: 1},
-		{ID: 12, ParentID: 10, Name: "DashboardPersonal", Title: "个人工作台", Path: "/dashboard/personal", Component: todo, Icon: "User", Sort: 2},
-		{ID: 13, ParentID: 10, Name: "MyResources", Title: "我的资源", Path: "/dashboard/my-resources", Component: todo, Icon: "Files", Sort: 3},
-		{ID: 14, ParentID: 10, Name: "MyActivity", Title: "我的活动", Path: "/dashboard/my-activity", Component: todo, Icon: "Notebook", Sort: 4},
+		{ID: 12, ParentID: 10, Name: "DashboardPersonal", Title: "个人工作台", Path: "/dashboard/personal", Component: "/dashboard/personal/index", Icon: "User", Sort: 2},
+		{ID: 13, ParentID: 10, Name: "MyResources", Title: "我的资源", Path: "/dashboard/my-resources", Component: "/dashboard/my-resources/index", Icon: "Files", Sort: 3},
+		{ID: 14, ParentID: 10, Name: "MyActivity", Title: "我的活动", Path: "/dashboard/my-activity", Component: "/dashboard/my-activity/index", Icon: "Notebook", Sort: 4},
 
 		// ---------- 资产管理 ----------
 		{ID: 100, Name: "Asset", Title: "资产管理", Path: "/asset", Icon: "Coin", Sort: 20},
@@ -124,7 +124,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 配置中心 ----------
 		{ID: 700, Name: "ConfigCenter", Title: "配置中心", Path: "/config", Icon: "Tools", Sort: 80},
-		{ID: 701, ParentID: 700, Name: "ConfigItem", Title: "配置项", Path: "/config/items", Component: todo, Icon: "Files", Sort: 1},
+		{ID: 701, ParentID: 700, Name: "ConfigItem", Title: "配置项", Path: "/config/items", Component: "/config/items/index", Icon: "Files", Sort: 1},
+		{ID: 706, ParentID: 701, Title: "维护配置", Type: "button", AuthCode: "config:manage", Sort: 1},
 		{ID: 702, ParentID: 700, Name: "WebhookInbound", Title: "Webhook 接入", Path: "/config/webhooks", Component: "/config/webhooks/index", Icon: "Link", Sort: 2},
 		{ID: 705, ParentID: 702, Title: "维护接入源", Type: "button", AuthCode: "source:manage", Sort: 1},
 		{ID: 703, ParentID: 700, Name: "SiteNavigation", Title: "站点导航", Path: "/config/site-navigation", Component: todo, Icon: "Compass", Sort: 3},
@@ -150,7 +151,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 814, ParentID: 800, Name: "Announcement", Title: "公告管理", Path: "/system/announcement", Component: "/system/announcement/index", Icon: "Bell", Sort: 10},
 		{ID: 824, ParentID: 814, Title: "维护与发布", Type: "button", AuthCode: "announcement:manage", Sort: 1},
 		{ID: 815, ParentID: 800, Name: "ImIntegration", Title: "IM 集成", Path: "/system/im", Component: todo, Icon: "ChatDotRound", Sort: 11},
-		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: todo, Icon: "Tools", Sort: 12},
+		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: "/system/config/index", Icon: "Tools", Sort: 12},
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},
 		{ID: 822, ParentID: 800, Name: "AuditLog", Title: "操作审计", Path: "/system/audit", Component: "/system/audit/index", Icon: "Document", Sort: 14},
@@ -236,7 +237,44 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		return err
 	}
 
-	return seedCommandRules(g)
+	if err := seedCommandRules(g); err != nil {
+		return err
+	}
+	return seedSysConfigs(g)
+}
+
+// seedSysConfigs 内置配置项，只在键不存在时写入，用户改过的值不会被覆盖
+func seedSysConfigs(g *gorm.DB) error {
+	configs := []model.SysConfig{
+		{Group: "platform", Key: "platform.name", Value: "OpsOne 一体化运维平台", Type: "string", Label: "平台名称", Remark: "显示在登录页与顶栏", Builtin: true},
+		{Group: "platform", Key: "platform.login_notice", Value: "", Type: "text", Label: "登录页公告", Remark: "留空则不展示", Builtin: true},
+		{Group: "execute", Key: "exec.concurrency", Value: "10", Type: "int", Label: "批量执行并发数", Remark: "单个作业同时连接的主机数上限", Builtin: true},
+		{Group: "execute", Key: "file.max_upload_mb", Value: "512", Type: "int", Label: "上传文件大小上限(MB)", Remark: "文件管理单文件上限", Builtin: true},
+		{Group: "bastion", Key: "session.record_keep_days", Value: "0", Type: "int", Label: "会话录像保留天数", Remark: "0 表示永久保留；启动时清理过期录像", Builtin: true},
+	}
+
+	for i := range configs {
+		cfg := configs[i]
+		var exist model.SysConfig
+		err := g.Where("`key` = ?", cfg.Key).First(&exist).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := g.Create(&cfg).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		// 已存在时只补齐说明性字段，取值保持用户配置
+		if err := g.Model(&exist).Updates(map[string]any{
+			"group": cfg.Group, "type": cfg.Type, "label": cfg.Label,
+			"remark": cfg.Remark, "builtin": true,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedCommandRules 内置高危命令规则，仅在对应 ID 不存在时写入，用户改动不会被覆盖
