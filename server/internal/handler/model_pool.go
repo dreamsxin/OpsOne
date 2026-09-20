@@ -597,42 +597,41 @@ func (h *Handler) pickUpstreams(alias string, upstreamID uint) ([]model.ModelUps
 	return list, nil
 }
 
-// ChatCompletion 网关入口：把请求转发到池子里的上游，并把用量落库。
-func (h *Handler) ChatCompletion(c *gin.Context) {
-	var req chatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误")
-		return
-	}
-	if err := req.normalize(); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
+// chatOutcome 一次成功派发的结果
+type chatOutcome struct {
+	Upstream model.ModelUpstream
+	Result   *callResult
+	Record   model.ModelCall
+	// Attempts 试过的每个上游及其结果，失败的也在里面
+	Attempts []gin.H
+}
 
-	caller := "api"
-	if req.UpstreamID > 0 || strings.TrimSpace(req.Caller) == "console" {
-		caller = "console"
-	}
+// dispatchChat 把请求派发到池子里的上游，并把用量落库。
+//
+// 网关接口与 Agent 运行共用这一条路径：否则 Agent 的调用不进流水，
+// 用量与成本页就会少算一块 —— 那是最难查的账。
+func (h *Handler) dispatchChat(ctx context.Context, req *chatRequest, caller string,
+	operator *model.User, clientIP string) (*chatOutcome, error) {
 	candidates, err := h.pickUpstreams(req.Model, req.UpstreamID)
 	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
+		return nil, err
 	}
 
-	operator := middleware.CurrentUser(c)
 	attempts := make([]gin.H, 0, modelMaxAttempts)
 	failures := make([]string, 0, modelMaxAttempts)
 	for i, upstream := range candidates {
 		if i >= modelMaxAttempts {
 			break
 		}
-		result, callErr := callUpstream(c.Request.Context(), &upstream, &req)
+		result, callErr := callUpstream(ctx, &upstream, req)
 
 		record := model.ModelCall{
 			UpstreamID: upstream.ID, UpstreamName: upstream.Name, Alias: upstream.Alias,
 			Provider: upstream.Provider, Model: upstream.Model, Caller: caller,
-			UserID: operator.ID, Username: operator.Username, ClientIP: c.ClientIP(),
-			Retried: i > 0,
+			ClientIP: clientIP, Retried: i > 0,
+		}
+		if operator != nil {
+			record.UserID, record.Username = operator.ID, operator.Username
 		}
 		if callErr != nil {
 			record.CallStatus = "failed"
@@ -659,34 +658,65 @@ func (h *Handler) ChatCompletion(c *gin.Context) {
 			// 落库失败不该影响调用方拿到回复，但要能在日志里查到
 			log.Printf("[ai] 调用流水落库失败: %v", err)
 		}
-
 		attempts = append(attempts, gin.H{
 			"upstreamId": upstream.ID, "upstreamName": upstream.Name, "status": "success",
 		})
-		response.OK(c, gin.H{
-			"content":      result.Content,
-			"alias":        upstream.Alias,
-			"model":        upstream.Model,
-			"provider":     upstream.Provider,
-			"upstreamId":   upstream.ID,
-			"upstreamName": upstream.Name,
-			"finishReason": result.FinishReason,
-			"usage": gin.H{
-				"promptTokens":     result.Usage.PromptTokens,
-				"completionTokens": result.Usage.CompletionTokens,
-				"totalTokens":      result.Usage.TotalTokens,
-				"missing":          result.UsageMissing,
-			},
-			"cost":      record.Cost,
-			"latencyMs": result.LatencyMs,
-			"callId":    record.ID,
-			"attempts":  attempts,
-		})
-		return
+		return &chatOutcome{
+			Upstream: upstream, Result: result, Record: record, Attempts: attempts,
+		}, nil
 	}
 
 	// 全军覆没：把每个上游的原话都带上，否则调用方只知道「失败了」
-	response.Error(c, "上游全部调用失败 —— "+strings.Join(failures, "；"))
+	return nil, fmt.Errorf("上游全部调用失败 —— %s", strings.Join(failures, "；"))
+}
+
+// ChatCompletion 网关入口：把请求转发到池子里的上游，并把用量落库。
+func (h *Handler) ChatCompletion(c *gin.Context) {
+	var req chatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	if err := req.normalize(); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	caller := "api"
+	if req.UpstreamID > 0 || strings.TrimSpace(req.Caller) == "console" {
+		caller = "console"
+	}
+	outcome, err := h.dispatchChat(c.Request.Context(), &req, caller,
+		middleware.CurrentUser(c), c.ClientIP())
+	if err != nil {
+		// 挑不到上游是配置问题（400），上游全挂是运行时失败（500）
+		if strings.Contains(err.Error(), "上游全部调用失败") {
+			response.Error(c, err.Error())
+		} else {
+			response.BadRequest(c, err.Error())
+		}
+		return
+	}
+
+	response.OK(c, gin.H{
+		"content":      outcome.Result.Content,
+		"alias":        outcome.Upstream.Alias,
+		"model":        outcome.Upstream.Model,
+		"provider":     outcome.Upstream.Provider,
+		"upstreamId":   outcome.Upstream.ID,
+		"upstreamName": outcome.Upstream.Name,
+		"finishReason": outcome.Result.FinishReason,
+		"usage": gin.H{
+			"promptTokens":     outcome.Result.Usage.PromptTokens,
+			"completionTokens": outcome.Result.Usage.CompletionTokens,
+			"totalTokens":      outcome.Result.Usage.TotalTokens,
+			"missing":          outcome.Result.UsageMissing,
+		},
+		"cost":      outcome.Record.Cost,
+		"latencyMs": outcome.Result.LatencyMs,
+		"callId":    outcome.Record.ID,
+		"attempts":  outcome.Attempts,
+	})
 }
 
 // ---------- 调用流水 ----------

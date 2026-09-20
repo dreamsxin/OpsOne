@@ -25,6 +25,7 @@ const (
 	CfgRetentionSession      = "retention.session_days"
 	CfgRetentionAlert        = "retention.alert_days"
 	CfgRetentionModelCall    = "retention.model_call_days"
+	CfgRetentionAgentRun     = "retention.agent_run_days"
 )
 
 // retentionTarget 一类可清理的数据
@@ -215,6 +216,20 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.ModelCall{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionAgentRun, label: "Agent 运行记录",
+		note:      "每次运行的上下文统计与模型给出的结论；删了结论就找不回来了",
+		irreverse: true,
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.AgentRun{}).Count(&total)
+			h.DB.Model(&model.AgentRun{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.AgentRun{}).RowsAffected
 		},
 	},
 }

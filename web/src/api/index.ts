@@ -2559,6 +2559,78 @@ export const exportModelCallsCSV = (params: Record<string, any>) => {
   return downloadBlob(`/ai/calls/export${query ? `?${query}` : ''}`, 'model-calls.csv')
 }
 
+// ---------- Agent ----------
+
+export interface AgentConfig {
+  id: number
+  name: string
+  alias: string
+  dataSource: 'none' | 'alert' | 'host_metric' | 'exec_job' | 'session_command'
+  maxItems: number
+  systemPrompt: string
+  promptTemplate: string
+  temperature: number
+  maxTokens: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+/** 数据来源的元信息：needsTarget 决定界面要不要让人选目标对象 */
+export interface AgentDataSource {
+  key: string
+  label: string
+  needsTarget: boolean
+}
+
+export interface AgentRun {
+  id: number
+  agentId: number
+  agentName: string
+  alias: string
+  dataSource: string
+  targetId: number
+  input: string
+  output: string
+  contextItems: number
+  contextChars: number
+  contextTruncated: boolean
+  callId: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cost: number
+  latencyMs: number
+  status: 'success' | 'failed'
+  errorMsg: string
+  username: string
+  createdAt: string
+}
+
+export const listAgentConfigs = (params?: Record<string, any>) =>
+  request<{ list: AgentConfig[]; dataSources: AgentDataSource[] }>({ url: '/ai/agents', params })
+export const createAgentConfig = (data: Record<string, any>) =>
+  request<AgentConfig>({ url: '/ai/agents', method: 'POST', data })
+export const updateAgentConfig = (id: number, data: Record<string, any>) =>
+  request<AgentConfig>({ url: `/ai/agents/${id}`, method: 'PUT', data })
+export const deleteAgentConfig = (id: number) =>
+  request({ url: `/ai/agents/${id}`, method: 'DELETE' })
+/** 运行 Agent：拼平台数据 → 调模型 → 存结论 */
+export const runAgent = (
+  id: number,
+  data: { targetId?: number; severity?: string; input?: string }
+) =>
+  request<{
+    run: AgentRun
+    prompt: string
+    upstreamName: string
+    model: string
+    contextSummary: string
+  }>({ url: `/ai/agents/${id}/run`, method: 'POST', data })
+export const listAgentRuns = (params: Record<string, any>) =>
+  request<PageData<AgentRun>>({ url: '/ai/agent-runs', params })
+export const getAgentRun = (id: number) => request<AgentRun>({ url: `/ai/agent-runs/${id}` })
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

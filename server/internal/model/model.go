@@ -1360,3 +1360,66 @@ type ModelCall struct {
 	Retried   bool      `gorm:"default:false" json:"retried"`
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
+
+// AgentConfig 一个「看平台数据、给结论」的 Agent。
+//
+// 这里的 Agent 是只读的分析器，不是执行器：它能读平台自己的数据（告警、主机指标、
+// 执行结果、会话命令），拼成上下文交给模型，拿回一段文字。**它不会执行任何命令、
+// 不会改任何东西** —— 在一个能连生产机器的运维平台里放一个会自己动手的东西，
+// 收益远不及风险。
+type AgentConfig struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Alias 用模型资源池里的哪个逻辑模型（不是上游真实模型名）
+	Alias string `gorm:"size:64;not null" json:"alias"`
+	// DataSource 上下文取自哪类平台数据：none | alert | host_metric | exec_job | session_command
+	DataSource string `gorm:"size:24;default:none" json:"dataSource"`
+	// MaxItems 上下文最多取多少条，防止把几千条记录塞进提示词
+	MaxItems int `gorm:"default:20" json:"maxItems"`
+	// SystemPrompt 角色设定，作为 system 消息发出去
+	SystemPrompt string `gorm:"type:text" json:"systemPrompt"`
+	// PromptTemplate 用户消息模板，text/template 语法，可用 {{.context}} 与 {{.input}}
+	PromptTemplate string  `gorm:"type:text" json:"promptTemplate"`
+	Temperature    float64 `gorm:"default:0" json:"temperature"`
+	MaxTokens      int     `gorm:"default:800" json:"maxTokens"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AgentRun 一次 Agent 运行的记录。
+//
+// 与网关的调用流水不同，这里**要存正文**：输入的是平台自己的数据、输出的是分析结论，
+// 存下来才能回看「上次这条告警是怎么判的」。网关代理的那些调用属于业务数据，仍然不存。
+type AgentRun struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	AgentID   uint   `gorm:"index;default:0" json:"agentId"`
+	AgentName string `gorm:"size:64" json:"agentName"`
+	Alias     string `gorm:"size:64" json:"alias"`
+	// DataSource / TargetID 这次实际用的上下文来源与目标对象（主机、作业、会话的 ID）
+	DataSource string `gorm:"size:24" json:"dataSource"`
+	TargetID   uint   `gorm:"default:0" json:"targetId"`
+	// Input 运行时补充的说明，Output 模型给出的结论
+	Input  string `gorm:"type:text" json:"input"`
+	Output string `gorm:"type:text" json:"output"`
+	// ContextItems / ContextChars 这次喂进去了多少条、多少字符，便于判断上下文是否被截断
+	ContextItems int `json:"contextItems"`
+	ContextChars int `json:"contextChars"`
+	// ContextTruncated 上下文条数撞到 MaxItems 上限，说明还有更多数据没进提示词
+	ContextTruncated bool `gorm:"default:false" json:"contextTruncated"`
+	// CallID 对应 model_calls 里的那一条，用量与成本在那边算
+	CallID           uint      `gorm:"index;default:0" json:"callId"`
+	PromptTokens     int       `json:"promptTokens"`
+	CompletionTokens int       `json:"completionTokens"`
+	TotalTokens      int       `json:"totalTokens"`
+	Cost             float64   `json:"cost"`
+	LatencyMs        int64     `json:"latencyMs"`
+	RunStatus        string    `gorm:"size:16;index" json:"status"` // success | failed
+	ErrorMsg         string    `gorm:"size:500" json:"errorMsg"`
+	UserID           uint      `gorm:"index;default:0" json:"userId"`
+	Username         string    `gorm:"size:64" json:"username"`
+	CreatedAt        time.Time `gorm:"index" json:"createdAt"`
+}

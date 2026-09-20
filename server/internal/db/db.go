@@ -47,7 +47,7 @@ func Migrate(g *gorm.DB) error {
 		&model.OnCallSchedule{}, &model.OnCallOverride{}, &model.AlertEscalation{},
 		&model.ExposureTarget{}, &model.ExposureScan{},
 		&model.MetricSource{}, &model.SavedMetricQuery{}, &model.LogSource{}, &model.TraceSource{},
-		&model.ModelUpstream{}, &model.ModelCall{},
+		&model.ModelUpstream{}, &model.ModelCall{}, &model.AgentConfig{}, &model.AgentRun{},
 	)
 }
 
@@ -168,8 +168,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 605, ParentID: 601, Title: "维护上游", Type: "button", AuthCode: "model:manage", Sort: 1},
 		{ID: 606, ParentID: 601, Title: "调用模型", Type: "button", AuthCode: "model:call", Sort: 2},
 		{ID: 602, ParentID: 600, Name: "ModelUsage", Title: "用量与成本", Path: "/ai/model-usage", Component: "/ai/model-usage/index", Icon: "Money", Sort: 2},
-		{ID: 603, ParentID: 600, Name: "AgentRuns", Title: "Agent 运行", Path: "/ai/agent-runs", Component: todo, Icon: "Cpu", Sort: 3},
-		{ID: 604, ParentID: 600, Name: "AgentConfig", Title: "Agent 配置", Path: "/ai/agent-config", Component: todo, Icon: "SetUp", Sort: 4},
+		{ID: 603, ParentID: 600, Name: "AgentRuns", Title: "Agent 运行", Path: "/ai/agent-runs", Component: "/ai/agent-runs/index", Icon: "Cpu", Sort: 3},
+		{ID: 604, ParentID: 600, Name: "AgentConfig", Title: "Agent 配置", Path: "/ai/agent-config", Component: "/ai/agent-config/index", Icon: "SetUp", Sort: 4},
+		{ID: 607, ParentID: 604, Title: "维护 Agent", Type: "button", AuthCode: "agent:manage", Sort: 1},
+		{ID: 608, ParentID: 604, Title: "运行 Agent", Type: "button", AuthCode: "agent:run", Sort: 2},
 
 		// ---------- 配置中心 ----------
 		{ID: 700, Name: "ConfigCenter", Title: "配置中心", Path: "/config", Icon: "Tools", Sort: 80},
@@ -390,6 +392,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.session_days", Value: "180", Type: "int", Label: "会话记录保留天数", Remark: "删除会话流水会连带命令明细与录像文件；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.alert_days", Value: "180", Type: "int", Label: "已恢复告警保留天数", Remark: "只清理已恢复的告警，未恢复的不动；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.model_call_days", Value: "365", Type: "int", Label: "模型调用流水保留天数", Remark: "AI 网关的用量与成本就从这张表算；删了就算不出那段时间的账。0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.agent_run_days", Value: "365", Type: "int", Label: "Agent 运行记录保留天数", Remark: "含模型给出的结论正文；删了结论就找不回来了。0 表示永久保留", Builtin: true},
 	}
 
 	for i := range configs {

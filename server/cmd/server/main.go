@@ -430,6 +430,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/ai/calls/export", h.ExportModelCalls)
 		auth.GET("/ai/usage", h.ModelUsage)
 
+		auth.GET("/ai/agents", h.ListAgentConfigs)
+		auth.POST("/ai/agents", middleware.RequirePerm("agent:manage"), h.CreateAgentConfig)
+		auth.PUT("/ai/agents/:id", middleware.RequirePerm("agent:manage"), h.UpdateAgentConfig)
+		auth.DELETE("/ai/agents/:id", middleware.RequirePerm("agent:manage"), h.DeleteAgentConfig)
+		auth.POST("/ai/agents/:id/run", middleware.RequirePerm("agent:run"), h.RunAgent)
+		auth.GET("/ai/agent-runs", h.ListAgentRuns)
+		auth.GET("/ai/agent-runs/:id", h.GetAgentRun)
+
 		auth.GET("/monitor/health", h.PlatformHealth)
 
 		auth.GET("/monitor/probes", h.ListProbes)
