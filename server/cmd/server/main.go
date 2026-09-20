@@ -439,6 +439,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/metrics/saved", middleware.RequirePerm("metric:manage"), h.CreateSavedMetricQuery)
 		auth.DELETE("/monitor/metrics/saved/:id", middleware.RequirePerm("metric:manage"), h.DeleteSavedMetricQuery)
 
+		auth.GET("/monitor/log-sources", h.ListLogSources)
+		auth.POST("/monitor/log-sources", middleware.RequirePerm("log:manage"), h.CreateLogSource)
+		auth.PUT("/monitor/log-sources/:id", middleware.RequirePerm("log:manage"), h.UpdateLogSource)
+		auth.DELETE("/monitor/log-sources/:id", middleware.RequirePerm("log:manage"), h.DeleteLogSource)
+		auth.POST("/monitor/log-sources/:id/check", middleware.RequirePerm("log:manage"), h.CheckLogSource)
+		auth.GET("/monitor/logs/query", h.QueryLogs)
+		auth.GET("/monitor/logs/labels", h.ListLogLabels)
+
 		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
 		auth.GET("/monitor/aggregation/overlaps", h.DetectAggregationOverlaps)
 		auth.GET("/monitor/aggregation", h.ListAggregationPolicies)

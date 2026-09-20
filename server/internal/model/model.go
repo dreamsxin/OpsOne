@@ -1145,6 +1145,36 @@ type MetricSource struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// LogSource 日志数据源（目前只支持 Loki 的 HTTP API）。
+//
+// 和指标一样：平台不存日志，只做查询入口。日志量级更大，复制一份既贵又没用。
+type LogSource struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	Type string `gorm:"size:16;default:loki" json:"type"`
+	// BaseURL Loki 根地址，例如 http://loki:3100（不含 /loki/api/...）
+	BaseURL string `gorm:"size:255;not null" json:"baseUrl"`
+	// Tenant 多租户 Loki 的 X-Scope-OrgID，单机模式留空
+	Tenant      string `gorm:"size:64" json:"tenant"`
+	HeaderKey   string `gorm:"size:64" json:"headerKey"`
+	HeaderValue string `gorm:"size:255" json:"-"`
+	TimeoutSec  int    `gorm:"default:30" json:"timeoutSec"`
+	IsDefault   bool   `gorm:"default:false" json:"isDefault"`
+
+	// 以下由连通性检查回填
+	Status string `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
+	// LabelCount 最近一小时的标签数，给人一个「这个源里有没有东西」的量感
+	LabelCount  int        `json:"labelCount"`
+	LastError   string     `gorm:"size:500" json:"lastError"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // SavedMetricQuery 常用查询。排查时反复敲同一串 PromQL 很费劲，存下来点一下就行。
 type SavedMetricQuery struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`

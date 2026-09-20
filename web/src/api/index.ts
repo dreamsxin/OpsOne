@@ -1386,6 +1386,69 @@ export const createSavedMetricQuery = (data: Record<string, any>) =>
 export const deleteSavedMetricQuery = (id: number) =>
   request({ url: `/monitor/metrics/saved/${id}`, method: 'DELETE' })
 
+// ---------- 日志查询 ----------
+
+export interface LogSource {
+  id: number
+  name: string
+  type: string
+  baseUrl: string
+  tenant: string
+  headerKey: string
+  timeoutSec: number
+  isDefault: boolean
+  status: 'unknown' | 'healthy' | 'error'
+  labelCount: number
+  lastError: string
+  lastCheckAt: string | null
+  enabled: boolean
+  remark: string
+}
+
+export interface LogRow {
+  at: number
+  nano: string
+  line: string
+  labels: Record<string, string>
+  stream: string
+  truncated: boolean
+}
+
+export interface LogQueryResult {
+  rows: LogRow[]
+  total: number
+  truncated: boolean
+  streams: number
+  limit: number
+  direction: string
+  start: string
+  end: string
+  costMs: number
+  linesProcessed: number
+  bytesProcessed: number
+}
+
+export const listLogSources = () => request<LogSource[]>({ url: '/monitor/log-sources' })
+export const createLogSource = (data: Record<string, any>) =>
+  request<{ source: LogSource; check: Record<string, any> }>({
+    url: '/monitor/log-sources',
+    method: 'POST',
+    data
+  })
+export const updateLogSource = (id: number, data: Record<string, any>) =>
+  request<LogSource>({ url: `/monitor/log-sources/${id}`, method: 'PUT', data })
+export const deleteLogSource = (id: number) =>
+  request({ url: `/monitor/log-sources/${id}`, method: 'DELETE' })
+export const checkLogSource = (id: number) =>
+  request<Record<string, any>>({ url: `/monitor/log-sources/${id}/check`, method: 'POST' })
+export const queryLogs = (params: Record<string, any>) =>
+  request<LogQueryResult>({ url: '/monitor/logs/query', params })
+export const listLogLabels = (params: Record<string, any>) =>
+  request<{ values: string[]; total: number; truncated: boolean }>({
+    url: '/monitor/logs/labels',
+    params
+  })
+
 // ---------- 暴露面监测 ----------
 
 export interface ExposureTarget {
