@@ -119,6 +119,16 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 		return
 	}
 
+	if channel.Type == "email" {
+		if err := h.sendMail(channel, alertMailVars(alert)); err != nil {
+			record.Status = "failed"
+			record.ErrorMsg = truncate(err.Error(), 240)
+		}
+		record.CostMs = time.Since(start).Milliseconds()
+		_ = h.DB.Create(&record).Error
+		return
+	}
+
 	status, err := postJSON(channel, alertMessage(alert))
 	record.HTTPStatus = status
 	record.CostMs = time.Since(start).Milliseconds()
@@ -193,13 +203,15 @@ func parseIDList(raw string) []uint {
 // ---------- 通知渠道 ----------
 
 type channelReq struct {
-	Name        string `json:"name" binding:"required"`
-	Type        string `json:"type"`
-	URL         string `json:"url"`
-	HeaderKey   string `json:"headerKey"`
-	HeaderValue string `json:"headerValue"`
-	Remark      string `json:"remark"`
-	Enabled     *bool  `json:"enabled"`
+	Name         string `json:"name" binding:"required"`
+	Type         string `json:"type"`
+	URL          string `json:"url"`
+	HeaderKey    string `json:"headerKey"`
+	HeaderValue  string `json:"headerValue"`
+	Recipients   string `json:"recipients"`
+	TemplateCode string `json:"templateCode"`
+	Remark       string `json:"remark"`
+	Enabled      *bool  `json:"enabled"`
 }
 
 func (h *Handler) ListNotifyChannels(c *gin.Context) {
@@ -222,10 +234,15 @@ func (h *Handler) CreateNotifyChannel(c *gin.Context) {
 		response.BadRequest(c, "webhook 渠道必须填写 URL")
 		return
 	}
+	if channelType == "email" && strings.TrimSpace(req.Recipients) == "" {
+		response.BadRequest(c, "email 渠道必须填写收件人")
+		return
+	}
 
 	channel := model.NotifyChannel{
 		Name: req.Name, Type: channelType, URL: req.URL,
 		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
+		Recipients: req.Recipients, TemplateCode: req.TemplateCode,
 		Remark: req.Remark, Enabled: true,
 	}
 	if req.Enabled != nil {
@@ -252,6 +269,7 @@ func (h *Handler) UpdateNotifyChannel(c *gin.Context) {
 
 	channel.Name, channel.Type = req.Name, normalizeChannelType(req.Type)
 	channel.URL, channel.HeaderKey, channel.Remark = req.URL, req.HeaderKey, req.Remark
+	channel.Recipients, channel.TemplateCode = req.Recipients, req.TemplateCode
 	if req.HeaderValue != "" {
 		channel.HeaderValue = req.HeaderValue // 留空表示不修改
 	}
@@ -297,6 +315,23 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 		return
 	}
 
+	if channel.Type == "email" {
+		start := time.Now()
+		vars := sampleAlertVars()
+		vars["title"] = "OpsOne 测试邮件"
+		vars["summary"] = "这是一封用于验证 SMTP 配置与模板渲染的测试邮件"
+		if err := h.sendMail(channel, vars); err != nil {
+			response.OK(c, gin.H{
+				"ok": false, "detail": err.Error(), "costMs": time.Since(start).Milliseconds(),
+			})
+			return
+		}
+		response.OK(c, gin.H{
+			"ok": true, "detail": "已投递到 SMTP 服务器", "costMs": time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
 	sample := map[string]any{
 		"alertId": 0, "title": "OpsOne 测试告警", "summary": "这是一条用于验证渠道连通性的样例消息",
 		"severity": "info", "status": "firing", "source": "channel-test",
@@ -318,10 +353,12 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 }
 
 func normalizeChannelType(t string) string {
-	if t == "silent" {
-		return "silent"
+	switch t {
+	case "silent", "email":
+		return t
+	default:
+		return "webhook"
 	}
-	return "webhook"
 }
 
 // ---------- 通知路由 ----------

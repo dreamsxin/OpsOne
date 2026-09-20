@@ -7,7 +7,6 @@ import (
 	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"ops-platform/server/internal/model"
@@ -32,6 +31,7 @@ func Migrate(g *gorm.DB) error {
 		&model.NotifyRoute{}, &model.NotifyRecord{},
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
+		&model.SiteLink{}, &model.EmailTemplate{},
 	)
 }
 
@@ -132,8 +132,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 706, ParentID: 701, Title: "维护配置", Type: "button", AuthCode: "config:manage", Sort: 1},
 		{ID: 702, ParentID: 700, Name: "WebhookInbound", Title: "Webhook 接入", Path: "/config/webhooks", Component: "/config/webhooks/index", Icon: "Link", Sort: 2},
 		{ID: 705, ParentID: 702, Title: "维护接入源", Type: "button", AuthCode: "source:manage", Sort: 1},
-		{ID: 703, ParentID: 700, Name: "SiteNavigation", Title: "站点导航", Path: "/config/site-navigation", Component: todo, Icon: "Compass", Sort: 3},
-		{ID: 704, ParentID: 700, Name: "EmailTemplate", Title: "邮件模板", Path: "/config/email-templates", Component: todo, Icon: "Message", Sort: 4},
+		{ID: 703, ParentID: 700, Name: "SiteNavigation", Title: "站点导航", Path: "/config/site-navigation", Component: "/config/site-navigation/index", Icon: "Compass", Sort: 3},
+		{ID: 704, ParentID: 700, Name: "EmailTemplate", Title: "邮件模板", Path: "/config/email-templates", Component: "/config/email-templates/index", Icon: "Message", Sort: 4},
 
 		// ---------- 系统管理 ----------
 		{ID: 800, Name: "System", Title: "系统管理", Path: "/system", Icon: "Setting", Sort: 90},
@@ -146,7 +146,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 807, ParentID: 800, Name: "SysDepartment", Title: "部门管理", Path: "/system/department", Component: "/system/department/index", Icon: "OfficeBuilding", Sort: 3},
 		{ID: 825, ParentID: 807, Title: "维护组织", Type: "button", AuthCode: "org:manage", Sort: 1},
 		{ID: 808, ParentID: 800, Name: "SysCompany", Title: "公司管理", Path: "/system/company", Component: "/system/company/index", Icon: "OfficeBuilding", Sort: 4},
-		{ID: 809, ParentID: 800, Name: "SysMenu", Title: "菜单管理", Path: "/system/menu", Component: todo, Icon: "Menu", Sort: 5},
+		{ID: 809, ParentID: 800, Name: "SysMenu", Title: "菜单管理", Path: "/system/menu", Component: "/system/menu/index", Icon: "Menu", Sort: 5},
+		{ID: 826, ParentID: 809, Title: "维护菜单", Type: "button", AuthCode: "menu:manage", Sort: 1},
 		{ID: 810, ParentID: 800, Name: "DataPermission", Title: "数据权限", Path: "/system/data-permission", Component: "/system/data-permission/index", Icon: "Filter", Sort: 6},
 		{ID: 811, ParentID: 800, Name: "ResourceGrant", Title: "资源授权", Path: "/system/resource-grant", Component: todo, Icon: "Unlock", Sort: 7},
 		{ID: 812, ParentID: 800, Name: "NotifyChannel", Title: "通知渠道", Path: "/system/notify-channel", Component: "/system/notify-channel/index", Icon: "Message", Sort: 8},
@@ -165,24 +166,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 901, ParentID: 900, Name: "MessageInbox", Title: "我的消息", Path: "/message/inbox", Component: "/message/inbox/index", Icon: "MessageBox", Sort: 1},
 		{ID: 902, ParentID: 900, Name: "AnnouncementFeed", Title: "公告中心", Path: "/message/announcement", Component: "/message/announcement/index", Icon: "Bell", Sort: 2},
 	}
-	// 菜单目前由种子数据统一维护（菜单管理模块尚未实现），因此以代码为准做全量覆盖：
-	// 按 ID upsert，并清掉不在清单里的历史菜单，避免版本升级后残留旧入口
-	if err := g.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		UpdateAll: true,
-	}).Create(&menus).Error; err != nil {
-		return err
-	}
-
-	keepIDs := make([]uint, 0, len(menus))
-	for i := range menus {
-		keepIDs = append(keepIDs, menus[i].ID)
-	}
-	if err := g.Where("id NOT IN ?", keepIDs).Delete(&model.Menu{}).Error; err != nil {
-		return err
-	}
-	// 菜单删除后清理悬空授权
-	if err := g.Exec("DELETE FROM role_menus WHERE menu_id NOT IN (SELECT id FROM menus)").Error; err != nil {
+	if err := upsertBuiltinMenus(g, menus); err != nil {
 		return err
 	}
 
@@ -244,7 +228,93 @@ func Seed(g *gorm.DB, adminPwd string) error {
 	if err := seedCommandRules(g); err != nil {
 		return err
 	}
+	if err := seedEmailTemplates(g); err != nil {
+		return err
+	}
 	return seedSysConfigs(g)
+}
+
+// seedEmailTemplates 内置告警邮件模板，只在编码不存在时写入
+func seedEmailTemplates(g *gorm.DB) error {
+	tpl := model.EmailTemplate{
+		Code:    "alert.default",
+		Name:    "告警通知（默认）",
+		Subject: "[{{.severity}}] {{.title}}",
+		Body: `告警标题：{{.title}}
+级别：{{.severity}}
+来源：{{.source}}
+当前值：{{.value}}
+出现次数：{{.count}}
+首次出现：{{.firstSeenAt}}
+最近出现：{{.lastSeenAt}}
+
+摘要：
+{{.summary}}
+
+标签：
+{{.labels}}
+
+-- 本邮件由 OpsOne 自动发送`,
+		Variables: "title,severity,source,value,count,summary,labels,firstSeenAt,lastSeenAt,status",
+		Enabled:   true,
+		Builtin:   true,
+		Remark:    "email 类型通知渠道未指定模板时使用",
+	}
+
+	var exist model.EmailTemplate
+	err := g.Where("code = ?", tpl.Code).First(&exist).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return g.Create(&tpl).Error
+	}
+	return err
+}
+
+// upsertBuiltinMenus 同步内置菜单。
+//
+// 结构字段（父级、路径、组件、类型、权限码、路由名）以代码为准每次覆盖；
+// 展示字段（标题、图标、排序、隐藏）只在首次写入时给默认值，之后由菜单管理页面维护。
+// 不在清单内的内置菜单会被删除（版本升级清理旧入口），用户自建菜单不受影响。
+func upsertBuiltinMenus(g *gorm.DB, menus []model.Menu) error {
+	keepIDs := make([]uint, 0, len(menus))
+
+	for i := range menus {
+		menu := menus[i]
+		menu.Builtin = true
+		// 清单里普通菜单不写 Type，靠列默认值只在 INSERT 时生效；
+		// UPDATE 必须显式补上，否则会把已有行的 type 覆盖成空串，菜单树会整片消失
+		if menu.Type == "" {
+			menu.Type = "menu"
+		}
+		keepIDs = append(keepIDs, menu.ID)
+
+		var exist model.Menu
+		err := g.Where("id = ?", menu.ID).First(&exist).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := g.Create(&menu).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		updates := map[string]any{
+			"parent_id": menu.ParentID, "name": menu.Name, "path": menu.Path,
+			"component": menu.Component, "type": menu.Type, "auth_code": menu.AuthCode,
+			"builtin": true,
+		}
+		if err := g.Model(&exist).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+
+	// 只清理内置菜单里已下线的条目，自建菜单保留
+	if err := g.Where("builtin = ? AND id NOT IN ?", true, keepIDs).Delete(&model.Menu{}).Error; err != nil {
+		return err
+	}
+	// 菜单删除后清理悬空授权
+	return g.Exec("DELETE FROM role_menus WHERE menu_id NOT IN (SELECT id FROM menus)").Error
 }
 
 // seedSysConfigs 内置配置项，只在键不存在时写入，用户改过的值不会被覆盖
@@ -255,6 +325,12 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "execute", Key: "exec.concurrency", Value: "10", Type: "int", Label: "批量执行并发数", Remark: "单个作业同时连接的主机数上限", Builtin: true},
 		{Group: "execute", Key: "file.max_upload_mb", Value: "512", Type: "int", Label: "上传文件大小上限(MB)", Remark: "文件管理单文件上限", Builtin: true},
 		{Group: "bastion", Key: "session.record_keep_days", Value: "0", Type: "int", Label: "会话录像保留天数", Remark: "0 表示永久保留；启动时清理过期录像", Builtin: true},
+		{Group: "smtp", Key: "smtp.host", Value: "", Type: "string", Label: "SMTP 服务器", Remark: "留空表示不启用邮件通知", Builtin: true},
+		{Group: "smtp", Key: "smtp.port", Value: "465", Type: "int", Label: "SMTP 端口", Remark: "465 走 TLS，587/25 走明文或 STARTTLS", Builtin: true},
+		{Group: "smtp", Key: "smtp.username", Value: "", Type: "string", Label: "SMTP 账号", Builtin: true},
+		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "明文存储，与主机凭据同等对待", Builtin: true},
+		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
+		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
 	}
 
 	for i := range configs {

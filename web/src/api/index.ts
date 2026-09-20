@@ -173,12 +173,15 @@ export interface AlertSource {
 export interface NotifyChannel {
   id: number
   name: string
-  type: 'webhook' | 'silent'
+  type: 'webhook' | 'email' | 'silent'
   url: string
   headerKey: string
+  recipients: string
+  templateCode: string
   enabled: boolean
   remark: string
 }
+
 
 export interface NotifyRoute {
   id: number
@@ -459,12 +462,42 @@ export interface AuditLog {
 export interface MenuTreeNode {
   id: number
   parentId: number
+  name: string
   title: string
   path: string
+  component: string
+  icon: string
   type: 'menu' | 'button'
   authCode: string
+  sort: number
+  hidden: boolean
+  builtin: boolean
   children?: MenuTreeNode[]
 }
+
+export interface SiteLink {
+  id: number
+  name: string
+  url: string
+  category: string
+  icon: string
+  description: string
+  sort: number
+  enabled: boolean
+}
+
+export interface EmailTemplate {
+  id: number
+  code: string
+  name: string
+  subject: string
+  body: string
+  variables: string
+  enabled: boolean
+  remark: string
+  builtin: boolean
+}
+
 
 // ---------- 接口 ----------
 
@@ -533,6 +566,36 @@ export const updateRole = (id: number, data: Record<string, any>) =>
 export const deleteRole = (id: number) => request({ url: `/system/roles/${id}`, method: 'DELETE' })
 
 export const getMenuTree = () => request<MenuTreeNode[]>({ url: '/system/menus/tree' })
+export const createMenu = (data: Record<string, any>) =>
+  request({ url: '/system/menus', method: 'POST', data })
+export const updateMenu = (id: number, data: Record<string, any>) =>
+  request({ url: `/system/menus/${id}`, method: 'PUT', data })
+export const deleteMenu = (id: number) =>
+  request({ url: `/system/menus/${id}`, method: 'DELETE' })
+
+export const listSiteLinks = (enabledOnly = false) =>
+  request<SiteLink[]>({ url: '/site-links', params: enabledOnly ? { enabledOnly: 'true' } : {} })
+export const createSiteLink = (data: Record<string, any>) =>
+  request<SiteLink>({ url: '/site-links', method: 'POST', data })
+export const updateSiteLink = (id: number, data: Record<string, any>) =>
+  request<SiteLink>({ url: `/site-links/${id}`, method: 'PUT', data })
+export const deleteSiteLink = (id: number) =>
+  request({ url: `/site-links/${id}`, method: 'DELETE' })
+
+export const listEmailTemplates = () => request<EmailTemplate[]>({ url: '/system/email-templates' })
+export const createEmailTemplate = (data: Record<string, any>) =>
+  request<EmailTemplate>({ url: '/system/email-templates', method: 'POST', data })
+export const updateEmailTemplate = (id: number, data: Record<string, any>) =>
+  request<EmailTemplate>({ url: `/system/email-templates/${id}`, method: 'PUT', data })
+export const deleteEmailTemplate = (id: number) =>
+  request({ url: `/system/email-templates/${id}`, method: 'DELETE' })
+export const previewEmailTemplate = (id: number, vars?: Record<string, string>) =>
+  request<{ subject: string; body: string; vars: Record<string, string> }>({
+    url: `/system/email-templates/${id}/preview`,
+    method: 'POST',
+    data: { vars: vars || {} }
+  })
+
 export const listAuditLogs = (params: Record<string, any>) =>
   request<PageData<AuditLog>>({ url: '/system/audit-logs', params })
 

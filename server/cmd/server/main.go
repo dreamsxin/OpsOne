@@ -135,7 +135,21 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/system/roles/:id", middleware.RequirePerm("role:manage"), h.DeleteRole)
 
 		auth.GET("/system/menus/tree", h.MenuTree)
+		auth.POST("/system/menus", middleware.RequirePerm("menu:manage"), h.CreateMenu)
+		auth.PUT("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.UpdateMenu)
+		auth.DELETE("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.DeleteMenu)
 		auth.GET("/system/audit-logs", h.ListAuditLogs)
+
+		auth.GET("/site-links", h.ListSiteLinks)
+		auth.POST("/site-links", middleware.RequirePerm("config:manage"), h.CreateSiteLink)
+		auth.PUT("/site-links/:id", middleware.RequirePerm("config:manage"), h.UpdateSiteLink)
+		auth.DELETE("/site-links/:id", middleware.RequirePerm("config:manage"), h.DeleteSiteLink)
+
+		auth.GET("/system/email-templates", h.ListEmailTemplates)
+		auth.POST("/system/email-templates", middleware.RequirePerm("config:manage"), h.CreateEmailTemplate)
+		auth.PUT("/system/email-templates/:id", middleware.RequirePerm("config:manage"), h.UpdateEmailTemplate)
+		auth.DELETE("/system/email-templates/:id", middleware.RequirePerm("config:manage"), h.DeleteEmailTemplate)
+		auth.POST("/system/email-templates/:id/preview", h.PreviewEmailTemplate)
 
 		auth.GET("/alerts", h.ListAlerts)
 		auth.GET("/alerts/stats", h.AlertStats)

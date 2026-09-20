@@ -273,14 +273,19 @@ func (h *Handler) MenuTree(c *gin.Context) {
 
 // FullMenuNode 授权树节点，保留按钮类型与权限码
 type FullMenuNode struct {
-	ID       uint           `json:"id"`
-	ParentID uint           `json:"parentId"`
-	Title    string         `json:"title"`
-	Path     string         `json:"path"`
-	Type     string         `json:"type"`
-	AuthCode string         `json:"authCode"`
-	Sort     int            `json:"sort"`
-	Children []FullMenuNode `json:"children,omitempty"`
+	ID        uint           `json:"id"`
+	ParentID  uint           `json:"parentId"`
+	Name      string         `json:"name"`
+	Title     string         `json:"title"`
+	Path      string         `json:"path"`
+	Component string         `json:"component"`
+	Icon      string         `json:"icon"`
+	Type      string         `json:"type"`
+	AuthCode  string         `json:"authCode"`
+	Sort      int            `json:"sort"`
+	Hidden    bool           `json:"hidden"`
+	Builtin   bool           `json:"builtin"`
+	Children  []FullMenuNode `json:"children,omitempty"`
 }
 
 func buildFullTree(menus []model.Menu, parent uint) []FullMenuNode {
@@ -290,8 +295,9 @@ func buildFullTree(menus []model.Menu, parent uint) []FullMenuNode {
 			continue
 		}
 		nodes = append(nodes, FullMenuNode{
-			ID: m.ID, ParentID: m.ParentID, Title: m.Title, Path: m.Path,
-			Type: m.Type, AuthCode: m.AuthCode, Sort: m.Sort,
+			ID: m.ID, ParentID: m.ParentID, Name: m.Name, Title: m.Title, Path: m.Path,
+			Component: m.Component, Icon: m.Icon, Type: m.Type, AuthCode: m.AuthCode,
+			Sort: m.Sort, Hidden: m.Hidden, Builtin: m.Builtin,
 			Children: buildFullTree(menus, m.ID),
 		})
 	}

@@ -83,8 +83,9 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 配置项 `/config/items` — 分组键值、类型校验、内置键只可改值、自定义键可增删
 
 - [x] Webhook 接入 `/config/webhooks` — 接入源与 Token、推送示例、Token 重置、按指纹去重
-- [ ] 站点导航 `/config/site-navigation` — 内部站点导航大盘
-- [ ] 邮件模板 `/config/email-templates`
+- [x] 站点导航 `/config/site-navigation` — 分类卡片墙 + 管理模式，仅允许 http/https 地址
+- [x] 邮件模板 `/config/email-templates` — Go template 语法、保存前语法校验、样例数据预览；配合 email 类型通知渠道走 SMTP 发信
+
 
 
 ## 系统管理（ID 800-899）
@@ -97,7 +98,8 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 通知记录 `/system/notify-record` — 投递流水、失败原因与耗时
 - [x] 部门管理 `/system/department` — 多级部门树、负责人、人员与主机计数，删除前校验引用
 - [x] 公司管理 `/system/company` — 公司台账，作为部门树的根
-- [ ] 菜单管理 `/system/menu` — 菜单树维护、拖拽排序（当前由种子数据维护）
+- [x] 菜单管理 `/system/menu` — 内置菜单可改展示（标题/图标/排序/隐藏）、自建菜单可全改可删，结构字段由代码维护
+
 - [x] 数据权限 `/system/data-permission` — 角色级数据范围（全部/本部门/含下级/仅本人/指定部门）+ 生效诊断
 - [ ] 资源授权 `/system/resource-grant` — 按主机/账号/凭据粒度授权
 

@@ -67,6 +67,9 @@ type Role struct {
 }
 
 // Menu 菜单与按钮权限。Type=menu 时参与前端路由生成，Type=button 时只作为权限点。
+//
+// Builtin=true 表示由种子数据维护：结构字段（路径、组件、父级、类型、权限码）以代码为准，
+// 每次启动覆盖；展示字段（标题、图标、排序、隐藏）由用户在菜单管理里维护，启动不覆盖。
 type Menu struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	ParentID  uint      `gorm:"index;default:0" json:"parentId"`
@@ -79,6 +82,36 @@ type Menu struct {
 	AuthCode  string    `gorm:"size:64" json:"authCode"` // 权限标识，如 host:create
 	Sort      int       `gorm:"default:0" json:"sort"`
 	Hidden    bool      `gorm:"default:false" json:"hidden"`
+	Builtin   bool      `gorm:"default:false" json:"builtin"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SiteLink 站点导航条目，用于集中收拢内部系统入口
+type SiteLink struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:64;not null" json:"name"`
+	URL         string    `gorm:"size:512;not null" json:"url"`
+	Category    string    `gorm:"size:32;default:general" json:"category"`
+	Icon        string    `gorm:"size:64" json:"icon"`
+	Description string    `gorm:"size:255" json:"description"`
+	Sort        int       `gorm:"default:0" json:"sort"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// EmailTemplate 邮件模板，正文用 Go text/template 语法，如 {{.Title}}
+type EmailTemplate struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Code      string    `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	Subject   string    `gorm:"size:255;not null" json:"subject"`
+	Body      string    `gorm:"type:text" json:"body"`
+	Variables string    `gorm:"size:255" json:"variables"` // 可用变量提示，逗号分隔
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	Builtin   bool      `gorm:"default:false" json:"builtin"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -275,18 +308,21 @@ type Alert struct {
 	HandleNote  string     `gorm:"size:255" json:"handleNote"`
 }
 
-// NotifyChannel 通知渠道。webhook 走 HTTP POST，silent 只落记录不外发。
+// NotifyChannel 通知渠道。webhook 走 HTTP POST，email 走 SMTP，silent 只落记录不外发。
 type NotifyChannel struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:64;not null" json:"name"`
-	Type        string    `gorm:"size:16;default:webhook" json:"type"` // webhook | silent
-	URL         string    `gorm:"size:512" json:"url"`
-	HeaderKey   string    `gorm:"size:64" json:"headerKey"` // 可选的鉴权头名
-	HeaderValue string    `gorm:"size:255" json:"-"`        // 鉴权头值，不出接口
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
-	Remark      string    `gorm:"size:255" json:"remark"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:64;not null" json:"name"`
+	Type        string `gorm:"size:16;default:webhook" json:"type"` // webhook | email | silent
+	URL         string `gorm:"size:512" json:"url"`
+	HeaderKey   string `gorm:"size:64" json:"headerKey"` // 可选的鉴权头名
+	HeaderValue string `gorm:"size:255" json:"-"`        // 鉴权头值，不出接口
+	// Recipients / TemplateCode 仅 email 类型使用
+	Recipients   string    `gorm:"size:512" json:"recipients"`  // 逗号分隔收件人
+	TemplateCode string    `gorm:"size:64" json:"templateCode"` // 邮件模板编码，空则用内置格式
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	Remark       string    `gorm:"size:255" json:"remark"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // NotifyRoute 通知路由：按告警级别与标签匹配，命中后投递到指定渠道。
