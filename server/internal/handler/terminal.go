@@ -251,7 +251,7 @@ func (h *Handler) recordCommand(session *model.Session, out *safeConn, d bastion
 	}
 	entry := model.SessionCommand{
 		SessionID: session.ID, Command: d.Command, Risk: d.Risk,
-		RuleID: d.RuleID, OffsetMs: offset,
+		RuleID: d.RuleID, RuleDesc: truncate(d.RuleDesc, 120), OffsetMs: offset,
 	}
 	if err := h.DB.Create(&entry).Error; err != nil {
 		log.Printf("[terminal] 命令落库失败: %v", err)

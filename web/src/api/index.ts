@@ -62,6 +62,8 @@ export interface SessionCommand {
   command: string
   risk: 'normal' | 'warn' | 'blocked'
   ruleId: number
+  /** 命中规则时抄下来的规则说明，规则后来被改名或删掉也还能看出原因 */
+  ruleDesc: string
   offsetMs: number
   createdAt: string
 }
@@ -641,6 +643,27 @@ export const listSessions = (params: Record<string, any>) =>
   request<PageData<TerminalSession>>({ url: '/sessions', params })
 export const getSession = (id: number) =>
   request<{ session: TerminalSession; replayable: boolean }>({ url: `/sessions/${id}` })
+/** 单个会话的命令明细，分页取；长会话有上千条，不一次全拉 */
+export const listSessionCommands = (id: number, params: Record<string, any>) =>
+  request<PageData<SessionCommand>>({ url: `/sessions/${id}/commands`, params })
+
+/** 跨会话命令检索的一行：命令 + 它属于哪次会话、谁在哪台机器上敲的 */
+export interface SessionCommandHit extends SessionCommand {
+  username: string
+  loginUser: string
+  hostName: string
+  address: string
+  clientIp: string
+}
+
+export const searchSessionCommands = (params: Record<string, any>) =>
+  request<{
+    list: SessionCommandHit[]
+    total: number
+    blocked: number
+    page: number
+    pageSize: number
+  }>({ url: '/sessions/commands', params })
 
 export const listCommandRules = () => request<CommandRule[]>({ url: '/system/command-rules' })
 export const createCommandRule = (data: Record<string, any>) =>
@@ -1833,6 +1856,16 @@ export const exportAuditLogsCSV = (params: Record<string, any>) => {
   })
   const query = search.toString()
   return downloadBlob(`/system/audit-logs/export${query ? `?${query}` : ''}`, 'audit-logs.csv')
+}
+
+/** 导出会话命令检索结果：条件与界面一致 */
+export const exportSessionCommandsCSV = (params: Record<string, any>) => {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== '' && value !== undefined && value !== null) search.append(key, String(value))
+  })
+  const query = search.toString()
+  return downloadBlob(`/sessions/commands/export${query ? `?${query}` : ''}`, 'session-commands.csv')
 }
 
 // ---------- 脚本库 ----------

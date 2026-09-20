@@ -192,7 +192,10 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/exec/jobs", middleware.RequirePerm("exec:run"), h.RunExecJob)
 
 		auth.GET("/sessions", h.ListSessions)
+		auth.GET("/sessions/commands", h.SearchSessionCommands)
+		auth.GET("/sessions/commands/export", h.ExportSessionCommands)
 		auth.GET("/sessions/:id", h.GetSession)
+		auth.GET("/sessions/:id/commands", h.ListSessionCommands)
 		auth.GET("/sessions/:id/replay", middleware.RequirePerm("session:replay"), h.ReplaySession)
 
 		auth.GET("/system/command-rules", h.ListCommandRules)

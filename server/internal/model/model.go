@@ -361,7 +361,7 @@ type Session struct {
 	ErrorMsg     string     `gorm:"size:255" json:"errorMsg"`
 	CommandCount int        `json:"commandCount"`
 	BlockedCount int        `json:"blockedCount"`
-	StartedAt    time.Time  `json:"startedAt"`
+	StartedAt    time.Time  `gorm:"index" json:"startedAt"`
 	EndedAt      *time.Time `json:"endedAt"`
 	DurationMs   int64      `json:"durationMs"`
 
@@ -370,13 +370,17 @@ type Session struct {
 
 // SessionCommand 会话中执行的单条命令
 type SessionCommand struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	SessionID uint      `gorm:"index;not null" json:"sessionId"`
-	Command   string    `gorm:"type:text" json:"command"`
-	Risk      string    `gorm:"size:16;default:normal" json:"risk"` // normal | warn | blocked
-	RuleID    uint      `json:"ruleId"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	SessionID uint   `gorm:"index;not null" json:"sessionId"`
+	Command   string `gorm:"type:text" json:"command"`
+	// Risk 建索引：审计最常问的就是「把所有被拦下来的命令拉出来」
+	Risk   string `gorm:"size:16;index;default:normal" json:"risk"` // normal | warn | blocked
+	RuleID uint   `json:"ruleId"`
+	// RuleDesc 命中规则时把规则说明抄一份下来。规则以后被改名或删掉，
+	// 历史记录里也还能看出当时是因为什么被拦的
+	RuleDesc  string    `gorm:"size:128" json:"ruleDesc"`
 	OffsetMs  int64     `json:"offsetMs"` // 相对会话开始的毫秒偏移，便于回放定位
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
 // ExecJob 批量执行作业
