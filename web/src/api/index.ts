@@ -127,6 +127,83 @@ export interface CronJob {
   createdAt: string
 }
 
+export interface Alert {
+  id: number
+  sourceId: number
+  sourceName: string
+  fingerprint: string
+  title: string
+  summary: string
+  severity: 'critical' | 'warning' | 'info'
+  status: 'firing' | 'acked' | 'resolved'
+  labels: string
+  value: string
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+  ackBy: string
+  ackAt: string | null
+  resolvedAt: string | null
+  handleNote: string
+}
+
+export interface AlertStats {
+  total: number
+  firing: number
+  acked: number
+  resolved: number
+  critical: number
+  warning: number
+}
+
+export interface AlertSource {
+  id: number
+  name: string
+  token: string
+  enabled: boolean
+  remark: string
+  receivedCount: number
+  lastSeenAt: string | null
+  createdAt: string
+}
+
+export interface NotifyChannel {
+  id: number
+  name: string
+  type: 'webhook' | 'silent'
+  url: string
+  headerKey: string
+  enabled: boolean
+  remark: string
+}
+
+export interface NotifyRoute {
+  id: number
+  name: string
+  priority: number
+  matchSeverity: string
+  matchLabels: string
+  channelIds: number[]
+  isDefault: boolean
+  enabled: boolean
+}
+
+export interface NotifyRecord {
+  id: number
+  alertId: number
+  alertTitle: string
+  routeId: number
+  routeName: string
+  channelId: number
+  channelName: string
+  status: 'success' | 'failed'
+  httpStatus: number
+  errorMsg: string
+  costMs: number
+  createdAt: string
+}
+
+
 
 
 export interface ExecResult {
@@ -327,4 +404,61 @@ export const deleteCronJob = (id: number) =>
   request({ url: `/scheduler/jobs/${id}`, method: 'DELETE' })
 export const runCronJobNow = (id: number) =>
   request<ExecJob>({ url: `/scheduler/jobs/${id}/run`, method: 'POST' })
+
+// ---------- 告警 ----------
+
+export const listAlerts = (params: Record<string, any>) =>
+  request<PageData<Alert>>({ url: '/alerts', params })
+export const getAlertStats = () => request<AlertStats>({ url: '/alerts/stats' })
+export const getAlert = (id: number) =>
+  request<{ alert: Alert; records: NotifyRecord[] }>({ url: `/alerts/${id}` })
+export const ackAlert = (id: number, note: string) =>
+  request({ url: `/alerts/${id}/ack`, method: 'POST', data: { note } })
+export const resolveAlert = (id: number, note: string) =>
+  request({ url: `/alerts/${id}/resolve`, method: 'POST', data: { note } })
+
+// ---------- 告警接入源 ----------
+
+export const listAlertSources = () => request<AlertSource[]>({ url: '/alert-sources' })
+export const createAlertSource = (data: Record<string, any>) =>
+  request<AlertSource>({ url: '/alert-sources', method: 'POST', data })
+export const updateAlertSource = (id: number, data: Record<string, any>) =>
+  request<AlertSource>({ url: `/alert-sources/${id}`, method: 'PUT', data })
+export const rotateAlertSourceToken = (id: number) =>
+  request<AlertSource>({ url: `/alert-sources/${id}/rotate`, method: 'POST' })
+export const deleteAlertSource = (id: number) =>
+  request({ url: `/alert-sources/${id}`, method: 'DELETE' })
+
+// ---------- 通知渠道与路由 ----------
+
+export const listNotifyChannels = () => request<NotifyChannel[]>({ url: '/notify/channels' })
+export const createNotifyChannel = (data: Record<string, any>) =>
+  request<NotifyChannel>({ url: '/notify/channels', method: 'POST', data })
+export const updateNotifyChannel = (id: number, data: Record<string, any>) =>
+  request<NotifyChannel>({ url: `/notify/channels/${id}`, method: 'PUT', data })
+export const deleteNotifyChannel = (id: number) =>
+  request({ url: `/notify/channels/${id}`, method: 'DELETE' })
+export const testNotifyChannel = (id: number) =>
+  request<{ ok: boolean; httpStatus?: number; detail?: string; costMs?: number }>({
+    url: `/notify/channels/${id}/test`,
+    method: 'POST'
+  })
+
+export const listNotifyRoutes = () => request<NotifyRoute[]>({ url: '/notify/routes' })
+export const createNotifyRoute = (data: Record<string, any>) =>
+  request<NotifyRoute>({ url: '/notify/routes', method: 'POST', data })
+export const updateNotifyRoute = (id: number, data: Record<string, any>) =>
+  request<NotifyRoute>({ url: `/notify/routes/${id}`, method: 'PUT', data })
+export const deleteNotifyRoute = (id: number) =>
+  request({ url: `/notify/routes/${id}`, method: 'DELETE' })
+export const testNotifyRoute = (data: { severity: string; labels: Record<string, string> }) =>
+  request<{ matched: boolean; routeId?: number; routeName?: string; channelIds?: number[]; fallback?: boolean }>({
+    url: '/notify/routes/test',
+    method: 'POST',
+    data
+  })
+
+export const listNotifyRecords = (params: Record<string, any>) =>
+  request<PageData<NotifyRecord>>({ url: '/notify/records', params })
+
 

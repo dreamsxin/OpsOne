@@ -44,10 +44,11 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 ## 监控告警（ID 400-499）
 
 - [ ] 告警态势 `/monitor/situation` — 实时聚合、按来源/级别分布
-- [ ] 告警列表 `/monitor/alerts` — 触发/已确认/已解决/静默，确认与恢复
+- [x] 告警列表 `/monitor/alerts` — 概览卡片、级别/状态/关键字筛选、确认与恢复、投递流水
 - [ ] 告警规则 `/monitor/alert-rules`
 - [ ] 检测规则 `/monitor/detection-rules` — 顺序链、并发窗、窗口 Join、降噪
-- [ ] 通知路由 `/monitor/routing` — 匹配条件、兜底路由、链路追踪
+- [x] 通知路由 `/monitor/routing` — 优先级 + 级别/标签匹配、兜底路由、选路预演
+
 - [ ] 聚合策略 `/monitor/aggregation` — 聚合维度、归桶预览、重叠检测
 - [ ] 事件中心 `/monitor/events` — 事件确认/恢复、响应处置、诊断上下文
 - [ ] 指标查询 `/monitor/metrics` — 对接 Prometheus，即时/范围查询
@@ -77,9 +78,10 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 ## 配置中心（ID 700-799）
 
 - [ ] 配置项 `/config/items` — 分环境键值、版本与回滚
-- [ ] Webhook 接入 `/config/webhooks` — 云厂商告警回调、签名校验、幂等键
+- [x] Webhook 接入 `/config/webhooks` — 接入源与 Token、推送示例、Token 重置、按指纹去重
 - [ ] 站点导航 `/config/site-navigation` — 内部站点导航大盘
 - [ ] 邮件模板 `/config/email-templates`
+
 
 ## 系统管理（ID 800-899）
 
@@ -87,14 +89,15 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 角色权限 `/system/role` — 菜单与按钮授权树
 - [x] 命令规则 `/system/command-rule` — 正则规则、拦截/告警、试跑
 - [x] 操作审计 `/system/audit` — 写操作流水
+- [x] 通知渠道 `/system/notify-channel` — webhook / silent 两类渠道、鉴权头、试发
+- [x] 通知记录 `/system/notify-record` — 投递流水、失败原因与耗时
 - [ ] 部门管理 `/system/department` — 部门树与部门角色
 - [ ] 公司管理 `/system/company` — 多公司隔离
 - [ ] 菜单管理 `/system/menu` — 菜单树维护、拖拽排序（当前由种子数据维护）
 - [ ] 数据权限 `/system/data-permission` — 资源目录、生效诊断
 - [ ] 资源授权 `/system/resource-grant` — 按主机/账号/凭据粒度授权
-- [ ] 通知渠道 `/system/notify-channel` — 渠道配置与连通测试
-- [ ] 通知记录 `/system/notify-record` — 投递流水与失败回执
 - [ ] 公告管理 `/system/announcement` — 发布/下线
+
 - [ ] IM 集成 `/system/im` — 扫码登录、组织同步、审批事件
 - [ ] 系统配置 `/system/config` — 平台级参数
 
@@ -105,11 +108,12 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 
 ## 建议实现顺序
 
-1. **监控告警主干** —— 告警接入（Webhook）→ 告警列表 → 通知渠道 → 通知路由；先打通「收得到、发得出」，再做聚合与态势
+1. **告警态势与规则** —— 在已有告警数据上做聚合视图（按来源/级别/时间趋势），再补告警规则与降噪
 2. **容器平台** —— 集群接入 + 工作负载只读视图，再加 YAML 编辑
 3. **组织与权限** —— 部门、公司、数据权限、资源授权，配套多租户场景
 4. **构建发布** —— 对接 Jenkins，与定时任务共用执行记录模型
 5. **其余模块** —— 按实际需求插队
+
 
 
 ## 暂不纳入

@@ -27,6 +27,8 @@ func Migrate(g *gorm.DB) error {
 		&model.Host{}, &model.ExecJob{}, &model.ExecResult{}, &model.AuditLog{},
 		&model.CommandRule{}, &model.Session{}, &model.SessionCommand{},
 		&model.CronJob{}, &model.FileAudit{},
+		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
+		&model.NotifyRoute{}, &model.NotifyRecord{},
 	)
 }
 
@@ -87,10 +89,12 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},
 		{ID: 401, ParentID: 400, Name: "AlertSituation", Title: "告警态势", Path: "/monitor/situation", Component: todo, Icon: "DataAnalysis", Sort: 1},
-		{ID: 402, ParentID: 400, Name: "AlertList", Title: "告警列表", Path: "/monitor/alerts", Component: todo, Icon: "Bell", Sort: 2},
+		{ID: 402, ParentID: 400, Name: "AlertList", Title: "告警列表", Path: "/monitor/alerts", Component: "/monitor/alerts/index", Icon: "Bell", Sort: 2},
+		{ID: 420, ParentID: 402, Title: "确认与恢复", Type: "button", AuthCode: "alert:handle", Sort: 1},
 		{ID: 403, ParentID: 400, Name: "AlertRule", Title: "告警规则", Path: "/monitor/alert-rules", Component: todo, Icon: "Tickets", Sort: 3},
 		{ID: 404, ParentID: 400, Name: "DetectionRule", Title: "检测规则", Path: "/monitor/detection-rules", Component: todo, Icon: "Aim", Sort: 4},
-		{ID: 405, ParentID: 400, Name: "NotifyRouting", Title: "通知路由", Path: "/monitor/routing", Component: todo, Icon: "Guide", Sort: 5},
+		{ID: 405, ParentID: 400, Name: "NotifyRouting", Title: "通知路由", Path: "/monitor/routing", Component: "/monitor/routing/index", Icon: "Guide", Sort: 5},
+		{ID: 421, ParentID: 405, Title: "维护路由", Type: "button", AuthCode: "route:manage", Sort: 1},
 		{ID: 406, ParentID: 400, Name: "AggregationPolicy", Title: "聚合策略", Path: "/monitor/aggregation", Component: todo, Icon: "Operation", Sort: 6},
 		{ID: 407, ParentID: 400, Name: "EventCenter", Title: "事件中心", Path: "/monitor/events", Component: todo, Icon: "Warning", Sort: 7},
 		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: todo, Icon: "Histogram", Sort: 8},
@@ -119,7 +123,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		// ---------- 配置中心 ----------
 		{ID: 700, Name: "ConfigCenter", Title: "配置中心", Path: "/config", Icon: "Tools", Sort: 80},
 		{ID: 701, ParentID: 700, Name: "ConfigItem", Title: "配置项", Path: "/config/items", Component: todo, Icon: "Files", Sort: 1},
-		{ID: 702, ParentID: 700, Name: "WebhookInbound", Title: "Webhook 接入", Path: "/config/webhooks", Component: todo, Icon: "Link", Sort: 2},
+		{ID: 702, ParentID: 700, Name: "WebhookInbound", Title: "Webhook 接入", Path: "/config/webhooks", Component: "/config/webhooks/index", Icon: "Link", Sort: 2},
+		{ID: 705, ParentID: 702, Title: "维护接入源", Type: "button", AuthCode: "source:manage", Sort: 1},
 		{ID: 703, ParentID: 700, Name: "SiteNavigation", Title: "站点导航", Path: "/config/site-navigation", Component: todo, Icon: "Compass", Sort: 3},
 		{ID: 704, ParentID: 700, Name: "EmailTemplate", Title: "邮件模板", Path: "/config/email-templates", Component: todo, Icon: "Message", Sort: 4},
 
@@ -136,8 +141,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 809, ParentID: 800, Name: "SysMenu", Title: "菜单管理", Path: "/system/menu", Component: todo, Icon: "Menu", Sort: 5},
 		{ID: 810, ParentID: 800, Name: "DataPermission", Title: "数据权限", Path: "/system/data-permission", Component: todo, Icon: "Filter", Sort: 6},
 		{ID: 811, ParentID: 800, Name: "ResourceGrant", Title: "资源授权", Path: "/system/resource-grant", Component: todo, Icon: "Unlock", Sort: 7},
-		{ID: 812, ParentID: 800, Name: "NotifyChannel", Title: "通知渠道", Path: "/system/notify-channel", Component: todo, Icon: "Message", Sort: 8},
-		{ID: 813, ParentID: 800, Name: "NotifyRecord", Title: "通知记录", Path: "/system/notify-record", Component: todo, Icon: "MessageBox", Sort: 9},
+		{ID: 812, ParentID: 800, Name: "NotifyChannel", Title: "通知渠道", Path: "/system/notify-channel", Component: "/system/notify-channel/index", Icon: "Message", Sort: 8},
+		{ID: 823, ParentID: 812, Title: "维护渠道", Type: "button", AuthCode: "channel:manage", Sort: 1},
+		{ID: 813, ParentID: 800, Name: "NotifyRecord", Title: "通知记录", Path: "/system/notify-record", Component: "/system/notify-record/index", Icon: "MessageBox", Sort: 9},
 		{ID: 814, ParentID: 800, Name: "Announcement", Title: "公告管理", Path: "/system/announcement", Component: todo, Icon: "Bell", Sort: 10},
 		{ID: 815, ParentID: 800, Name: "ImIntegration", Title: "IM 集成", Path: "/system/im", Component: todo, Icon: "ChatDotRound", Sort: 11},
 		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: todo, Icon: "Tools", Sort: 12},

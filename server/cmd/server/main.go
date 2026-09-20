@@ -72,6 +72,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 	api := r.Group("/api/v1")
 	api.POST("/auth/login", h.Login)
+	// 告警接入走 Token 鉴权，供外部监控系统直接 POST
+	api.POST("/webhooks/alerts/:token", h.ReceiveAlert)
 
 	auth := api.Group("")
 	auth.Use(middleware.Auth(cfg.JWTSecret, gormDB), middleware.Audit(gormDB))
@@ -129,6 +131,32 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		auth.GET("/system/menus/tree", h.MenuTree)
 		auth.GET("/system/audit-logs", h.ListAuditLogs)
+
+		auth.GET("/alerts", h.ListAlerts)
+		auth.GET("/alerts/stats", h.AlertStats)
+		auth.GET("/alerts/:id", h.GetAlert)
+		auth.POST("/alerts/:id/ack", middleware.RequirePerm("alert:handle"), h.AckAlert)
+		auth.POST("/alerts/:id/resolve", middleware.RequirePerm("alert:handle"), h.ResolveAlert)
+
+		auth.GET("/alert-sources", h.ListAlertSources)
+		auth.POST("/alert-sources", middleware.RequirePerm("source:manage"), h.CreateAlertSource)
+		auth.PUT("/alert-sources/:id", middleware.RequirePerm("source:manage"), h.UpdateAlertSource)
+		auth.POST("/alert-sources/:id/rotate", middleware.RequirePerm("source:manage"), h.RotateAlertSourceToken)
+		auth.DELETE("/alert-sources/:id", middleware.RequirePerm("source:manage"), h.DeleteAlertSource)
+
+		auth.GET("/notify/channels", h.ListNotifyChannels)
+		auth.POST("/notify/channels", middleware.RequirePerm("channel:manage"), h.CreateNotifyChannel)
+		auth.PUT("/notify/channels/:id", middleware.RequirePerm("channel:manage"), h.UpdateNotifyChannel)
+		auth.DELETE("/notify/channels/:id", middleware.RequirePerm("channel:manage"), h.DeleteNotifyChannel)
+		auth.POST("/notify/channels/:id/test", middleware.RequirePerm("channel:manage"), h.TestNotifyChannel)
+
+		auth.GET("/notify/routes", h.ListNotifyRoutes)
+		auth.POST("/notify/routes", middleware.RequirePerm("route:manage"), h.CreateNotifyRoute)
+		auth.PUT("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.UpdateNotifyRoute)
+		auth.DELETE("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.DeleteNotifyRoute)
+		auth.POST("/notify/routes/test", h.TestNotifyRoute)
+
+		auth.GET("/notify/records", h.ListNotifyRecords)
 	}
 
 	return r

@@ -199,3 +199,82 @@ type AuditLog struct {
 	CostMs    int64     `json:"costMs"`
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
+
+// AlertSource 告警接入源，外部系统用 Token 推送告警
+type AlertSource struct {
+	ID            uint       `gorm:"primaryKey" json:"id"`
+	Name          string     `gorm:"size:64;not null" json:"name"`
+	Token         string     `gorm:"size:64;uniqueIndex;not null" json:"token"`
+	Enabled       bool       `gorm:"default:true" json:"enabled"`
+	Remark        string     `gorm:"size:255" json:"remark"`
+	ReceivedCount int        `json:"receivedCount"`
+	LastSeenAt    *time.Time `json:"lastSeenAt"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+// Alert 告警实例，按 Fingerprint 去重，同一指纹重复上报只累加次数
+type Alert struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	SourceID    uint       `gorm:"index" json:"sourceId"`
+	SourceName  string     `gorm:"size:64" json:"sourceName"`
+	Fingerprint string     `gorm:"size:64;index" json:"fingerprint"`
+	Title       string     `gorm:"size:255;not null" json:"title"`
+	Summary     string     `gorm:"type:text" json:"summary"`
+	Severity    string     `gorm:"size:16;index" json:"severity"`              // critical | warning | info
+	Status      string     `gorm:"size:16;index;default:firing" json:"status"` // firing | acked | resolved
+	Labels      string     `gorm:"type:text" json:"labels"`                    // JSON 对象字符串
+	Value       string     `gorm:"size:64" json:"value"`
+	Count       int        `gorm:"default:1" json:"count"`
+	FirstSeenAt time.Time  `json:"firstSeenAt"`
+	LastSeenAt  time.Time  `json:"lastSeenAt"`
+	AckBy       string     `gorm:"size:64" json:"ackBy"`
+	AckAt       *time.Time `json:"ackAt"`
+	ResolvedAt  *time.Time `json:"resolvedAt"`
+	HandleNote  string     `gorm:"size:255" json:"handleNote"`
+}
+
+// NotifyChannel 通知渠道。webhook 走 HTTP POST，silent 只落记录不外发。
+type NotifyChannel struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:64;not null" json:"name"`
+	Type        string    `gorm:"size:16;default:webhook" json:"type"` // webhook | silent
+	URL         string    `gorm:"size:512" json:"url"`
+	HeaderKey   string    `gorm:"size:64" json:"headerKey"` // 可选的鉴权头名
+	HeaderValue string    `gorm:"size:255" json:"-"`        // 鉴权头值，不出接口
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Remark      string    `gorm:"size:255" json:"remark"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// NotifyRoute 通知路由：按告警级别与标签匹配，命中后投递到指定渠道。
+// 按 Priority 升序取第一条命中的路由；都没命中时用 IsDefault 的兜底路由。
+type NotifyRoute struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Name          string    `gorm:"size:64;not null" json:"name"`
+	Priority      int       `gorm:"default:100" json:"priority"`
+	MatchSeverity string    `gorm:"size:64" json:"matchSeverity"` // 逗号分隔，空表示不限
+	MatchLabels   string    `gorm:"type:text" json:"matchLabels"` // JSON 对象，需全部命中
+	ChannelIDs    string    `gorm:"type:text" json:"-"`           // JSON 数组，接口层用 channelIds 暴露
+	IsDefault     bool      `gorm:"default:false" json:"isDefault"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// NotifyRecord 通知投递流水
+type NotifyRecord struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	AlertID     uint      `gorm:"index" json:"alertId"`
+	AlertTitle  string    `gorm:"size:255" json:"alertTitle"`
+	RouteID     uint      `json:"routeId"`
+	RouteName   string    `gorm:"size:64" json:"routeName"`
+	ChannelID   uint      `gorm:"index" json:"channelId"`
+	ChannelName string    `gorm:"size:64" json:"channelName"`
+	Status      string    `gorm:"size:16" json:"status"` // success | failed
+	HTTPStatus  int       `json:"httpStatus"`
+	ErrorMsg    string    `gorm:"size:255" json:"errorMsg"`
+	CostMs      int64     `json:"costMs"`
+	CreatedAt   time.Time `gorm:"index" json:"createdAt"`
+}
