@@ -774,3 +774,45 @@ type ProbeRecord struct {
 	Operator  string    `gorm:"size:64" json:"operator"` // 手动拨测记操作人，定时为 scheduler
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
+
+// Event 需要有人处置的事件。
+//
+// 告警是「机器发现的现象」，事件是「人要跟进的事」：由人从一条或多条告警升格而来，
+// 有负责人、有处置过程。平台不自动建单，避免把告警噪音原样搬成工单噪音。
+type Event struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Title    string `gorm:"size:255;not null" json:"title"`
+	Severity string `gorm:"size:16;index;default:warning" json:"severity"` // critical | warning | info
+	// Status open 待处理 | processing 处理中 | resolved 已解决 | closed 已关闭（无需处理）
+	Status  string `gorm:"size:16;index;default:open" json:"status"`
+	Summary string `gorm:"type:text" json:"summary"`
+	// AlertIDs 关联告警 ID 的 JSON 数组，接口层用 alertIds 暴露
+	AlertIDs string `gorm:"type:text" json:"-"`
+	// Origin manual 手动选告警建单 | bucket 从聚合桶建单
+	Origin     string `gorm:"size:16;default:manual" json:"origin"`
+	OriginNote string `gorm:"size:255" json:"originNote"` // 例如聚合策略名与桶 key
+
+	Assignee   string     `gorm:"size:64;index" json:"assignee"`
+	AssignedBy string     `gorm:"size:64" json:"assignedBy"`
+	AssignedAt *time.Time `json:"assignedAt"`
+
+	CreatedByName  string     `gorm:"size:64" json:"createdByName"`
+	LastActivityAt time.Time  `json:"lastActivityAt"`
+	ResolvedAt     *time.Time `json:"resolvedAt"`
+	ResolvedBy     string     `gorm:"size:64" json:"resolvedBy"`
+
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// EventLog 事件处置时间线，只追加不修改
+type EventLog struct {
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	EventID uint   `gorm:"index;not null" json:"eventId"`
+	Action  string `gorm:"size:16" json:"action"` // create | assign | note | status
+	// Content 一句人能看懂的说明，例如「状态 open -> processing」
+	Content   string    `gorm:"size:500" json:"content"`
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}

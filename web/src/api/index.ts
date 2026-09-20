@@ -1363,6 +1363,86 @@ export const previewAggregation = (id: number) =>
 export const detectAggregationOverlaps = () =>
   request<{ overlaps: AggregationOverlap[]; detail: string }>({ url: '/monitor/aggregation/overlaps' })
 
+// ---------- 事件中心 ----------
+
+export interface OpsEvent {
+  id: number
+  title: string
+  severity: string
+  status: string
+  statusLabel: string
+  summary: string
+  alertIds: number[]
+  origin: string
+  originNote: string
+  assignee: string
+  assignedBy: string
+  assignedAt: string | null
+  createdByName: string
+  lastActivityAt: string
+  resolvedAt: string | null
+  resolvedBy: string
+  createdAt: string
+}
+
+export interface EventLog {
+  id: number
+  eventId: number
+  action: string
+  content: string
+  operator: string
+  createdAt: string
+}
+
+export interface EventStats {
+  total: number
+  open: number
+  processing: number
+  resolved: number
+  mine: number
+  unassigned: number
+  today: number
+}
+
+export interface EventContext {
+  hosts: { id?: number; name: string; address?: string; env?: string; status: string; checkedAt?: string }[]
+  probes: Probe[]
+  certificates: Certificate[]
+  rules: AlertRule[]
+  otherLabels: Record<string, string>
+}
+
+export interface EventDetail {
+  event: OpsEvent
+  alerts: Alert[]
+  logs: EventLog[]
+  context: EventContext
+}
+
+export const listEvents = (params: Record<string, any>) =>
+  request<PageData<OpsEvent>>({ url: '/monitor/events', params })
+export const getEventStats = () => request<EventStats>({ url: '/monitor/events/stats' })
+export const getEvent = (id: number) => request<EventDetail>({ url: `/monitor/events/${id}` })
+export const createEvent = (data: Record<string, any>) =>
+  request<OpsEvent>({ url: '/monitor/events', method: 'POST', data })
+export const createEventFromBucket = (data: Record<string, any>) =>
+  request<OpsEvent>({ url: '/monitor/events/from-bucket', method: 'POST', data })
+export const assignEvent = (id: number, data: { assignee: string; note?: string }) =>
+  request<{ assignee: string }>({ url: `/monitor/events/${id}/assign`, method: 'POST', data })
+export const addEventNote = (id: number, content: string) =>
+  request({ url: `/monitor/events/${id}/note`, method: 'POST', data: { content } })
+export const updateEventStatus = (
+  id: number,
+  data: { status: string; note?: string; resolveAlerts?: boolean }
+) =>
+  request<{ status: string; resolvedAlerts: number }>({
+    url: `/monitor/events/${id}/status`,
+    method: 'POST',
+    data
+  })
+export const deleteEvent = (id: number) =>
+  request({ url: `/monitor/events/${id}`, method: 'DELETE' })
+
 
 
 

@@ -334,6 +334,16 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/aggregation/:id", middleware.RequirePerm("aggregation:manage"), h.UpdateAggregationPolicy)
 		auth.DELETE("/monitor/aggregation/:id", middleware.RequirePerm("aggregation:manage"), h.DeleteAggregationPolicy)
 		auth.GET("/monitor/aggregation/:id/preview", h.PreviewAggregation)
+
+		auth.GET("/monitor/events", h.ListEvents)
+		auth.GET("/monitor/events/stats", h.EventStats)
+		auth.GET("/monitor/events/:id", h.GetEvent)
+		auth.POST("/monitor/events", middleware.RequirePerm("event:manage"), h.CreateEvent)
+		auth.POST("/monitor/events/from-bucket", middleware.RequirePerm("event:manage"), h.CreateEventFromBucket)
+		auth.POST("/monitor/events/:id/assign", middleware.RequirePerm("event:manage"), h.AssignEvent)
+		auth.POST("/monitor/events/:id/note", middleware.RequirePerm("event:manage"), h.AddEventNote)
+		auth.POST("/monitor/events/:id/status", middleware.RequirePerm("event:manage"), h.UpdateEventStatus)
+		auth.DELETE("/monitor/events/:id", middleware.RequirePerm("event:manage"), h.DeleteEvent)
 	}
 
 	return r

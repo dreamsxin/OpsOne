@@ -3,12 +3,14 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   createAggregationPolicy,
+  createEventFromBucket,
   deleteAggregationPolicy,
   detectAggregationOverlaps,
   listAggregationDimensions,
   listAggregationPolicies,
   previewAggregation,
   updateAggregationPolicy,
+  type AggregationBucket,
   type AggregationDimension,
   type AggregationOverlap,
   type AggregationPolicy,
@@ -172,6 +174,20 @@ async function openOverlaps() {
   overlapVisible.value = true
 }
 
+async function createEventForBucket(bucket: AggregationBucket) {
+  if (!preview.value) return
+  await ElMessageBox.confirm(
+    `把这个桶里的 ${bucket.alertCount} 条告警建成一个事件？（建单时会按当前窗口重新取一次告警）`,
+    '建为事件',
+    { type: 'info' }
+  )
+  const event = await createEventFromBucket({
+    policyId: preview.value.policy.id,
+    bucketKey: bucket.key
+  })
+  ElMessage.success(`已建单 #${event.id}，可到「事件中心」指派处理`)
+}
+
 async function remove(row: AggregationPolicy) {
   await ElMessageBox.confirm(`确认删除策略「${row.name}」？已被抑制的告警记录不受影响`, '提示', {
     type: 'warning'
@@ -325,6 +341,13 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column prop="lastSeenAt" label="最近出现" min-width="180" />
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button v-perm="'event:manage'" link type="primary" @click="createEventForBucket(row)">
+              建为事件
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-drawer>
 

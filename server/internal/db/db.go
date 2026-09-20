@@ -38,6 +38,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Certificate{}, &model.AlertRule{},
 		&model.Probe{}, &model.ProbeRecord{},
 		&model.AggregationPolicy{},
+		&model.Event{}, &model.EventLog{},
 	)
 }
 
@@ -115,7 +116,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 421, ParentID: 405, Title: "维护路由", Type: "button", AuthCode: "route:manage", Sort: 1},
 		{ID: 406, ParentID: 400, Name: "AggregationPolicy", Title: "聚合策略", Path: "/monitor/aggregation", Component: "/monitor/aggregation/index", Icon: "Operation", Sort: 6},
 		{ID: 424, ParentID: 406, Title: "维护聚合策略", Type: "button", AuthCode: "aggregation:manage", Sort: 1},
-		{ID: 407, ParentID: 400, Name: "EventCenter", Title: "事件中心", Path: "/monitor/events", Component: todo, Icon: "Warning", Sort: 7},
+		{ID: 407, ParentID: 400, Name: "EventCenter", Title: "事件中心", Path: "/monitor/events", Component: "/monitor/events/index", Icon: "Warning", Sort: 7},
+		{ID: 425, ParentID: 407, Title: "建单与处置", Type: "button", AuthCode: "event:manage", Sort: 1},
 		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: todo, Icon: "Histogram", Sort: 8},
 		{ID: 409, ParentID: 400, Name: "LogQuery", Title: "日志查询", Path: "/monitor/logs", Component: todo, Icon: "Document", Sort: 9},
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: todo, Icon: "Share", Sort: 10},
