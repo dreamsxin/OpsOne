@@ -1706,6 +1706,88 @@ export const createTopologyEdge = (
 export const deleteTopologyEdge = (id: number, edgeId: number) =>
   request<{ detail: string }>({ url: `/monitor/topologies/${id}/edges/${edgeId}`, method: 'DELETE' })
 
+// ---------- 检测规则 ----------
+
+export type DetectionMode = 'concurrent' | 'sequence' | 'join'
+
+export interface DetectionStep {
+  name?: string
+  titleKeyword?: string
+  source?: string
+  severity?: string
+  labelKey?: string
+  labelValue?: string
+}
+
+export interface DetectionRule {
+  id: number
+  name: string
+  mode: DetectionMode
+  modeLabel: string
+  steps: string
+  stepList: DetectionStep[]
+  joinLabel: string
+  windowMinutes: number
+  severity: string
+  lastStatus: string
+  lastDetail: string
+  lastEvalAt: string | null
+  lastFireAt: string | null
+  enabled: boolean
+  remark: string
+}
+
+export interface DetectionMatchedAlert {
+  id: number
+  title: string
+  severity: string
+  sourceName: string
+  status: string
+  firstSeenAt: string
+}
+
+export interface DetectionStepResult {
+  index: number
+  label: string
+  matched: DetectionMatchedAlert[]
+  hit: boolean
+}
+
+export interface DetectionOutcome {
+  hit: boolean
+  steps: DetectionStepResult[]
+  joinValues: string[] | null
+  detail: string
+}
+
+export interface DetectionMeta {
+  modes: { key: DetectionMode; label: string; hint: string }[]
+  sources: string[]
+  labelKeys: string[]
+}
+
+export const listDetectionRules = () => request<DetectionRule[]>({ url: '/monitor/detection-rules' })
+export const listDetectionMeta = () => request<DetectionMeta>({ url: '/monitor/detection-rules/meta' })
+export const createDetectionRule = (data: Record<string, any>) =>
+  request<DetectionRule>({ url: '/monitor/detection-rules', method: 'POST', data })
+export const updateDetectionRule = (id: number, data: Record<string, any>) =>
+  request<DetectionRule>({ url: `/monitor/detection-rules/${id}`, method: 'PUT', data })
+export const deleteDetectionRule = (id: number) =>
+  request({ url: `/monitor/detection-rules/${id}`, method: 'DELETE' })
+/** 预演：用草稿条件看每步各命中哪些告警，不落库、不写告警 */
+export const previewDetection = (data: Record<string, any>) =>
+  request<{ scanned: number; modeLabel: string; outcome: DetectionOutcome }>({
+    url: '/monitor/detection-rules/preview',
+    method: 'POST',
+    data
+  })
+/** 试跑：和定时评估同一条路径，会真实写入状态与告警 */
+export const evaluateDetectionRule = (id: number) =>
+  request<{ status: string; scanned: number; modeLabel: string; outcome: DetectionOutcome }>({
+    url: `/monitor/detection-rules/${id}/evaluate`,
+    method: 'POST'
+  })
+
 
 
 

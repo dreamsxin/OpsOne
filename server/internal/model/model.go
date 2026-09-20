@@ -887,3 +887,34 @@ type TopologyEdge struct {
 	Label      string    `gorm:"size:32" json:"label"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
+
+// DetectionRule 检测规则：把「多条告警的组合」判定成一个问题。
+//
+// 和另外两个模块的分工：告警规则看单个指标越不越阈值，聚合策略把同类告警归堆降噪，
+// 检测规则回答「A 和 B 一起出现（或先后出现）才说明是那个故障」。
+// 它只读平台自己的告警表，不依赖任何外部关联引擎。
+type DetectionRule struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Mode sequence 顺序链（按先后）| concurrent 并发窗（同窗口内都出现）| join 窗口 Join（还要落在同一个对象上）
+	Mode string `gorm:"size:16;default:concurrent" json:"mode"`
+	// Steps 步骤定义，JSON 数组，每步是一个告警匹配条件：
+	// [{"name":"网关 5xx","titleKeyword":"5xx","source":"","severity":"","labelKey":"","labelValue":""}]
+	Steps string `gorm:"type:text" json:"steps"`
+	// JoinLabel mode=join 时用来对齐的标签键，例如 host：两步都得是同一台机器上的告警才算
+	JoinLabel string `gorm:"size:32" json:"joinLabel"`
+	// WindowMinutes 关联窗口。窗口内「发生过」的告警都算，包括已恢复的
+	WindowMinutes int    `gorm:"default:30" json:"windowMinutes"`
+	Severity      string `gorm:"size:16;default:warning" json:"severity"`
+
+	LastStatus string     `gorm:"size:16;default:unknown" json:"lastStatus"` // unknown | ok | firing | error
+	LastDetail string     `gorm:"size:500" json:"lastDetail"`
+	LastEvalAt *time.Time `json:"lastEvalAt"`
+	LastFireAt *time.Time `json:"lastFireAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

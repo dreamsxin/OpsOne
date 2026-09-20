@@ -41,6 +41,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Event{}, &model.EventLog{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
+		&model.DetectionRule{},
 	)
 }
 
@@ -115,7 +116,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 420, ParentID: 402, Title: "确认与恢复", Type: "button", AuthCode: "alert:handle", Sort: 1},
 		{ID: 403, ParentID: 400, Name: "AlertRule", Title: "告警规则", Path: "/monitor/alert-rules", Component: "/monitor/alert-rules/index", Icon: "Tickets", Sort: 3},
 		{ID: 422, ParentID: 403, Title: "维护与试跑规则", Type: "button", AuthCode: "alertrule:manage", Sort: 1},
-		{ID: 404, ParentID: 400, Name: "DetectionRule", Title: "检测规则", Path: "/monitor/detection-rules", Component: todo, Icon: "Aim", Sort: 4},
+		{ID: 404, ParentID: 400, Name: "DetectionRule", Title: "检测规则", Path: "/monitor/detection-rules", Component: "/monitor/detection-rules/index", Icon: "Aim", Sort: 4},
+		{ID: 427, ParentID: 404, Title: "维护与试跑检测规则", Type: "button", AuthCode: "detection:manage", Sort: 1},
 		{ID: 405, ParentID: 400, Name: "NotifyRouting", Title: "通知路由", Path: "/monitor/routing", Component: "/monitor/routing/index", Icon: "Guide", Sort: 5},
 		{ID: 421, ParentID: 405, Title: "维护路由", Type: "button", AuthCode: "route:manage", Sort: 1},
 		{ID: 406, ParentID: 400, Name: "AggregationPolicy", Title: "聚合策略", Path: "/monitor/aggregation", Component: "/monitor/aggregation/index", Icon: "Operation", Sort: 6},

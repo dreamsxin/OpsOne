@@ -39,6 +39,10 @@ type Config struct {
 	// RetentionSpec 数据留存清理的 cron 表达式。留空表示不自动清理，
 	// 只能在「数据留存」页面手动执行。
 	RetentionSpec string
+
+	// DetectionSpec 检测规则评估的 cron 表达式。留空表示不做定时评估，
+	// 规则只能在界面上手动试跑。
+	DetectionSpec string
 }
 
 func Load() *Config {
@@ -55,6 +59,7 @@ func Load() *Config {
 		AlertRuleSpec:    strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 		ProbeSpec:        strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),
 		RetentionSpec:    strings.TrimSpace(env("OPS_RETENTION_SPEC", "30 3 * * *")),
+		DetectionSpec:    strings.TrimSpace(env("OPS_DETECTION_SPEC", "*/5 * * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

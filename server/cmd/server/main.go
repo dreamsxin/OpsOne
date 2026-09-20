@@ -68,6 +68,14 @@ func main() {
 	} else {
 		log.Println("[retention] 定时清理未启用（OPS_RETENTION_SPEC 为空），只能手动清理")
 	}
+	if cfg.DetectionSpec != "" {
+		if err := sched.AddFixed(cfg.DetectionSpec, h.EvaluateDetectionRulesForSchedule); err != nil {
+			log.Fatalf("检测规则 cron 表达式无效(%s): %v", cfg.DetectionSpec, err)
+		}
+		log.Printf("[detection] 定时评估已启用: %s", cfg.DetectionSpec)
+	} else {
+		log.Println("[detection] 定时评估未启用（OPS_DETECTION_SPEC 为空），只能手动试跑")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -327,6 +335,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.UpdateAlertRule)
 		auth.DELETE("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.DeleteAlertRule)
 		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
+
+		auth.GET("/monitor/detection-rules/meta", h.ListDetectionMeta)
+		auth.GET("/monitor/detection-rules", h.ListDetectionRules)
+		auth.POST("/monitor/detection-rules", middleware.RequirePerm("detection:manage"), h.CreateDetectionRule)
+		auth.POST("/monitor/detection-rules/preview", middleware.RequirePerm("detection:manage"), h.PreviewDetection)
+		auth.PUT("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.UpdateDetectionRule)
+		auth.DELETE("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.DeleteDetectionRule)
+		auth.POST("/monitor/detection-rules/:id/evaluate", middleware.RequirePerm("detection:manage"), h.EvaluateDetectionRule)
 
 		auth.GET("/monitor/health", h.PlatformHealth)
 
