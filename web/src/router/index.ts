@@ -1,0 +1,122 @@
+import {
+  createRouter,
+  createWebHistory,
+  type RouteRecordRaw,
+  type Router
+} from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import type { MenuNode } from '@/api'
+
+// 所有业务页面按约定放在 views 下，后端菜单的 component 字段与此路径对应
+// glob 的 key 形态在不同 Vite 版本下可能是相对路径或 /src 开头，统一归一化成 /dashboard/index 这种后缀
+const viewLoaders: Record<string, () => Promise<unknown>> = {}
+for (const [key, loader] of Object.entries(import.meta.glob('../views/**/*.vue'))) {
+  const matched = key.match(/views(\/.*)\.vue$/)
+  if (matched) {
+    viewLoaders[matched[1]] = loader as () => Promise<unknown>
+  }
+}
+
+
+const staticRoutes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/login/index.vue'),
+    meta: { title: '登录', public: true }
+  },
+  {
+    path: '/',
+    name: 'Root',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/dashboard/overview',
+
+    children: []
+  },
+  {
+    path: '/403',
+    name: 'Forbidden',
+    component: () => import('@/views/error/403.vue'),
+    meta: { title: '无权访问' }
+  },
+  {
+    // 不能标记为 public：否则未登录访问业务路径时会先命中这里并直接渲染 404，
+    // 而不是跳转登录页
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/error/404.vue'),
+    meta: { title: '页面不存在' }
+  }
+
+]
+
+export const router: Router = createRouter({
+  history: createWebHistory(),
+  routes: staticRoutes
+})
+
+function resolveComponent(component: string) {
+  return viewLoaders[component]
+}
+
+
+/** 把后端菜单树拍平成路由，挂到布局容器下 */
+function toRoutes(menus: MenuNode[]): RouteRecordRaw[] {
+  const routes: RouteRecordRaw[] = []
+  for (const menu of menus) {
+    if (menu.component) {
+      const loader = resolveComponent(menu.component)
+      if (!loader) {
+        console.warn(`[router] 菜单 ${menu.title} 指向的组件不存在: ${menu.component}`)
+      } else {
+        routes.push({
+          path: menu.path,
+          name: menu.name || menu.path,
+          component: loader as never,
+          meta: { title: menu.title, icon: menu.icon, hidden: menu.hidden }
+        })
+      }
+    }
+    if (menu.children?.length) {
+      routes.push(...toRoutes(menu.children))
+    }
+  }
+  return routes
+}
+
+export function registerDynamicRoutes(menus: MenuNode[]) {
+  for (const route of toRoutes(menus)) {
+    if (!router.hasRoute(route.name!)) {
+      router.addRoute('Root', route)
+    }
+  }
+}
+
+router.beforeEach(async (to) => {
+  const store = useUserStore()
+
+  // 动态路由未注册时必须先注册再放行：否则任何业务路径都会先命中兜底的 404 路由
+  if (store.isLogin && !store.routesReady) {
+    try {
+      await store.loadProfile()
+      registerDynamicRoutes(store.menus)
+      store.routesReady = true
+      // 只带 path/query/hash 重新解析，避免把已匹配到 404 的 name 一起透传
+      return { path: to.path, query: to.query, hash: to.hash, replace: true }
+    } catch {
+      store.logout()
+      return { path: '/login' }
+    }
+  }
+
+  if (to.meta.public) {
+    return true
+  }
+  if (!store.isLogin) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
+})
+
+
+export default router

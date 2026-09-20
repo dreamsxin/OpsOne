@@ -1,0 +1,22 @@
+# 依赖与构建产物
+node_modules/
+web/dist/
+web/.vite/
+
+# 本地数据库与日志
+server/ops.db
+server/*.db
+*.log
+
+# 会话录像
+server/recordings/
+
+
+# 编译产物
+server/server
+server/server.exe
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store

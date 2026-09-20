@@ -1,0 +1,250 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"ops-platform/server/internal/model"
+	"ops-platform/server/internal/response"
+	"ops-platform/server/internal/sshx"
+)
+
+type hostReq struct {
+	Name        string `json:"name" binding:"required"`
+	Address     string `json:"address" binding:"required"`
+	Port        int    `json:"port"`
+	Username    string `json:"username" binding:"required"`
+	AuthType    string `json:"authType"`
+	Secret      string `json:"secret"` // 密码或私钥，更新时留空表示不变
+	Env         string `json:"env"`
+	Tags        string `json:"tags"`
+	Remark      string `json:"remark"`
+	ProxyHostID uint   `json:"proxyHostId"` // 跳板机，0 表示直连
+}
+
+// ListHosts 主机清单，支持关键字与环境过滤
+func (h *Handler) ListHosts(c *gin.Context) {
+	page, size := pageParams(c)
+	q := h.DB.Model(&model.Host{})
+
+	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("name LIKE ? OR address LIKE ? OR tags LIKE ?", like, like, like)
+	}
+	if env := c.Query("env"); env != "" {
+		q = q.Where("env = ?", env)
+	}
+	if status := c.Query("status"); status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		response.Error(c, "查询主机失败")
+		return
+	}
+	var list []model.Host
+	if err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
+		response.Error(c, "查询主机失败")
+		return
+	}
+	response.OKPage(c, list, total, page, size)
+}
+
+// CreateHost 新增主机
+func (h *Handler) CreateHost(c *gin.Context) {
+	var req hostReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "主机名称、地址、登录用户为必填项")
+		return
+	}
+	if req.Secret == "" {
+		response.BadRequest(c, "请提供登录密码或私钥")
+		return
+	}
+	if req.ProxyHostID != 0 {
+		if err := h.DB.First(&model.Host{}, req.ProxyHostID).Error; err != nil {
+			response.BadRequest(c, "指定的跳板机不存在")
+			return
+		}
+	}
+
+	host := model.Host{
+		Name: req.Name, Address: req.Address, Port: defaultPort(req.Port),
+		Username: req.Username, AuthType: defaultAuth(req.AuthType), Secret: req.Secret,
+		Env: defaultEnv(req.Env), Tags: req.Tags, Remark: req.Remark, Status: "unknown",
+		ProxyHostID: req.ProxyHostID,
+	}
+	if err := h.DB.Create(&host).Error; err != nil {
+		response.Error(c, "主机创建失败")
+		return
+	}
+	response.OK(c, host)
+}
+
+// UpdateHost 编辑主机
+func (h *Handler) UpdateHost(c *gin.Context) {
+	var host model.Host
+	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
+		response.NotFound(c, "主机不存在")
+		return
+	}
+	var req hostReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数校验失败")
+		return
+	}
+	if req.ProxyHostID == host.ID {
+		response.BadRequest(c, "跳板机不能是自己")
+		return
+	}
+	if req.ProxyHostID != 0 {
+		if err := h.DB.First(&model.Host{}, req.ProxyHostID).Error; err != nil {
+			response.BadRequest(c, "指定的跳板机不存在")
+			return
+		}
+	}
+
+	// 地址或端口变了，原有主机指纹不再可信，清空以便重新记录
+	if host.Address != req.Address || host.Port != defaultPort(req.Port) {
+		host.HostKey = ""
+	}
+
+	host.Name, host.Address, host.Port = req.Name, req.Address, defaultPort(req.Port)
+	host.Username, host.AuthType = req.Username, defaultAuth(req.AuthType)
+	host.Env, host.Tags, host.Remark = defaultEnv(req.Env), req.Tags, req.Remark
+	host.ProxyHostID = req.ProxyHostID
+
+	if req.Secret != "" {
+		host.Secret = req.Secret
+	}
+	if err := h.DB.Save(&host).Error; err != nil {
+		response.Error(c, "主机更新失败")
+		return
+	}
+	response.OK(c, host)
+}
+
+// DeleteHost 删除主机
+func (h *Handler) DeleteHost(c *gin.Context) {
+	id := idParam(c)
+	var refCount int64
+	h.DB.Model(&model.Host{}).Where("proxy_host_id = ?", id).Count(&refCount)
+	if refCount > 0 {
+		response.BadRequest(c, fmt.Sprintf("该主机被 %d 台主机作为跳板机使用，请先解除引用", refCount))
+		return
+	}
+	if err := h.DB.Delete(&model.Host{}, id).Error; err != nil {
+		response.Error(c, "主机删除失败")
+		return
+	}
+	response.OK(c, nil)
+}
+
+// CheckHost 连通性探测，顺带采集系统信息
+func (h *Handler) CheckHost(c *gin.Context) {
+	var host model.Host
+	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
+		response.NotFound(c, "主机不存在")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+	res := sshx.Run(ctx, h.target(&host), "uname -srm 2>/dev/null || ver")
+
+	now := time.Now()
+	host.CheckedAt = &now
+	if res.Status == "success" {
+		host.Status = "online"
+		host.OSInfo = strings.TrimSpace(res.Stdout)
+	} else {
+		host.Status = "offline"
+	}
+	h.DB.Model(&host).Select("status", "os_info", "checked_at").Updates(host)
+
+	response.OK(c, gin.H{
+		"status":   host.Status,
+		"osInfo":   host.OSInfo,
+		"detail":   strings.TrimSpace(res.Stderr),
+		"costMs":   res.CostMs,
+		"viaProxy": h.proxyLabel(&host),
+	})
+}
+
+// target 构造 SSH 连接目标，按 ProxyHostID 递归拼出跳板链。
+// 开启指纹校验时，首次连接学到的主机公钥会写回数据库。
+func (h *Handler) target(host *model.Host) sshx.Target {
+	return h.buildTarget(host, map[uint]bool{})
+}
+
+func (h *Handler) buildTarget(host *model.Host, seen map[uint]bool) sshx.Target {
+	hostID := host.ID
+	t := sshx.Target{
+		Address:       host.Address,
+		Port:          host.Port,
+		Username:      host.Username,
+		AuthType:      host.AuthType,
+		Secret:        host.Secret,
+		StrictHostKey: h.Cfg.SSHStrictHostKey,
+		KnownHostKey:  host.HostKey,
+		OnLearnHostKey: func(authorizedKey string) {
+			h.DB.Model(&model.Host{}).Where("id = ?", hostID).Update("host_key", authorizedKey)
+		},
+	}
+
+	seen[host.ID] = true
+	if host.ProxyHostID != 0 && !seen[host.ProxyHostID] {
+		var proxy model.Host
+		if err := h.DB.First(&proxy, host.ProxyHostID).Error; err == nil {
+			proxyTarget := h.buildTarget(&proxy, seen)
+			t.Proxy = &proxyTarget
+		}
+	}
+	return t
+}
+
+// proxyLabel 返回跳板链的可读描述，直连时为空字符串
+func (h *Handler) proxyLabel(host *model.Host) string {
+	labels := make([]string, 0, sshx.MaxProxyDepth)
+	seen := map[uint]bool{host.ID: true}
+	next := host.ProxyHostID
+
+	for next != 0 && !seen[next] && len(labels) < sshx.MaxProxyDepth {
+		seen[next] = true
+		var proxy model.Host
+		if err := h.DB.First(&proxy, next).Error; err != nil {
+			break
+		}
+		labels = append(labels, fmt.Sprintf("%s(%s)", proxy.Name, proxy.Address))
+		next = proxy.ProxyHostID
+	}
+	return strings.Join(labels, " → ")
+}
+
+func defaultPort(p int) int {
+	if p <= 0 || p > 65535 {
+		return 22
+	}
+	return p
+}
+
+func defaultAuth(a string) string {
+	if a == "key" {
+		return "key"
+	}
+	return "password"
+}
+
+func defaultEnv(e string) string {
+	switch e {
+	case "test", "prod":
+		return e
+	default:
+		return "dev"
+	}
+}

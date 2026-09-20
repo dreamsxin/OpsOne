@@ -1,0 +1,97 @@
+# OpsOne
+
+一体化运维管理平台。把主机资产、远程执行、堡垒机审计、容器、监控告警、组织权限收敛到一个工作台，面向中小规模自建环境。
+
+后端 Go + Gin + GORM，前端 Vue 3 + TypeScript + Vite + Element Plus，默认 SQLite 落地、零外部依赖即可跑起来。
+
+## 已实现
+
+- **主机资产**：CRUD、环境/标签/状态过滤、SSH 连通性探测并采集系统信息
+- **跳板机代理**：主机可关联跳板机，连接时先登录跳板机再在其隧道内握手到目标，终端与批量执行共用该链路，最多 3 层、成环即拒
+- **Web 终端**：SSH PTY、窗口自适应、断线提示
+- **会话录像与回放**：asciinema v2 格式落盘，网页端 xterm 回放，支持 1/2/4/8 倍速与按命令定位
+- **命令审计与拦截**：服务端在输入流上还原命令行并按正则规则判定，命中拦截规则则不下发、清空当前行并告知操作人；内置 7 条高危规则，支持在线试跑
+- **文件管理**：SFTP 目录浏览、上传、下载、新建目录、重命名、删除，全部动作留痕
+- **定时任务**：cron 表达式编排批量命令、多主机并发下发、启停与立即执行、运行历史
+- **批量执行**：并发下发（默认上限 10）、单机超时、生产环境二次确认、逐台输出留存
+- **RBAC**：用户 / 角色 / 菜单三级授权，菜单与按钮两级权限，后端逐接口校验
+- **操作审计**：写操作记录操作人、接口、状态码、来源 IP、耗时
+
+其余模块（容器平台、监控告警、安全合规、配置中心等）菜单与权限位已就位，实现状态见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+
+## 快速开始
+
+需要 Go 1.25+、Node 20+、pnpm。
+
+```bash
+# 后端，默认监听 :8080，首次启动自动建表并创建 admin
+cd server
+export OPS_JWT_SECRET="$(openssl rand -hex 32)"
+go run ./cmd/server
+
+# 前端，默认 http://127.0.0.1:5173
+cd web
+pnpm install
+pnpm dev
+```
+
+初始账号 `admin`，初始口令取自 `OPS_ADMIN_PASSWORD`（默认 `Admin@123456`），**首次登录后立即修改**。
+
+Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
+
+## 配置项
+
+全部通过环境变量注入：
+
+- `OPS_ADDR` — 监听地址，默认 `:8080`
+- `OPS_DSN` — SQLite 文件路径，默认 `ops.db`；换 MySQL/PostgreSQL 只需改 `server/internal/db/db.go` 里的 driver
+- `OPS_JWT_SECRET` — 令牌签名密钥，**生产必填**，未设置时使用开发默认值并打印告警
+- `OPS_TOKEN_TTL_HOUR` — 令牌有效期，默认 12
+- `OPS_ALLOW_ORIGINS` — CORS 与 WebSocket Origin 白名单，逗号分隔，默认 `http://localhost:5173`
+- `OPS_ADMIN_PASSWORD` — 内置管理员初始口令，默认 `Admin@123456`
+- `OPS_RECORD_DIR` — 会话录像目录，默认 `recordings`
+- `OPS_SSH_STRICT_HOST_KEY` — 是否校验 SSH 主机指纹，默认 `false`；置 `true` 后首次连接记录指纹（TOFU），之后指纹变化即拒绝
+- `OPS_DEBUG` — `true` 时输出 SQL 日志并启用 gin 调试模式，默认 `true`
+
+## 目录结构
+
+```
+server/
+  cmd/server/          入口与路由注册
+  internal/bastion/    会话录像、命令审计
+  internal/config/     环境变量配置
+  internal/db/         迁移与种子数据（菜单、角色、内置规则）
+  internal/handler/    HTTP 处理器
+  internal/middleware/ 认证、权限、审计
+  internal/model/      数据模型
+  internal/scheduler/  定时任务调度
+  internal/sshx/       SSH 连接、跳板链、命令执行
+web/
+  src/api/             接口定义与 axios 封装
+  src/layouts/         主框架
+  src/router/          静态路由 + 后端菜单动态注册
+  src/stores/          用户与权限状态
+  src/views/           业务页面
+docs/
+  ROADMAP.md           模块清单与实现状态
+  SECURITY.md          安全设计与已知风险
+```
+
+## 菜单与权限
+
+菜单树当前由种子数据统一维护（`server/internal/db/db.go` 的 `Seed`），按 ID 分段：10 工作台 / 100 资产 / 200 运维执行 / 300 容器 / 400 监控告警 / 500 安全合规 / 600 智能与成本 / 700 配置中心 / 800 系统管理 / 900 消息中心。种子数据是权威来源，启动时全量覆盖并清理不在清单内的历史菜单。
+
+新增页面：在 `web/src/views` 下建 `xxx/index.vue`，再往种子数据里加一条菜单，`Component` 填 `/xxx/index` 即可；前端按后端下发的菜单动态注册路由。按钮级权限用 `v-perm="'host:create'"`，后端对应接口挂 `middleware.RequirePerm`。
+
+## 安全须知
+
+部署前务必阅读 [docs/SECURITY.md](docs/SECURITY.md)。当前有几处明确的取舍需要知晓：
+
+- 主机登录凭据**明文存储**在数据库，数据库文件与备份等同于凭据本体
+- SSH 主机指纹默认不校验，存在中间人风险，可用 `OPS_SSH_STRICT_HOST_KEY=true` 开启
+- 命令拦截是 PTY 层面的启发式手段，能挡常见误操作，但拦不住 `vim :!cmd`、base64 解码执行等绕过，不能当作强制访问控制
+- 会话录像包含终端输出全文，可能含配置与令牌，需按敏感数据管理
+
+## License
+
+[MIT](LICENSE)
