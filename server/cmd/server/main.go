@@ -172,6 +172,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.UpdateMenu)
 		auth.DELETE("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.DeleteMenu)
 		auth.GET("/system/audit-logs", h.ListAuditLogs)
+		auth.GET("/system/audit-logs/operators", h.AuditOperators)
+		auth.GET("/system/audit-logs/export", h.ExportAuditLogs)
 
 		auth.GET("/site-links", h.ListSiteLinks)
 		auth.POST("/site-links", middleware.RequirePerm("config:manage"), h.CreateSiteLink)

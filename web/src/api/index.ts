@@ -534,11 +534,18 @@ export interface AuditLog {
   username: string
   method: string
   path: string
+  action: string
   status: number
   ip: string
   costMs: number
   createdAt: string
 }
+
+/** 审计检索结果：除分页数据外带上命中条件里的失败条数 */
+export interface AuditPage extends PageData<AuditLog> {
+  failed: number
+}
+
 
 export interface MenuTreeNode {
   id: number
@@ -700,7 +707,8 @@ export const previewEmailTemplate = (id: number, vars?: Record<string, string>) 
   })
 
 export const listAuditLogs = (params: Record<string, any>) =>
-  request<PageData<AuditLog>>({ url: '/system/audit-logs', params })
+  request<AuditPage>({ url: '/system/audit-logs', params })
+export const listAuditOperators = () => request<string[]>({ url: '/system/audit-logs/operators' })
 
 // ---------- 文件管理 ----------
 
@@ -1527,6 +1535,16 @@ export const downloadHostTemplate = () =>
   downloadBlob('/hosts/import-template', 'host-import-template.csv')
 export const exportHostsCSV = (env?: string) =>
   downloadBlob(env ? `/hosts/export?env=${env}` : '/hosts/export', 'hosts.csv')
+
+/** 导出审计：用的是和列表完全相同的检索条件，导出内容与界面所见一致 */
+export const exportAuditLogsCSV = (params: Record<string, any>) => {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== '' && value !== undefined && value !== null) search.append(key, String(value))
+  })
+  const query = search.toString()
+  return downloadBlob(`/system/audit-logs/export${query ? `?${query}` : ''}`, 'audit-logs.csv')
+}
 
 // ---------- 脚本库 ----------
 

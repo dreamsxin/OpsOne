@@ -304,27 +304,6 @@ func buildFullTree(menus []model.Menu, parent uint) []FullMenuNode {
 	return nodes
 }
 
-// ---------- 审计 ----------
-
-func (h *Handler) ListAuditLogs(c *gin.Context) {
-	page, size := pageParams(c)
-	q := h.DB.Model(&model.AuditLog{})
-	if kw := c.Query("username"); kw != "" {
-		q = q.Where("username LIKE ?", "%"+kw+"%")
-	}
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		response.Error(c, "查询审计日志失败")
-		return
-	}
-	var list []model.AuditLog
-	if err := q.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
-		response.Error(c, "查询审计日志失败")
-		return
-	}
-	response.OKPage(c, list, total, page, size)
-}
-
 // ---------- 工作台 ----------
 
 func (h *Handler) DashboardStats(c *gin.Context) {
