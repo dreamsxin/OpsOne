@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
+  getKubePodLogs,
   listKubeClusters,
   listKubeEvents,
   listKubeNamespaces,
@@ -114,6 +115,102 @@ const phaseType: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
   Failed: 'danger'
 }
 
+// ---------- 容器日志 ----------
+const logView = reactive({
+  visible: false,
+  namespace: '',
+  pod: '',
+  containers: [] as string[],
+  container: '',
+  previous: false,
+  timestamps: false,
+  tailLines: 500,
+  text: '',
+  lines: 0,
+  truncated: false,
+  loading: false,
+  autoRefresh: false,
+  fetchedAt: ''
+})
+let autoTimer: number | undefined
+const logBox = ref<HTMLElement | null>(null)
+
+function openLogs(pod: KubePod) {
+  logView.visible = true
+  logView.namespace = pod.namespace
+  logView.pod = pod.name
+  // init 容器也能选：Pod 卡在 Init 阶段时要看的就是它
+  logView.containers = [...(pod.containers || []), ...(pod.initContainers || [])]
+  logView.container = logView.containers[0] || ''
+  logView.previous = false
+  logView.text = ''
+  logView.lines = 0
+  logView.truncated = false
+  logView.autoRefresh = false
+  loadLogs()
+}
+
+async function loadLogs() {
+  if (!clusterId.value || !logView.pod) return
+  logView.loading = true
+  try {
+    const res = await getKubePodLogs(clusterId.value, {
+      namespace: logView.namespace,
+      pod: logView.pod,
+      ...(logView.container ? { container: logView.container } : {}),
+      tailLines: logView.tailLines,
+      ...(logView.previous ? { previous: 'true' } : {}),
+      ...(logView.timestamps ? { timestamps: 'true' } : {})
+    })
+    logView.text = res.logs
+    logView.lines = res.lines
+    logView.truncated = res.truncated
+    logView.fetchedAt = new Date().toLocaleTimeString()
+    // 日志是追加的，默认看最新的那几行
+    requestAnimationFrame(() => {
+      if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight
+    })
+  } catch (err: any) {
+    logView.text = ''
+    ElMessage.error(err?.message || '读取日志失败')
+    logView.autoRefresh = false
+  } finally {
+    logView.loading = false
+  }
+}
+
+function toggleAutoRefresh(on: boolean) {
+  window.clearInterval(autoTimer)
+  if (on) {
+    autoTimer = window.setInterval(loadLogs, 5000)
+  }
+}
+
+function downloadLogs() {
+  const name = `${logView.pod}${logView.container ? '-' + logView.container : ''}${
+    logView.previous ? '-previous' : ''
+  }.log`
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(new Blob([logView.text], { type: 'text/plain;charset=utf-8' }))
+  link.download = name
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+watch(() => logView.visible, (open) => {
+  if (!open) {
+    logView.autoRefresh = false
+    window.clearInterval(autoTimer)
+  }
+})
+watch(() => logView.autoRefresh, toggleAutoRefresh)
+watch(() => [logView.container, logView.previous, logView.timestamps, logView.tailLines], () => {
+  if (logView.visible) loadLogs()
+})
+
+onUnmounted(() => window.clearInterval(autoTimer))
+
+
 onMounted(async () => {
   await loadClusters()
   if (clusterId.value) {
@@ -222,6 +319,11 @@ onMounted(async () => {
                   <span v-else>—</span>
                 </template>
               </el-table-column>
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openLogs(row)">日志</el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
 
@@ -245,5 +347,68 @@ onMounted(async () => {
         </el-tabs>
       </template>
     </el-card>
+
+    <el-drawer v-model="logView.visible" size="70%" :title="`容器日志：${logView.pod}`">
+      <div class="log-toolbar">
+        <el-select v-model="logView.container" placeholder="容器" style="width: 180px">
+          <el-option v-for="name in logView.containers" :key="name" :label="name" :value="name" />
+        </el-select>
+        <el-select v-model="logView.tailLines" style="width: 130px">
+          <el-option :value="200" label="最后 200 行" />
+          <el-option :value="500" label="最后 500 行" />
+          <el-option :value="2000" label="最后 2000 行" />
+          <el-option :value="5000" label="最后 5000 行" />
+        </el-select>
+        <el-checkbox v-model="logView.previous">上一个容器</el-checkbox>
+        <el-checkbox v-model="logView.timestamps">时间戳</el-checkbox>
+        <el-checkbox v-model="logView.autoRefresh">每 5 秒刷新</el-checkbox>
+        <el-button :loading="logView.loading" @click="loadLogs">刷新</el-button>
+        <el-button :disabled="!logView.text" @click="downloadLogs">下载</el-button>
+      </div>
+      <div class="log-meta">
+        {{ logView.namespace }} · {{ logView.lines }} 行
+        <span v-if="logView.fetchedAt">· 取于 {{ logView.fetchedAt }}</span>
+        <span v-if="logView.truncated" style="color: var(--el-color-warning)">
+          · 已达 1MB 上限，只显示前面部分，要看全量请减少行数或下载
+        </span>
+      </div>
+      <div ref="logBox" v-loading="logView.loading" class="log-box">
+        <pre v-if="logView.text">{{ logView.text }}</pre>
+        <el-empty
+          v-else
+          :description="logView.previous ? '上一个容器没有日志（容器可能还没重启过）' : '这个容器暂时没有输出'"
+        />
+      </div>
+    </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.log-meta {
+  margin: 8px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.log-box {
+  height: calc(100vh - 220px);
+  overflow: auto;
+  padding: 8px 12px;
+  background: #1e1e1e;
+  border-radius: 4px;
+}
+.log-box pre {
+  margin: 0;
+  color: #d4d4d4;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+</style>

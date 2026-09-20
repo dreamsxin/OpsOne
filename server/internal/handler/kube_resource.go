@@ -260,13 +260,19 @@ func (h *Handler) ScaleKubeResource(c *gin.Context) {
 }
 
 // respondKubeError 按 API Server 的说法挑一个合适的状态码。
-// 对象不存在是操作者填错了名字，报 404 比 500 好判断。
+//
+// 对象不存在、字段不合法都是调用方填错了，报 404 / 400 比一律 500 好判断；
+// 其余（连不上、没权限、准入拒绝）才算服务端问题。
 func respondKubeError(c *gin.Context, message string, opErr error) {
-	if strings.Contains(opErr.Error(), "not found") {
+	detail := opErr.Error()
+	switch {
+	case strings.Contains(detail, "not found"):
 		response.NotFound(c, message)
-		return
+	case strings.Contains(detail, "API 返回 400"), strings.Contains(detail, "API 返回 422"):
+		response.BadRequest(c, message)
+	default:
+		response.Error(c, message)
 	}
-	response.Error(c, message)
 }
 
 // recordKubeChange 落一条集群写操作留痕。失败也记，且记下 API Server 的原话。

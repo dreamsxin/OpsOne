@@ -1856,8 +1856,22 @@ export interface KubePod {
   ready: string
   restarts: number
   images: string[]
+  containers: string[]
+  initContainers: string[]
+  restarted: boolean
   containerMsg: string
   createdAt: string
+}
+
+export interface KubePodLogs {
+  namespace: string
+  pod: string
+  container: string
+  previous: boolean
+  logs: string
+  lines: number
+  truncated: boolean
+  tailLines: number
 }
 
 export interface KubeEvent {
@@ -1902,6 +1916,8 @@ export const listKubePods = (id: number, namespace?: string) =>
     url: `/kube/clusters/${id}/pods`,
     params: namespace ? { namespace } : {}
   })
+export const getKubePodLogs = (id: number, params: Record<string, any>) =>
+  request<KubePodLogs>({ url: `/kube/clusters/${id}/pod-logs`, params })
 export const listKubeEvents = (id: number, namespace?: string, onlyWarning?: boolean) =>
   request<{ items: KubeEvent[]; total: number }>({
     url: `/kube/clusters/${id}/events`,

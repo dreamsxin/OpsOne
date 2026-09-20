@@ -394,6 +394,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/kube/clusters/:id/namespaces", h.KubeNamespaces)
 		auth.GET("/kube/clusters/:id/workloads", h.KubeWorkloads)
 		auth.GET("/kube/clusters/:id/pods", h.KubePods)
+		auth.GET("/kube/clusters/:id/pod-logs", h.KubePodLogs)
 		auth.GET("/kube/clusters/:id/events", h.KubeEvents)
 		auth.GET("/kube/resource-kinds", h.KubeResourceKinds)
 		auth.GET("/kube/clusters/:id/resources", h.KubeResources)

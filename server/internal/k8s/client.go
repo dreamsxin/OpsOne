@@ -115,6 +115,49 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values,
 	return json.Unmarshal(raw, out)
 }
 
+// getRaw 发一次 GET 并原样返回响应体。
+//
+// 日志这类纯文本接口不能走 JSON 解码；limit 用来防止一次把内存拉爆，
+// 返回值第二项说明是否已被截断（上层要告诉用户「只看到一部分」）。
+func (c *Client) getRaw(ctx context.Context, path string, query url.Values, limit int64) ([]byte, bool, error) {
+	target := c.cfg.Server + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	if c.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	} else if c.cfg.Username != "" {
+		req.SetBasicAuth(c.cfg.Username, c.cfg.Password)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+
+	// 多读 1 字节，用来判断是否触到了上限
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode >= 400 {
+		var status apiStatus
+		if json.Unmarshal(body, &status) == nil && status.Message != "" {
+			return nil, false, fmt.Errorf("API 返回 %d: %s", resp.StatusCode, status.Message)
+		}
+		return nil, false, fmt.Errorf("API 返回 %d", resp.StatusCode)
+	}
+	if int64(len(body)) > limit {
+		return body[:limit], true, nil
+	}
+	return body, false, nil
+}
+
 // ---------- 版本与节点 ----------
 
 // VersionInfo /version 的返回
@@ -363,16 +406,21 @@ func (c *Client) DaemonSets(ctx context.Context, namespace string) ([]Workload, 
 // ---------- Pod ----------
 
 type Pod struct {
-	Namespace    string    `json:"namespace"`
-	Name         string    `json:"name"`
-	Phase        string    `json:"phase"`
-	NodeName     string    `json:"nodeName"`
-	PodIP        string    `json:"podIP"`
-	Ready        string    `json:"ready"` // 形如 1/2
-	Restarts     int       `json:"restarts"`
-	Images       []string  `json:"images"`
-	CreatedAt    time.Time `json:"createdAt"`
-	ContainerMsg string    `json:"containerMsg"` // 不正常容器的原因，例如 CrashLoopBackOff
+	Namespace string    `json:"namespace"`
+	Name      string    `json:"name"`
+	Phase     string    `json:"phase"`
+	NodeName  string    `json:"nodeName"`
+	PodIP     string    `json:"podIP"`
+	Ready     string    `json:"ready"` // 形如 1/2
+	Restarts  int       `json:"restarts"`
+	Images    []string  `json:"images"`
+	CreatedAt time.Time `json:"createdAt"`
+	// Containers 容器名，看日志时要指定；init 容器用 initContainers 单列
+	Containers     []string `json:"containers"`
+	InitContainers []string `json:"initContainers"`
+	// Restarted 有容器重启过，说明「上一个容器的日志」有内容可看
+	Restarted    bool   `json:"restarted"`
+	ContainerMsg string `json:"containerMsg"` // 不正常容器的原因，例如 CrashLoopBackOff
 }
 
 func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
@@ -386,8 +434,12 @@ func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
 			Spec struct {
 				NodeName   string `json:"nodeName"`
 				Containers []struct {
+					Name  string `json:"name"`
 					Image string `json:"image"`
 				} `json:"containers"`
+				InitContainers []struct {
+					Name string `json:"name"`
+				} `json:"initContainers"`
 			} `json:"spec"`
 			Status struct {
 				Phase             string `json:"phase"`
@@ -420,10 +472,14 @@ func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
 			Namespace: item.Metadata.Namespace, Name: item.Metadata.Name,
 			Phase: item.Status.Phase, NodeName: item.Spec.NodeName,
 			PodIP: item.Status.PodIP, CreatedAt: item.Metadata.CreationTimestamp,
-			Images: []string{},
+			Images: []string{}, Containers: []string{}, InitContainers: []string{},
 		}
 		for _, container := range item.Spec.Containers {
 			pod.Images = append(pod.Images, container.Image)
+			pod.Containers = append(pod.Containers, container.Name)
+		}
+		for _, container := range item.Spec.InitContainers {
+			pod.InitContainers = append(pod.InitContainers, container.Name)
 		}
 		ready := 0
 		for _, status := range item.Status.ContainerStatuses {
@@ -431,6 +487,9 @@ func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
 				ready++
 			}
 			pod.Restarts += status.RestartCount
+			if status.RestartCount > 0 {
+				pod.Restarted = true
+			}
 			if pod.ContainerMsg == "" {
 				if status.State.Waiting != nil && status.State.Waiting.Reason != "" {
 					pod.ContainerMsg = status.Name + ": " + status.State.Waiting.Reason
@@ -445,6 +504,61 @@ func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
 		list = append(list, pod)
 	}
 	return list, nil
+}
+
+// ---------- 容器日志 ----------
+
+// LogOptions 取日志的条件。零值表示「不带这个参数，交给 API Server 的默认」。
+type LogOptions struct {
+	// Container 容器名。Pod 只有一个容器时可以留空
+	Container string
+	// TailLines 只要最后多少行。0 表示全部（配合 LimitBytes 才不至于拉爆）
+	TailLines int
+	// SinceSeconds 只要最近多少秒内的
+	SinceSeconds int
+	// Previous 看上一个已退出容器的日志——排查 CrashLoopBackOff 就靠这个
+	Previous bool
+	// Timestamps 每行前面带上时间戳
+	Timestamps bool
+	// LimitBytes 本地读取上限，超出即截断并告知上层
+	LimitBytes int64
+}
+
+// logQuery 把条件拍成 URL 参数，单独拆出来是为了可单测
+func logQuery(opts LogOptions) url.Values {
+	query := url.Values{}
+	if opts.Container != "" {
+		query.Set("container", opts.Container)
+	}
+	if opts.TailLines > 0 {
+		query.Set("tailLines", strconv.Itoa(opts.TailLines))
+	}
+	if opts.SinceSeconds > 0 {
+		query.Set("sinceSeconds", strconv.Itoa(opts.SinceSeconds))
+	}
+	if opts.Previous {
+		query.Set("previous", "true")
+	}
+	if opts.Timestamps {
+		query.Set("timestamps", "true")
+	}
+	return query
+}
+
+// PodLogs 取某个容器的日志。第二个返回值表示是否因为超过 LimitBytes 被截断。
+//
+// 不做 follow（流式）：一次取一段、由界面按需刷新，链路上少一个长连接，
+// 也不用在服务端维护订阅状态。
+func (c *Client) PodLogs(ctx context.Context, namespace, pod string, opts LogOptions) (string, bool, error) {
+	if opts.LimitBytes <= 0 {
+		opts.LimitBytes = 1 << 20
+	}
+	path := namespacedPath("/api/v1", namespace, "pods") + "/" + url.PathEscape(pod) + "/log"
+	body, truncated, err := c.getRaw(ctx, path, logQuery(opts), opts.LimitBytes)
+	if err != nil {
+		return "", false, err
+	}
+	return string(body), truncated, nil
 }
 
 // ---------- 事件 ----------

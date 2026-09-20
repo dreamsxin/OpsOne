@@ -157,6 +157,7 @@
 - **强制接管字段（`force=true`）有破坏性**：字段被 kubectl 或其他控制器管理时，不强制会返回 409 并带出冲突字段名；勾了强制就按提交的 YAML 覆盖，并把字段管理者改成 `opsone`。界面上默认关闭。
 - **提交 YAML 的限制**：单个对象（多段 `---` 直接拒绝）、必须写明 `metadata.namespace`（不替它猜 default）、`apiVersion` 必须与白名单一致、单次上限 256 KB。
 - **读回的 YAML 会清掉 status 与集群自己维护的 metadata**（`resourceVersion` / `uid` / `generation` / `managedFields` / `creationTimestamp` / `ownerReferences`，以及 kubectl 的 `last-applied-configuration`），避免把集群的账本回填进 apply。嵌套的 `template.metadata.creationTimestamp: null` 与 kubectl 输出一样保留，不影响提交。
+- **容器日志是明文原样返回的**：应用往 stdout 写了什么（token、身份证号、SQL 参数），日志页就能看到什么。日志接口是只读接口，和其它只读集群接口一样**不单独绑权限码** —— 能看到「容器平台」菜单的账号就能看日志，收敛靠菜单 RBAC。单次最多取 1MB、最多 5000 行，超出如实标注截断；不落库、不做 follow 流式跟随，也不提供 exec。
 - **集群地址由管理员填写，服务端主动外联**：和 Jenkins、Webhook、证书巡检同一类出站面，拥有 `kube:manage` 的人可以让平台去连内网任意 HTTPS 端口。
 - **支持 `insecure-skip-tls-verify`**：kubeconfig 里显式声明时才生效，平台不会自己关校验。开了它就等于接受中间人风险。
 - **只接受内嵌凭据**：`client-certificate-data` / `client-key-data` / `token`。指向本地文件路径的 kubeconfig 会被拒绝 —— 平台是集中纳管，依赖某台机器上的文件会让「能不能连上」变得不可预期。

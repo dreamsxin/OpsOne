@@ -42,7 +42,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 ## 容器平台（ID 300-399）
 
 - [x] 集群接入 `/kubernetes/source` — 粘贴 kubeconfig 纳管（解析上下文后选用哪个）、连通性与版本检查、节点就绪明细（角色/容量/kubelet/cordon）；不可达或有节点 NotReady 自动写告警并可恢复，定时检查由 `OPS_KUBE_CHECK_SPEC` 控制。**只接受内嵌凭据**，不支持路径式 kubeconfig；**kubeconfig 明文存库**，见 docs/SECURITY.md 第 16 节
-- [x] 工作负载 `/kubernetes/workload` — 按命名空间看 Deployment / StatefulSet / DaemonSet 的副本就绪情况、Pod 状态与容器异常原因、集群事件（可只看 Warning）。**纯只读**：改动走「资源管理」
+- [x] 工作负载 `/kubernetes/workload` — 按命名空间看 Deployment / StatefulSet / DaemonSet 的副本就绪情况、Pod 状态与容器异常原因、集群事件（可只看 Warning）；Pod 行可直接看**容器日志**（多容器/init 容器切换、行数 200~5000、时间戳、上一个容器、每 5 秒自动刷新、下载，单次 1MB 上限并标注截断）。**不做 follow 流式跟随**、**不提供 exec**；资源改动走「资源管理」
 - [x] 资源管理 `/kubernetes/resource` — 按类型列资源（带类型相关摘要）、看单个对象的可编辑 YAML（自动清掉 status 与 resourceVersion / uid / managedFields 等集群自维护字段）、服务端 apply（`fieldManager=opsone`）并可先 `dryRun=All` 预检、Deployment / StatefulSet 直接改副本数（`/scale`，同样可预检）；字段冲突返回 409 并带出冲突字段，可显式「强制接管」；每次改动（含预检与失败）写 `kube_change_logs` 留痕，记录提交的 YAML 原文与 API Server 原话，写操作绑 `kube:write`。**类型白名单**（Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / Ingress），**不提供删除**，**不开放 Secret / Namespace / RBAC**，**一次只提交一个对象**（多段 YAML 拒绝），也**不做版本回滚与 diff**
 - [ ] 服务转发 `/kubernetes/forward` — port-forward 通道管理
 

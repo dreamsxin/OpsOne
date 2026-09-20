@@ -436,6 +436,77 @@ func (h *Handler) KubePods(c *gin.Context) {
 	response.OK(c, gin.H{"items": pods, "total": len(pods), "abnormal": abnormal})
 }
 
+// kubeLogMaxBytes 单次日志读取上限。再多界面也看不动，还会把内存拉高
+const kubeLogMaxBytes = 1 << 20
+
+// kubeLogDefaultTail 默认只取最后多少行
+const kubeLogDefaultTail = 500
+
+// KubePodLogs 取容器日志。
+//
+// 不做 follow：一次取一段，界面按需刷新。少一条长连接，服务端也不用维护订阅。
+func (h *Handler) KubePodLogs(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	namespace := strings.TrimSpace(c.Query("namespace"))
+	pod := strings.TrimSpace(c.Query("pod"))
+	if namespace == "" || pod == "" {
+		response.BadRequest(c, "命名空间与 Pod 名称都不能为空")
+		return
+	}
+
+	opts := k8s.LogOptions{
+		Container:  strings.TrimSpace(c.Query("container")),
+		TailLines:  kubeLogDefaultTail,
+		Previous:   c.Query("previous") == "true",
+		Timestamps: c.Query("timestamps") == "true",
+		LimitBytes: kubeLogMaxBytes,
+	}
+	if raw := c.Query("tailLines"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 5000 {
+			response.BadRequest(c, "行数需在 1 到 5000 之间")
+			return
+		}
+		opts.TailLines = n
+	}
+	if raw := c.Query("sinceSeconds"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 86400 {
+			response.BadRequest(c, "时间范围需在 1 秒到 24 小时之间")
+			return
+		}
+		opts.SinceSeconds = n
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), kubeCallTimeout)
+	defer cancel()
+
+	text, truncated, err := client.PodLogs(ctx, namespace, pod, opts)
+	if err != nil {
+		respondKubeError(c, "读取日志失败: "+err.Error(), err)
+		return
+	}
+	response.OK(c, gin.H{
+		"namespace": namespace, "pod": pod, "container": opts.Container,
+		"previous": opts.Previous, "logs": text,
+		"lines": countLogLines(text), "truncated": truncated,
+		"tailLines": opts.TailLines,
+	})
+}
+
+// countLogLines 数实际拿到多少行。末尾换行不算新的一行。
+func countLogLines(text string) int {
+	if text == "" {
+		return 0
+	}
+	return strings.Count(strings.TrimSuffix(text, "\n"), "\n") + 1
+}
+
+// ---------- 事件 ----------
+
 func (h *Handler) KubeEvents(c *gin.Context) {
 	_, client, ok := h.requireKubeCluster(c)
 	if !ok {
