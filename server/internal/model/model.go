@@ -847,3 +847,43 @@ type Script struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
+
+// Topology 业务拓扑：把一条业务链路画成图，回答「这个业务现在哪一环挂了」。
+//
+// 拓扑本身不产生任何监控数据，节点健康度实时取自它绑定的资源（主机/数据库/拨测/证书），
+// 所以这里存的只有结构与画布坐标。
+type Topology struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"size:64;not null" json:"name"`
+	Remark      string    `gorm:"size:255" json:"remark"`
+	CreatorName string    `gorm:"size:64" json:"creatorName"`
+	CreatedBy   uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// TopologyNode 拓扑节点。Kind + RefID 指向平台内已有资源；
+// kind=external 表示平台管不到的外部依赖（对方 API、运营商线路等），健康度恒为「未知」。
+type TopologyNode struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	TopologyID uint   `gorm:"index;not null" json:"topologyId"`
+	Name       string `gorm:"size:64;not null" json:"name"`
+	Kind       string `gorm:"size:16;default:external" json:"kind"` // host | database | probe | certificate | external
+	RefID      uint   `gorm:"default:0" json:"refId"`               // external 恒为 0
+	// X / Y 画布坐标，拖动后由「保存布局」批量写回
+	X         int       `gorm:"default:0" json:"x"`
+	Y         int       `gorm:"default:0" json:"y"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// TopologyEdge 依赖连线：From 依赖 To（箭头由 From 指向 To）
+type TopologyEdge struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	TopologyID uint      `gorm:"index;not null" json:"topologyId"`
+	FromNodeID uint      `gorm:"index;not null" json:"fromNodeId"`
+	ToNodeID   uint      `gorm:"index;not null" json:"toNodeId"`
+	Label      string    `gorm:"size:32" json:"label"`
+	CreatedAt  time.Time `json:"createdAt"`
+}

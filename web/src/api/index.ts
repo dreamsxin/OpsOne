@@ -1614,6 +1614,98 @@ export const runScript = (
     data
   })
 
+// ---------- 业务拓扑 ----------
+
+export type TopologyNodeKind = 'host' | 'database' | 'probe' | 'certificate' | 'external'
+export type TopologyHealth = 'normal' | 'warning' | 'error' | 'unknown'
+
+export interface TopologySummary {
+  id: number
+  name: string
+  remark: string
+  creatorName: string
+  nodeCount: number
+  edgeCount: number
+  health: TopologyHealth
+  problems: number
+  updatedAt: string
+}
+
+export interface TopologyNode {
+  id: number
+  topologyId: number
+  name: string
+  kind: TopologyNodeKind
+  refId: number
+  x: number
+  y: number
+  remark: string
+  /** 以下三个由后端实时算出，不落库 */
+  health: TopologyHealth
+  detail: string
+  refName: string
+}
+
+export interface TopologyEdge {
+  id: number
+  topologyId: number
+  fromNodeId: number
+  toNodeId: number
+  label: string
+}
+
+export interface TopologyDetail {
+  topology: { id: number; name: string; remark: string }
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+  counts: Record<TopologyHealth, number>
+  health: TopologyHealth
+  /** 依赖成环时给出闭合路径（节点名），不成环为 null */
+  cycle: string[] | null
+}
+
+export interface BindableResource {
+  id: number
+  name: string
+  detail: string
+}
+
+export const listTopologies = () => request<TopologySummary[]>({ url: '/monitor/topologies' })
+export const getTopology = (id: number) => request<TopologyDetail>({ url: `/monitor/topologies/${id}` })
+export const listTopologyResources = () =>
+  request<Record<Exclude<TopologyNodeKind, 'external'>, BindableResource[]>>({
+    url: '/monitor/topology/resources'
+  })
+export const createTopology = (data: { name: string; remark?: string }) =>
+  request<TopologySummary>({ url: '/monitor/topologies', method: 'POST', data })
+export const updateTopology = (id: number, data: { name: string; remark?: string }) =>
+  request({ url: `/monitor/topologies/${id}`, method: 'PUT', data })
+export const deleteTopology = (id: number) =>
+  request<{ detail: string }>({ url: `/monitor/topologies/${id}`, method: 'DELETE' })
+export const createTopologyNode = (id: number, data: Record<string, any>) =>
+  request<TopologyNode>({ url: `/monitor/topologies/${id}/nodes`, method: 'POST', data })
+export const updateTopologyNode = (id: number, nodeId: number, data: Record<string, any>) =>
+  request({ url: `/monitor/topologies/${id}/nodes/${nodeId}`, method: 'PUT', data })
+export const deleteTopologyNode = (id: number, nodeId: number) =>
+  request<{ detail: string }>({ url: `/monitor/topologies/${id}/nodes/${nodeId}`, method: 'DELETE' })
+export const saveTopologyLayout = (id: number, nodes: { id: number; x: number; y: number }[]) =>
+  request<{ saved: number; detail: string }>({
+    url: `/monitor/topologies/${id}/layout`,
+    method: 'POST',
+    data: { nodes }
+  })
+export const createTopologyEdge = (
+  id: number,
+  data: { fromNodeId: number; toNodeId: number; label?: string }
+) =>
+  request<{ edge: TopologyEdge; cycle: string[] | null }>({
+    url: `/monitor/topologies/${id}/edges`,
+    method: 'POST',
+    data
+  })
+export const deleteTopologyEdge = (id: number, edgeId: number) =>
+  request<{ detail: string }>({ url: `/monitor/topologies/${id}/edges/${edgeId}`, method: 'DELETE' })
+
 
 
 
