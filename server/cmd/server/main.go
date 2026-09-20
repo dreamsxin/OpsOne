@@ -427,6 +427,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/exposures/:id/scan", middleware.RequirePerm("exposure:manage"), h.ScanExposureTarget)
 		auth.GET("/monitor/exposure-scans", h.ListExposureScans)
 
+		auth.GET("/monitor/metric-sources", h.ListMetricSources)
+		auth.POST("/monitor/metric-sources", middleware.RequirePerm("metric:manage"), h.CreateMetricSource)
+		auth.PUT("/monitor/metric-sources/:id", middleware.RequirePerm("metric:manage"), h.UpdateMetricSource)
+		auth.DELETE("/monitor/metric-sources/:id", middleware.RequirePerm("metric:manage"), h.DeleteMetricSource)
+		auth.POST("/monitor/metric-sources/:id/check", middleware.RequirePerm("metric:manage"), h.CheckMetricSource)
+		auth.GET("/monitor/metrics/query", h.QueryMetricInstant)
+		auth.GET("/monitor/metrics/query-range", h.QueryMetricRange)
+		auth.GET("/monitor/metrics/names", h.ListMetricNames)
+		auth.GET("/monitor/metrics/saved", h.ListSavedMetricQueries)
+		auth.POST("/monitor/metrics/saved", middleware.RequirePerm("metric:manage"), h.CreateSavedMetricQuery)
+		auth.DELETE("/monitor/metrics/saved/:id", middleware.RequirePerm("metric:manage"), h.DeleteSavedMetricQuery)
+
 		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
 		auth.GET("/monitor/aggregation/overlaps", h.DetectAggregationOverlaps)
 		auth.GET("/monitor/aggregation", h.ListAggregationPolicies)

@@ -46,6 +46,7 @@ func Migrate(g *gorm.DB) error {
 		&model.HostMetric{},
 		&model.OnCallSchedule{}, &model.OnCallOverride{}, &model.AlertEscalation{},
 		&model.ExposureTarget{}, &model.ExposureScan{},
+		&model.MetricSource{}, &model.SavedMetricQuery{},
 	)
 }
 
@@ -130,7 +131,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 424, ParentID: 406, Title: "维护聚合策略", Type: "button", AuthCode: "aggregation:manage", Sort: 1},
 		{ID: 407, ParentID: 400, Name: "EventCenter", Title: "事件中心", Path: "/monitor/events", Component: "/monitor/events/index", Icon: "Warning", Sort: 7},
 		{ID: 425, ParentID: 407, Title: "建单与处置", Type: "button", AuthCode: "event:manage", Sort: 1},
-		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: todo, Icon: "Histogram", Sort: 8},
+		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: "/monitor/metrics/index", Icon: "Histogram", Sort: 8},
+		{ID: 431, ParentID: 408, Title: "维护数据源与常用查询", Type: "button", AuthCode: "metric:manage", Sort: 1},
 		{ID: 409, ParentID: 400, Name: "LogQuery", Title: "日志查询", Path: "/monitor/logs", Component: todo, Icon: "Document", Sort: 9},
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: todo, Icon: "Share", Sort: 10},
 		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: "/monitor/probe/index", Icon: "Position", Sort: 11},

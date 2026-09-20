@@ -1113,6 +1113,52 @@ type DetectionRule struct {
 //
 // 平台只存 kubeconfig 全文并按需发起只读 REST 调用，不在本地缓存集群资源 ——
 // 看到的永远是集群当下的状态，不存在「平台里还是旧的」这种问题。
+// MetricSource 指标数据源（目前只支持 Prometheus 兼容的 HTTP API）。
+//
+// 平台不自己存时序数据：已经有 Prometheus 的地方再复制一份没意义，
+// 这里只做查询入口，把 PromQL 结果拍成表格与折线图。
+type MetricSource struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Type 预留：prometheus | victoriametrics 等 Prometheus 兼容实现
+	Type string `gorm:"size:16;default:prometheus" json:"type"`
+	// BaseURL Prometheus 根地址，例如 http://prom.internal:9090（不含 /api/v1）
+	BaseURL string `gorm:"size:255;not null" json:"baseUrl"`
+	// HeaderKey / HeaderValue 可选鉴权头，值不出接口
+	HeaderKey   string `gorm:"size:64" json:"headerKey"`
+	HeaderValue string `gorm:"size:255" json:"-"`
+	TimeoutSec  int    `gorm:"default:15" json:"timeoutSec"`
+	// IsDefault 界面默认选中的数据源，只允许一个
+	IsDefault bool `gorm:"default:false" json:"isDefault"`
+
+	// 以下由连通性检查回填
+	Status      string     `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
+	Version     string     `gorm:"size:64" json:"version"`
+	SeriesCount int64      `json:"seriesCount"`
+	LastError   string     `gorm:"size:500" json:"lastError"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SavedMetricQuery 常用查询。排查时反复敲同一串 PromQL 很费劲，存下来点一下就行。
+type SavedMetricQuery struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Name     string `gorm:"size:64;not null" json:"name"`
+	SourceID uint   `gorm:"index;default:0" json:"sourceId"`
+	Expr     string `gorm:"type:text;not null" json:"expr"`
+	// RangeMode 默认以范围查询打开（折线图），否则即时查询（表格）
+	RangeMode bool      `gorm:"default:true" json:"rangeMode"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 type KubeCluster struct {
 	ID   uint   `gorm:"primaryKey" json:"id"`
 	Name string `gorm:"size:64;not null" json:"name"`

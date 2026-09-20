@@ -1303,6 +1303,89 @@ export const runProbe = (id: number) =>
 export const listProbeRecords = (params: Record<string, any>) =>
   request<PageData<ProbeRecord>>({ url: '/monitor/probe-records', params })
 
+// ---------- 指标查询 ----------
+
+export interface MetricSource {
+  id: number
+  name: string
+  type: string
+  baseUrl: string
+  headerKey: string
+  timeoutSec: number
+  isDefault: boolean
+  status: 'unknown' | 'healthy' | 'error'
+  version: string
+  seriesCount: number
+  lastError: string
+  lastCheckAt: string | null
+  enabled: boolean
+  remark: string
+}
+
+export interface MetricPoint {
+  at: number
+  value: string
+}
+
+export interface MetricSeries {
+  name: string
+  labels: Record<string, string>
+  points: MetricPoint[]
+  value: string
+}
+
+export interface MetricQueryResult {
+  resultType: string
+  series: MetricSeries[]
+  total: number
+  truncated: boolean
+  warnings: string[] | null
+  costMs: number
+  queriedAt?: string
+  start?: string
+  end?: string
+  step?: number
+}
+
+export interface SavedMetricQuery {
+  id: number
+  name: string
+  sourceId: number
+  expr: string
+  rangeMode: boolean
+  remark: string
+}
+
+export const listMetricSources = () => request<MetricSource[]>({ url: '/monitor/metric-sources' })
+export const createMetricSource = (data: Record<string, any>) =>
+  request<{ source: MetricSource; check: Record<string, any> }>({
+    url: '/monitor/metric-sources',
+    method: 'POST',
+    data
+  })
+export const updateMetricSource = (id: number, data: Record<string, any>) =>
+  request<MetricSource>({ url: `/monitor/metric-sources/${id}`, method: 'PUT', data })
+export const deleteMetricSource = (id: number) =>
+  request({ url: `/monitor/metric-sources/${id}`, method: 'DELETE' })
+export const checkMetricSource = (id: number) =>
+  request<Record<string, any>>({ url: `/monitor/metric-sources/${id}/check`, method: 'POST' })
+
+export const queryMetricInstant = (params: Record<string, any>) =>
+  request<MetricQueryResult>({ url: '/monitor/metrics/query', params })
+export const queryMetricRange = (params: Record<string, any>) =>
+  request<MetricQueryResult>({ url: '/monitor/metrics/query-range', params })
+export const listMetricNames = (sourceId: number, keyword?: string) =>
+  request<{ names: string[]; total: number; truncated: boolean }>({
+    url: '/monitor/metrics/names',
+    params: { sourceId, ...(keyword ? { keyword } : {}) }
+  })
+export const listSavedMetricQueries = () =>
+  request<SavedMetricQuery[]>({ url: '/monitor/metrics/saved' })
+export const createSavedMetricQuery = (data: Record<string, any>) =>
+  request<SavedMetricQuery>({ url: '/monitor/metrics/saved', method: 'POST', data })
+export const deleteSavedMetricQuery = (id: number) =>
+  request({ url: `/monitor/metrics/saved/${id}`, method: 'DELETE' })
+
 // ---------- 暴露面监测 ----------
 
 export interface ExposureTarget {
