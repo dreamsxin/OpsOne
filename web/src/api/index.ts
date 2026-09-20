@@ -445,6 +445,80 @@ export interface FixedAssetStats {
   totalPrice: number
 }
 
+export interface CloudAccount {
+  id: number
+  name: string
+  provider: 'aliyun' | 'tencent' | 'huawei' | 'aws' | 'other'
+  accessKeyId: string
+  region: string
+  accountId: string
+  deptId: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface InventoryItem {
+  id: number
+  batchId: number
+  assetId: number
+  assetName: string
+  sn: string
+  expectLocation: string
+  actualLocation: string
+  result: 'pending' | 'matched' | 'missing' | 'moved'
+  note: string
+  checkedBy: string
+  checkedAt: string | null
+}
+
+export interface InventoryBatch {
+  id: number
+  name: string
+  scopeDeptId: number
+  status: 'ongoing' | 'finished'
+  operator: string
+  totalCount: number
+  checkedCount: number
+  matchedCount: number
+  missingCount: number
+  movedCount: number
+  remark: string
+  startedAt: string
+  finishedAt: string | null
+  items?: InventoryItem[]
+}
+
+export interface PurchaseItem {
+  id?: number
+  orderId?: number
+  name: string
+  category: string
+  model: string
+  vendor: string
+  quantity: number
+  unitPrice: number
+  remark: string
+}
+
+export interface PurchaseOrder {
+  id: number
+  orderNo: string
+  title: string
+  vendor: string
+  applicant: string
+  status: 'draft' | 'ordered' | 'received' | 'cancelled'
+  amount: number
+  deptId: number
+  orderDate: string | null
+  expectedDate: string | null
+  receivedDate: string | null
+  assetCreated: boolean
+  remark: string
+  items?: PurchaseItem[]
+}
+
+
 
 
 
@@ -867,6 +941,52 @@ export const updateFixedAsset = (id: number, data: Record<string, any>) =>
   request<FixedAsset>({ url: `/fixed-assets/${id}`, method: 'PUT', data })
 export const deleteFixedAsset = (id: number) =>
   request({ url: `/fixed-assets/${id}`, method: 'DELETE' })
+
+// ---------- 云账号 ----------
+
+export const listCloudAccounts = (params?: Record<string, any>) =>
+  request<CloudAccount[]>({ url: '/cloud-accounts', params })
+export const createCloudAccount = (data: Record<string, any>) =>
+  request<CloudAccount>({ url: '/cloud-accounts', method: 'POST', data })
+export const updateCloudAccount = (id: number, data: Record<string, any>) =>
+  request<CloudAccount>({ url: `/cloud-accounts/${id}`, method: 'PUT', data })
+export const deleteCloudAccount = (id: number) =>
+  request({ url: `/cloud-accounts/${id}`, method: 'DELETE' })
+
+// ---------- 资产盘点 ----------
+
+export const listInventoryBatches = (params: Record<string, any>) =>
+  request<PageData<InventoryBatch>>({ url: '/inventory/batches', params })
+export const getInventoryBatch = (id: number) =>
+  request<InventoryBatch>({ url: `/inventory/batches/${id}` })
+export const createInventoryBatch = (data: Record<string, any>) =>
+  request<InventoryBatch>({ url: '/inventory/batches', method: 'POST', data })
+export const finishInventoryBatch = (id: number) =>
+  request<InventoryBatch>({ url: `/inventory/batches/${id}/finish`, method: 'POST' })
+export const deleteInventoryBatch = (id: number) =>
+  request({ url: `/inventory/batches/${id}`, method: 'DELETE' })
+export const updateInventoryItem = (id: number, data: Record<string, any>) =>
+  request({ url: `/inventory/items/${id}`, method: 'PUT', data })
+
+// ---------- 采购记录 ----------
+
+export const listPurchaseOrders = (params: Record<string, any>) =>
+  request<PageData<PurchaseOrder>>({ url: '/purchase/orders', params })
+export const getPurchaseOrder = (id: number) =>
+  request<PurchaseOrder>({ url: `/purchase/orders/${id}` })
+export const createPurchaseOrder = (data: Record<string, any>) =>
+  request<PurchaseOrder>({ url: '/purchase/orders', method: 'POST', data })
+export const updatePurchaseOrder = (id: number, data: Record<string, any>) =>
+  request<PurchaseOrder>({ url: `/purchase/orders/${id}`, method: 'PUT', data })
+export const deletePurchaseOrder = (id: number) =>
+  request({ url: `/purchase/orders/${id}`, method: 'DELETE' })
+export const receivePurchaseOrder = (id: number, data: Record<string, any>) =>
+  request<{ received: boolean; createdAssets: number }>({
+    url: `/purchase/orders/${id}/receive`,
+    method: 'POST',
+    data
+  })
+
 
 
 

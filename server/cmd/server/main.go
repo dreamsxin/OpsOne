@@ -237,6 +237,25 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/fixed-assets", middleware.RequirePerm("asset:manage"), h.CreateFixedAsset)
 		auth.PUT("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.UpdateFixedAsset)
 		auth.DELETE("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.DeleteFixedAsset)
+
+		auth.GET("/cloud-accounts", h.ListCloudAccounts)
+		auth.POST("/cloud-accounts", middleware.RequirePerm("cloud:manage"), h.CreateCloudAccount)
+		auth.PUT("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.UpdateCloudAccount)
+		auth.DELETE("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.DeleteCloudAccount)
+
+		auth.GET("/inventory/batches", h.ListInventoryBatches)
+		auth.GET("/inventory/batches/:id", h.GetInventoryBatch)
+		auth.POST("/inventory/batches", middleware.RequirePerm("inventory:manage"), h.CreateInventoryBatch)
+		auth.POST("/inventory/batches/:id/finish", middleware.RequirePerm("inventory:manage"), h.FinishInventoryBatch)
+		auth.DELETE("/inventory/batches/:id", middleware.RequirePerm("inventory:manage"), h.DeleteInventoryBatch)
+		auth.PUT("/inventory/items/:id", middleware.RequirePerm("inventory:manage"), h.UpdateInventoryItem)
+
+		auth.GET("/purchase/orders", h.ListPurchaseOrders)
+		auth.GET("/purchase/orders/:id", h.GetPurchaseOrder)
+		auth.POST("/purchase/orders", middleware.RequirePerm("purchase:manage"), h.CreatePurchaseOrder)
+		auth.PUT("/purchase/orders/:id", middleware.RequirePerm("purchase:manage"), h.UpdatePurchaseOrder)
+		auth.DELETE("/purchase/orders/:id", middleware.RequirePerm("purchase:manage"), h.DeletePurchaseOrder)
+		auth.POST("/purchase/orders/:id/receive", middleware.RequirePerm("purchase:manage"), h.ReceivePurchaseOrder)
 	}
 
 	return r

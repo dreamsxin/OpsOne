@@ -32,6 +32,8 @@ func Migrate(g *gorm.DB) error {
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
+		&model.CloudAccount{}, &model.InventoryBatch{}, &model.InventoryItem{},
+		&model.PurchaseOrder{}, &model.PurchaseItem{},
 	)
 }
 
@@ -60,13 +62,16 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 105, ParentID: 101, Title: "连通性探测", Type: "button", AuthCode: "host:check", Sort: 4},
 		{ID: 110, ParentID: 100, Name: "DatabaseAsset", Title: "数据库资产", Path: "/asset/database", Component: "/asset/database/index", Icon: "Coin", Sort: 2},
 		{ID: 116, ParentID: 110, Title: "维护数据库资产", Type: "button", AuthCode: "db:manage", Sort: 1},
-		{ID: 111, ParentID: 100, Name: "CloudAccount", Title: "云账号", Path: "/asset/cloud", Component: todo, Icon: "Cloudy", Sort: 3},
+		{ID: 111, ParentID: 100, Name: "CloudAccount", Title: "云账号", Path: "/asset/cloud", Component: "/asset/cloud/index", Icon: "Cloudy", Sort: 3},
+		{ID: 119, ParentID: 111, Title: "维护云账号", Type: "button", AuthCode: "cloud:manage", Sort: 1},
 		{ID: 112, ParentID: 100, Name: "AssetTag", Title: "标签管理", Path: "/asset/tag", Component: "/asset/tag/index", Icon: "PriceTag", Sort: 4},
 		{ID: 117, ParentID: 112, Title: "维护标签", Type: "button", AuthCode: "tag:manage", Sort: 1},
 		{ID: 113, ParentID: 100, Name: "FixedAsset", Title: "固定资产", Path: "/asset/fixed", Component: "/asset/fixed/index", Icon: "Box", Sort: 5},
 		{ID: 118, ParentID: 113, Title: "维护固定资产", Type: "button", AuthCode: "asset:manage", Sort: 1},
-		{ID: 114, ParentID: 100, Name: "AssetInventory", Title: "资产盘点", Path: "/asset/inventory", Component: todo, Icon: "Tickets", Sort: 6},
-		{ID: 115, ParentID: 100, Name: "AssetPurchase", Title: "采购记录", Path: "/asset/purchase", Component: todo, Icon: "ShoppingCart", Sort: 7},
+		{ID: 114, ParentID: 100, Name: "AssetInventory", Title: "资产盘点", Path: "/asset/inventory", Component: "/asset/inventory/index", Icon: "Tickets", Sort: 6},
+		{ID: 120, ParentID: 114, Title: "维护盘点", Type: "button", AuthCode: "inventory:manage", Sort: 1},
+		{ID: 115, ParentID: 100, Name: "AssetPurchase", Title: "采购记录", Path: "/asset/purchase", Component: "/asset/purchase/index", Icon: "ShoppingCart", Sort: 7},
+		{ID: 121, ParentID: 115, Title: "维护采购单", Type: "button", AuthCode: "purchase:manage", Sort: 1},
 
 		// ---------- 运维执行 ----------
 		{ID: 200, Name: "Execute", Title: "运维执行", Path: "/execute", Icon: "Promotion", Sort: 30},

@@ -482,3 +482,94 @@ type FixedAsset struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
 }
+
+// CloudAccount 云账号台账。
+//
+// 只做账号与密钥的集中登记，**不做资源同步** —— 同步需要各云厂商 SDK 与出网能力，
+// 目前不在实现范围内，页面上会显式说明，避免误以为能拉到云上资源。
+type CloudAccount struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	Name            string    `gorm:"size:64;not null" json:"name"`
+	Provider        string    `gorm:"size:16;default:aliyun" json:"provider"` // aliyun | tencent | huawei | aws | other
+	AccessKeyID     string    `gorm:"size:128" json:"accessKeyId"`
+	AccessKeySecret string    `gorm:"type:text" json:"-"` // 明文存储，与主机凭据同等对待
+	Region          string    `gorm:"size:64" json:"region"`
+	AccountID       string    `gorm:"size:64" json:"accountId"` // 云上主账号 ID，便于对账
+	DeptID          uint      `gorm:"index;default:0" json:"deptId"`
+	CreatedBy       uint      `gorm:"index;default:0" json:"createdBy"`
+	Enabled         bool      `gorm:"default:true" json:"enabled"`
+	Remark          string    `gorm:"size:255" json:"remark"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+// InventoryBatch 资产盘点批次。创建时按范围对固定资产做快照生成明细。
+type InventoryBatch struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	Name         string     `gorm:"size:128;not null" json:"name"`
+	ScopeDeptID  uint       `gorm:"default:0" json:"scopeDeptId"`          // 0 表示全部可见资产
+	Status       string     `gorm:"size:16;default:ongoing" json:"status"` // ongoing | finished
+	Operator     string     `gorm:"size:64" json:"operator"`
+	DeptID       uint       `gorm:"index;default:0" json:"deptId"`
+	CreatedBy    uint       `gorm:"index;default:0" json:"createdBy"`
+	TotalCount   int        `json:"totalCount"`
+	CheckedCount int        `json:"checkedCount"`
+	MatchedCount int        `json:"matchedCount"`
+	MissingCount int        `json:"missingCount"`
+	MovedCount   int        `json:"movedCount"`
+	Remark       string     `gorm:"size:255" json:"remark"`
+	StartedAt    time.Time  `json:"startedAt"`
+	FinishedAt   *time.Time `json:"finishedAt"`
+
+	Items []InventoryItem `gorm:"foreignKey:BatchID" json:"items,omitempty"`
+}
+
+// InventoryItem 盘点明细，一条对应一件固定资产
+type InventoryItem struct {
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	BatchID        uint       `gorm:"index;not null" json:"batchId"`
+	AssetID        uint       `gorm:"index" json:"assetId"`
+	AssetName      string     `gorm:"size:64" json:"assetName"`
+	SN             string     `gorm:"size:64" json:"sn"`
+	ExpectLocation string     `gorm:"size:128" json:"expectLocation"`
+	ActualLocation string     `gorm:"size:128" json:"actualLocation"`
+	Result         string     `gorm:"size:16;default:pending" json:"result"` // pending | matched | missing | moved
+	Note           string     `gorm:"size:255" json:"note"`
+	CheckedBy      string     `gorm:"size:64" json:"checkedBy"`
+	CheckedAt      *time.Time `json:"checkedAt"`
+}
+
+// PurchaseOrder 采购单。收货入库时可按明细生成固定资产。
+type PurchaseOrder struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	OrderNo      string     `gorm:"size:64;uniqueIndex;not null" json:"orderNo"`
+	Title        string     `gorm:"size:128;not null" json:"title"`
+	Vendor       string     `gorm:"size:64" json:"vendor"`
+	Applicant    string     `gorm:"size:64" json:"applicant"`
+	Status       string     `gorm:"size:16;default:draft" json:"status"` // draft | ordered | received | cancelled
+	Amount       float64    `json:"amount"`                              // 由明细汇总
+	DeptID       uint       `gorm:"index;default:0" json:"deptId"`
+	CreatedBy    uint       `gorm:"index;default:0" json:"createdBy"`
+	OrderDate    *time.Time `json:"orderDate"`
+	ExpectedDate *time.Time `json:"expectedDate"`
+	ReceivedDate *time.Time `json:"receivedDate"`
+	AssetCreated bool       `gorm:"default:false" json:"assetCreated"` // 是否已生成固定资产
+	Remark       string     `gorm:"size:255" json:"remark"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+
+	Items []PurchaseItem `gorm:"foreignKey:OrderID" json:"items,omitempty"`
+}
+
+// PurchaseItem 采购明细
+type PurchaseItem struct {
+	ID        uint    `gorm:"primaryKey" json:"id"`
+	OrderID   uint    `gorm:"index;not null" json:"orderId"`
+	Name      string  `gorm:"size:64;not null" json:"name"`
+	Category  string  `gorm:"size:16;default:server" json:"category"` // 与固定资产类别一致
+	Model     string  `gorm:"size:64" json:"model"`
+	Vendor    string  `gorm:"size:64" json:"vendor"`
+	Quantity  int     `gorm:"default:1" json:"quantity"`
+	UnitPrice float64 `json:"unitPrice"`
+	Remark    string  `gorm:"size:255" json:"remark"`
+}
