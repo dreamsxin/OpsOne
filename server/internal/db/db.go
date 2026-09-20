@@ -48,6 +48,7 @@ func Migrate(g *gorm.DB) error {
 		&model.ExposureTarget{}, &model.ExposureScan{},
 		&model.MetricSource{}, &model.SavedMetricQuery{}, &model.LogSource{}, &model.TraceSource{},
 		&model.ModelUpstream{}, &model.ModelCall{}, &model.AgentConfig{}, &model.AgentRun{},
+		&model.ImApp{}, &model.ImAccount{}, &model.ImSyncRun{},
 	)
 }
 
@@ -203,7 +204,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 813, ParentID: 800, Name: "NotifyRecord", Title: "通知记录", Path: "/system/notify-record", Component: "/system/notify-record/index", Icon: "MessageBox", Sort: 9},
 		{ID: 814, ParentID: 800, Name: "Announcement", Title: "公告管理", Path: "/system/announcement", Component: "/system/announcement/index", Icon: "Bell", Sort: 10},
 		{ID: 824, ParentID: 814, Title: "维护与发布", Type: "button", AuthCode: "announcement:manage", Sort: 1},
-		{ID: 815, ParentID: 800, Name: "ImIntegration", Title: "IM 集成", Path: "/system/im", Component: todo, Icon: "ChatDotRound", Sort: 11},
+		{ID: 815, ParentID: 800, Name: "ImIntegration", Title: "IM 集成", Path: "/system/im", Component: "/system/im/index", Icon: "ChatDotRound", Sort: 11},
+		{ID: 829, ParentID: 815, Title: "维护 IM 应用", Type: "button", AuthCode: "im:manage", Sort: 1},
+		{ID: 830, ParentID: 815, Title: "执行组织同步", Type: "button", AuthCode: "im:sync", Sort: 2},
 		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: "/system/config/index", Icon: "Tools", Sort: 12},
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},

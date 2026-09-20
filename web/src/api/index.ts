@@ -2631,6 +2631,115 @@ export const listAgentRuns = (params: Record<string, any>) =>
   request<PageData<AgentRun>>({ url: '/ai/agent-runs', params })
 export const getAgentRun = (id: number) => request<AgentRun>({ url: `/ai/agent-runs/${id}` })
 
+// ---------- IM 集成（组织同步） ----------
+
+export interface ImApp {
+  id: number
+  name: string
+  provider: 'wecom' | 'dingtalk' | 'feishu'
+  corpId: string
+  agentId: string
+  baseUrl: string
+  rootDeptId: string
+  targetCompanyId: number
+  defaultRoleId: number
+  disableMissing: boolean
+  status: 'unknown' | 'healthy' | 'error'
+  lastError: string
+  lastCheckAt: string | null
+  lastSyncAt: string | null
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface ImAccount {
+  id: number
+  appId: number
+  provider: string
+  imUserId: string
+  imName: string
+  imMobile: string
+  imEmail: string
+  imDeptPath: string
+  userId: number
+  username: string
+  lastSyncAt: string | null
+}
+
+export interface ImSyncRun {
+  id: number
+  appId: number
+  appName: string
+  provider: string
+  dryRun: boolean
+  deptTotal: number
+  deptCreated: number
+  deptUpdated: number
+  userTotal: number
+  userCreated: number
+  userBound: number
+  userUpdated: number
+  userDisabled: number
+  userSkipped: number
+  status: 'success' | 'failed'
+  errorMsg: string
+  costMs: number
+  operator: string
+  createdAt: string
+}
+
+/** 预演与执行返回同一种报告，dryRun 为 true 时一行都没写库 */
+export interface ImSyncReport {
+  dryRun: boolean
+  changes: {
+    kind: 'dept' | 'user'
+    action: 'create' | 'update' | 'bind' | 'disable' | 'skip'
+    name: string
+    imId: string
+    detail: string
+  }[]
+  deptTotal: number
+  deptCreated: number
+  deptUpdated: number
+  userTotal: number
+  userCreated: number
+  userBound: number
+  userUpdated: number
+  userDisabled: number
+  userSkipped: number
+}
+
+export const listImApps = () =>
+  request<{ list: { app: ImApp; boundCount: number }[] }>({ url: '/system/im/apps' })
+export const createImApp = (data: Record<string, any>) =>
+  request<{ app: ImApp; check: { status: string; detail: string } }>({
+    url: '/system/im/apps',
+    method: 'POST',
+    data
+  })
+export const updateImApp = (id: number, data: Record<string, any>) =>
+  request<ImApp>({ url: `/system/im/apps/${id}`, method: 'PUT', data })
+export const deleteImApp = (id: number) =>
+  request<{ note: string }>({ url: `/system/im/apps/${id}`, method: 'DELETE' })
+export const checkImApp = (id: number) =>
+  request<{ status: string; detail: string; deptCount?: number; latencyMs?: number }>({
+    url: `/system/im/apps/${id}/check`,
+    method: 'POST'
+  })
+export const syncImApp = (id: number, dryRun: boolean) =>
+  request<{ run: ImSyncRun; report: ImSyncReport }>({
+    url: `/system/im/apps/${id}/sync`,
+    method: 'POST',
+    data: { dryRun }
+  })
+export const listImSyncRuns = (params: Record<string, any>) =>
+  request<PageData<ImSyncRun>>({ url: '/system/im/sync-runs', params })
+export const listImAccounts = (params: Record<string, any>) =>
+  request<PageData<ImAccount>>({ url: '/system/im/accounts', params })
+export const unbindImAccount = (id: number) =>
+  request<{ note: string }>({ url: `/system/im/accounts/${id}`, method: 'DELETE' })
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

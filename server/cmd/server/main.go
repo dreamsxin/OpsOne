@@ -438,6 +438,16 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/ai/agent-runs", h.ListAgentRuns)
 		auth.GET("/ai/agent-runs/:id", h.GetAgentRun)
 
+		auth.GET("/system/im/apps", h.ListImApps)
+		auth.POST("/system/im/apps", middleware.RequirePerm("im:manage"), h.CreateImApp)
+		auth.PUT("/system/im/apps/:id", middleware.RequirePerm("im:manage"), h.UpdateImApp)
+		auth.DELETE("/system/im/apps/:id", middleware.RequirePerm("im:manage"), h.DeleteImApp)
+		auth.POST("/system/im/apps/:id/check", middleware.RequirePerm("im:manage"), h.CheckImApp)
+		auth.POST("/system/im/apps/:id/sync", middleware.RequirePerm("im:sync"), h.SyncImApp)
+		auth.GET("/system/im/sync-runs", h.ListImSyncRuns)
+		auth.GET("/system/im/accounts", h.ListImAccounts)
+		auth.DELETE("/system/im/accounts/:id", middleware.RequirePerm("im:manage"), h.UnbindImAccount)
+
 		auth.GET("/monitor/health", h.PlatformHealth)
 
 		auth.GET("/monitor/probes", h.ListProbes)

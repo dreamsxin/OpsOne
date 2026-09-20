@@ -1423,3 +1423,94 @@ type AgentRun struct {
 	Username         string    `gorm:"size:64" json:"username"`
 	CreatedAt        time.Time `gorm:"index" json:"createdAt"`
 }
+
+// ImApp 一个 IM 企业自建应用（企业微信 / 钉钉 / 飞书）。
+//
+// 与「通知渠道」里的群机器人是两套东西：机器人只能往群里发消息，
+// 这里用的是应用级凭据（corpid/appsecret），能读通讯录。
+type ImApp struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Provider wecom | dingtalk | feishu
+	Provider string `gorm:"size:16;index;not null" json:"provider"`
+	// CorpID 企业微信 corpid / 钉钉 corpId / 飞书 app_id
+	CorpID string `gorm:"size:128;not null" json:"corpId"`
+	// AppSecret 应用密钥，明文存库（与主机凭据同等对待），不出接口
+	AppSecret string `gorm:"size:255" json:"-"`
+	// AgentID 企业微信自建应用的 agentid，其他家留空
+	AgentID string `gorm:"size:64" json:"agentId"`
+	// BaseURL 接口根地址。留空用各家默认（qyapi.weixin.qq.com / oapi.dingtalk.com /
+	// open.feishu.cn）；内网通过代理出网、或要对着私有网关调时可以改
+	BaseURL string `gorm:"size:255" json:"baseUrl"`
+	// RootDeptID 同步起点部门：企微填 1，飞书填 0 或部门 open_id，钉钉填 1
+	RootDeptID string `gorm:"size:64" json:"rootDeptId"`
+	// TargetCompanyID 同步到平台哪个公司下（部门树挂在它下面）
+	TargetCompanyID uint `gorm:"default:0" json:"targetCompanyId"`
+	// DefaultRoleID 新建用户默认给的角色。只在新建时生效，之后手工调过的角色不会被同步覆盖
+	DefaultRoleID uint `gorm:"default:0" json:"defaultRoleId"`
+	// DisableMissing IM 侧已经查不到的人（离职），把平台账号置为停用。
+	// 只停用、不删除 —— 删了操作审计里的历史记录就对不上人了
+	DisableMissing bool `gorm:"default:true" json:"disableMissing"`
+
+	// 以下由连通性检查与同步回填
+	AppStatus   string     `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
+	LastError   string     `gorm:"size:500" json:"lastError"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastSyncAt  *time.Time `json:"lastSyncAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ImAccount IM 账号与平台账号的绑定关系。
+//
+// 单独一张表而不是往 users 上加列：一个平台账号未来可能同时绑企微与飞书，
+// 而且 IM 侧的字段（手机号、部门路径）不该混进平台的用户模型里。
+type ImAccount struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	AppID    uint   `gorm:"index;default:0" json:"appId"`
+	Provider string `gorm:"size:16;index" json:"provider"`
+	// ImUserID IM 侧的用户标识（企微 userid / 钉钉 userid / 飞书 open_id）
+	ImUserID string `gorm:"size:128;index;not null" json:"imUserId"`
+	ImName   string `gorm:"size:64" json:"imName"`
+	// ImMobile / ImEmail 只作参照，平台用户模型里没有手机号
+	ImMobile string `gorm:"size:32" json:"imMobile"`
+	ImEmail  string `gorm:"size:128" json:"imEmail"`
+	// ImDeptPath IM 侧的部门路径，便于人工核对映射对不对
+	ImDeptPath string     `gorm:"size:255" json:"imDeptPath"`
+	UserID     uint       `gorm:"index;not null" json:"userId"`
+	Username   string     `gorm:"size:64" json:"username"`
+	LastSyncAt *time.Time `json:"lastSyncAt"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
+// ImSyncRun 一次组织同步的结果。预演也记，便于回答「上次同步到底改了什么」。
+type ImSyncRun struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	AppID    uint   `gorm:"index;default:0" json:"appId"`
+	AppName  string `gorm:"size:64" json:"appName"`
+	Provider string `gorm:"size:16" json:"provider"`
+	// DryRun 预演不写库，只给出将要发生什么
+	DryRun bool `gorm:"default:false" json:"dryRun"`
+
+	DeptTotal    int `json:"deptTotal"`
+	DeptCreated  int `json:"deptCreated"`
+	DeptUpdated  int `json:"deptUpdated"`
+	UserTotal    int `json:"userTotal"`
+	UserCreated  int `json:"userCreated"`
+	UserBound    int `json:"userBound"`
+	UserUpdated  int `json:"userUpdated"`
+	UserDisabled int `json:"userDisabled"`
+	UserSkipped  int `json:"userSkipped"`
+
+	SyncStatus string    `gorm:"size:16;index" json:"status"` // success | failed
+	ErrorMsg   string    `gorm:"size:500" json:"errorMsg"`
+	CostMs     int64     `json:"costMs"`
+	UserIDOp   uint      `gorm:"column:operator_id;index;default:0" json:"operatorId"`
+	Operator   string    `gorm:"size:64" json:"operator"`
+	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
+}
