@@ -36,6 +36,7 @@ func Migrate(g *gorm.DB) error {
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
 		&model.Certificate{}, &model.AlertRule{},
+		&model.Probe{}, &model.ProbeRecord{},
 	)
 }
 
@@ -116,7 +117,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 408, ParentID: 400, Name: "MetricQuery", Title: "指标查询", Path: "/monitor/metrics", Component: todo, Icon: "Histogram", Sort: 8},
 		{ID: 409, ParentID: 400, Name: "LogQuery", Title: "日志查询", Path: "/monitor/logs", Component: todo, Icon: "Document", Sort: 9},
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: todo, Icon: "Share", Sort: 10},
-		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: todo, Icon: "Position", Sort: 11},
+		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: "/monitor/probe/index", Icon: "Position", Sort: 11},
+		{ID: 423, ParentID: 411, Title: "维护与执行拨测", Type: "button", AuthCode: "probe:manage", Sort: 1},
 		{ID: 412, ParentID: 400, Name: "Topology", Title: "业务拓扑", Path: "/monitor/topology", Component: todo, Icon: "Connection", Sort: 12},
 		{ID: 413, ParentID: 400, Name: "PlatformHealth", Title: "平台健康", Path: "/monitor/health", Component: "/monitor/health/index", Icon: "FirstAidKit", Sort: 13},
 		{ID: 414, ParentID: 400, Name: "PublicIPMonitor", Title: "公网监测", Path: "/monitor/public-ip", Component: todo, Icon: "Compass", Sort: 14},

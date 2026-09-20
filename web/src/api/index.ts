@@ -1239,6 +1239,59 @@ export interface HealthReport {
 
 export const getPlatformHealth = () => request<HealthReport>({ url: '/monitor/health' })
 
+// ---------- 拨测探测 ----------
+
+export interface Probe {
+  id: number
+  name: string
+  type: 'http' | 'tcp'
+  target: string
+  method: string
+  expectStatus: number
+  expectKeyword: string
+  timeoutSec: number
+  alertEnabled: boolean
+  consecutiveFails: number
+  failStreak: number
+  lastStatus: string
+  lastCode: number
+  lastCostMs: number
+  lastError: string
+  lastCheckAt: string | null
+  totalChecks: number
+  failChecks: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface ProbeRecord {
+  id: number
+  probeId: number
+  status: string
+  code: number
+  costMs: number
+  errorMsg: string
+  operator: string
+  createdAt: string
+}
+
+export const listProbes = (params?: Record<string, any>) =>
+  request<Probe[]>({ url: '/monitor/probes', params })
+export const createProbe = (data: Record<string, any>) =>
+  request<Probe>({ url: '/monitor/probes', method: 'POST', data })
+export const updateProbe = (id: number, data: Record<string, any>) =>
+  request<Probe>({ url: `/monitor/probes/${id}`, method: 'PUT', data })
+export const deleteProbe = (id: number) =>
+  request({ url: `/monitor/probes/${id}`, method: 'DELETE' })
+export const runProbe = (id: number) =>
+  request<{ status: string; code: number; costMs: number; errorMsg: string; failStreak: number; needStreak: number }>({
+    url: `/monitor/probes/${id}/run`,
+    method: 'POST'
+  })
+export const listProbeRecords = (params: Record<string, any>) =>
+  request<PageData<ProbeRecord>>({ url: '/monitor/probe-records', params })
+
 
 
 

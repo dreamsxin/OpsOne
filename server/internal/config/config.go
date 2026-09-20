@@ -31,6 +31,10 @@ type Config struct {
 	// AlertRuleSpec 告警规则评估的 cron 表达式。留空表示不做定时评估，
 	// 规则只能在界面上手动试跑。
 	AlertRuleSpec string
+
+	// ProbeSpec 拨测执行的 cron 表达式。留空表示不做定时拨测，
+	// 只能在界面上手动拨测。所有拨测共用这一个节奏。
+	ProbeSpec string
 }
 
 func Load() *Config {
@@ -45,6 +49,7 @@ func Load() *Config {
 		SSHStrictHostKey: env("OPS_SSH_STRICT_HOST_KEY", "false") == "true",
 		CertCheckSpec:    strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 		AlertRuleSpec:    strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
+		ProbeSpec:        strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

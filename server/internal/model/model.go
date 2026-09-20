@@ -700,3 +700,48 @@ type AlertRule struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// Probe 拨测任务：从平台所在网络位置去访问一个 HTTP 地址或 TCP 端口。
+//
+// 所有启用的拨测按同一节奏执行（OPS_PROBE_SPEC），不支持每条独立周期。
+type Probe struct {
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	Name   string `gorm:"size:64;not null" json:"name"`
+	Type   string `gorm:"size:8;default:http" json:"type"`  // http | tcp
+	Target string `gorm:"size:255;not null" json:"target"`  // http 填 URL，tcp 填 host:port
+	Method string `gorm:"size:8;default:GET" json:"method"` // 仅 http
+
+	ExpectStatus  int    `gorm:"default:200" json:"expectStatus"` // 0 表示只要 2xx/3xx 就算通
+	ExpectKeyword string `gorm:"size:128" json:"expectKeyword"`   // 响应体必须包含，空表示不校验
+	TimeoutSec    int    `gorm:"default:10" json:"timeoutSec"`
+
+	AlertEnabled     bool `gorm:"default:true" json:"alertEnabled"`
+	ConsecutiveFails int  `gorm:"default:1" json:"consecutiveFails"` // 连续失败几次才告警
+	FailStreak       int  `json:"failStreak"`
+
+	LastStatus  string     `gorm:"size:16;default:unknown" json:"lastStatus"` // unknown | up | down
+	LastCode    int        `json:"lastCode"`                                  // HTTP 状态码，tcp 恒为 0
+	LastCostMs  int64      `json:"lastCostMs"`
+	LastError   string     `gorm:"size:255" json:"lastError"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	TotalChecks int        `json:"totalChecks"`
+	FailChecks  int        `json:"failChecks"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ProbeRecord 单次拨测结果。超过保留期的记录会在定时拨测时清理。
+type ProbeRecord struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	ProbeID   uint      `gorm:"index;not null" json:"probeId"`
+	Status    string    `gorm:"size:16" json:"status"` // up | down
+	Code      int       `json:"code"`
+	CostMs    int64     `json:"costMs"`
+	ErrorMsg  string    `gorm:"size:255" json:"errorMsg"`
+	Operator  string    `gorm:"size:64" json:"operator"` // 手动拨测记操作人，定时为 scheduler
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}

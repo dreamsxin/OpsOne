@@ -140,6 +140,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_CERT_CHECK_SPEC 为空，证书只能手动巡检"))
 	items = append(items, h.fixedTaskItem("rule", "告警规则评估", h.Cfg.AlertRuleSpec,
 		"OPS_ALERT_RULE_SPEC 为空，规则只能手动试跑"))
+	items = append(items, h.fixedTaskItem("probe", "拨测探测", h.Cfg.ProbeSpec,
+		"OPS_PROBE_SPEC 为空，拨测只能手动执行"))
 	return items
 }
 

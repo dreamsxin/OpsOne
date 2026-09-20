@@ -369,10 +369,17 @@ func (h *Handler) CreateCertificate(c *gin.Context) {
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled
 	}
+	// 同 Probe：带 default 的字段在 Create 后会被 GORM 回填成库默认值，
+	// 用户关掉的开关必须在插入后显式写回
+	wantAlert, wantEnabled := item.AlertEnabled, item.Enabled
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "创建失败")
 		return
 	}
+	item.AlertEnabled, item.Enabled = wantAlert, wantEnabled
+	h.DB.Model(&model.Certificate{}).Where("id = ?", item.ID).Updates(map[string]any{
+		"alert_enabled": wantAlert, "enabled": wantEnabled,
+	})
 
 	// 录入即探测一次，避免列表里长期停在「未巡检」
 	response.OK(c, h.checkCertificate(item))

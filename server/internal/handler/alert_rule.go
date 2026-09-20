@@ -134,11 +134,18 @@ var builtinMetrics = []metricDef{
 		},
 	},
 	{
-		Key: "notify.failed", Label: "窗口内投递失败的通知数", Unit: "条", Windowed: true,
-		Hint: "通知发不出去时告警本身也送不到人，这条用来兜底",
+		Key: "notify.failed", Label: "窗口内投递失败的通知数", Unit: "条", Windowed: true, Hint: "通知发不出去时告警本身也送不到人，这条用来兜底",
 		Eval: func(h *Handler, window time.Duration) (float64, string) {
 			return plainCount(h, &model.NotifyRecord{},
 				"status <> ? AND created_at >= ?", "success", time.Now().Add(-window))
+		},
+	},
+	{
+		Key: "probe.down", Label: "拨测失败的目标数", Unit: "个",
+		Hint: "只统计最近一次拨测为失败的目标；拨测本身也会单独告警",
+		Eval: func(h *Handler, _ time.Duration) (float64, string) {
+			var names []string
+			return countWithNames(h, &model.Probe{}, &names, "last_status = ?", "down")
 		},
 	},
 }

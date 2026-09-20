@@ -52,6 +52,14 @@ func main() {
 	} else {
 		log.Println("[rule] 告警规则定时评估未启用（OPS_ALERT_RULE_SPEC 为空），只能手动试跑")
 	}
+	if cfg.ProbeSpec != "" {
+		if err := sched.AddFixed(cfg.ProbeSpec, h.RunProbesForSchedule); err != nil {
+			log.Fatalf("拨测 cron 表达式无效(%s): %v", cfg.ProbeSpec, err)
+		}
+		log.Printf("[probe] 定时拨测已启用: %s", cfg.ProbeSpec)
+	} else {
+		log.Println("[probe] 定时拨测未启用（OPS_PROBE_SPEC 为空），只能手动拨测")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -311,6 +319,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
 
 		auth.GET("/monitor/health", h.PlatformHealth)
+
+		auth.GET("/monitor/probes", h.ListProbes)
+		auth.POST("/monitor/probes", middleware.RequirePerm("probe:manage"), h.CreateProbe)
+		auth.PUT("/monitor/probes/:id", middleware.RequirePerm("probe:manage"), h.UpdateProbe)
+		auth.DELETE("/monitor/probes/:id", middleware.RequirePerm("probe:manage"), h.DeleteProbe)
+		auth.POST("/monitor/probes/:id/run", middleware.RequirePerm("probe:manage"), h.RunProbe)
+		auth.GET("/monitor/probe-records", h.ListProbeRecords)
 	}
 
 	return r
