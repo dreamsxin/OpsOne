@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-// Client 一个绑定到具体集群的只读 REST 客户端
+// Client 一个绑定到具体集群的 REST 客户端
 type Client struct {
 	cfg  *Config
 	http *http.Client
@@ -59,15 +60,31 @@ type apiStatus struct {
 
 // get 发一次 GET 并把响应体解到 out
 func (c *Client) get(ctx context.Context, path string, query url.Values, out any) error {
+	return c.do(ctx, http.MethodGet, path, query, "", nil, out)
+}
+
+// do 发一次请求并把响应体解到 out。body 为空时不带请求体。
+//
+// 错误信息一律带上 API Server 自己的 message：k8s 的报错（字段不合法、
+// 字段冲突、没权限）说得比任何本地包装都清楚。
+func (c *Client) do(ctx context.Context, method, path string, query url.Values,
+	contentType string, body []byte, out any) error {
 	target := c.cfg.Server + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	var reader io.Reader
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	if c.cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
 	} else if c.cfg.Username != "" {
@@ -80,13 +97,13 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return err
 	}
 	if resp.StatusCode >= 400 {
 		var status apiStatus
-		if json.Unmarshal(body, &status) == nil && status.Message != "" {
+		if json.Unmarshal(raw, &status) == nil && status.Message != "" {
 			// 把 API Server 自己的说法透出去，比「请求失败」有用得多
 			return fmt.Errorf("API 返回 %d: %s", resp.StatusCode, status.Message)
 		}
@@ -95,7 +112,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(body, out)
+	return json.Unmarshal(raw, out)
 }
 
 // ---------- 版本与节点 ----------

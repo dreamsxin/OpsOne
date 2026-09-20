@@ -147,14 +147,20 @@
 - **强制模式下不能自行解绑**，避免"开了又关"；策略切回 `optional` 后才能解绑，解绑必须同时给出登录口令与当前验证码（防止会话被劫持后直接摘掉双因子）。
 - **已签发的令牌不受影响**：给某个账号开双因子或重置绑定，不会让它已经拿到的 JWT 失效，旧令牌在有效期内（默认 12 小时）仍可用。真要立刻踢下线需要停用账号。
 
-### 16. 容器平台（集群接入）
+### 16. 容器平台（集群接入与资源改动）
 
-- **kubeconfig 明文存库**（`kube_clusters.kubeconfig`），里面的客户端证书与私钥通常就是 cluster-admin 凭据 —— **这是本平台目前权限最大的一份存储凭据**，拿到数据库等于拿到集群。与主机凭据同等对待（见第 1 节），接口不返回该字段，编辑时留空表示不修改。生产环境建议给平台单独签一个只读 ServiceAccount 的 kubeconfig，而不是直接用 admin 那份。
-- **平台侧只做只读调用**：取版本、列节点/命名空间/工作负载/Pod/事件，没有任何写操作接口（不提供 apply、scale、delete、exec）。但**凭据本身的权限不受平台限制** —— 拿到数据库的人可以用这份 kubeconfig 直接对集群做任何事。
+- **kubeconfig 明文存库**（`kube_clusters.kubeconfig`），里面的客户端证书与私钥通常就是 cluster-admin 凭据 —— **这是本平台目前权限最大的一份存储凭据**，拿到数据库等于拿到集群。与主机凭据同等对待（见第 1 节），接口不返回该字段，编辑时留空表示不修改。生产环境建议给平台单独签一个权限收敛的 ServiceAccount kubeconfig，而不是直接用 admin 那份。
+- **平台开放的写操作只有两种**：服务端 apply（`application/apply-patch+yaml`，`fieldManager=opsone`）与改副本数（`/scale` 子资源），且**只对白名单类型生效**：Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / Ingress。**不提供 delete、exec，也不开放 Secret / Namespace / RBAC 对象** —— 要动这些仍然走 kubectl。白名单在 `server/internal/k8s/resource.go` 的 `resourceKinds`。但**凭据本身的权限不受平台限制** —— 拿到数据库的人可以用这份 kubeconfig 直接对集群做任何事。
+- **写操作要 `kube:write` 权限**，与「维护集群」的 `kube:manage` 分开：能改资源的人不一定要能换 kubeconfig，反之亦然。前端 `v-perm` 只控制显示，拦截在路由上。
+- **每次写操作单独留痕**（`kube_change_logs`）：集群、对象、动作、是否只预检、是否强制接管字段、**提交的 YAML 原文**、成功或失败、API Server 的原话、操作人与来源 IP，失败也落库。留痕会原样存下 YAML 里的一切内容，**别把密钥写进 ConfigMap 再 apply**，那等于把密钥抄进了留痕表。保留天数由「数据留存」的 `retention.kube_change_days` 控制（默认 180 天）。
+- **预检（`dryRun=All`）是 API Server 侧的完整校验**（含准入控制）但不落盘，用来在真改之前确认 YAML 能过。预检也记留痕，检索时可用「只看真改过的」排除。
+- **强制接管字段（`force=true`）有破坏性**：字段被 kubectl 或其他控制器管理时，不强制会返回 409 并带出冲突字段名；勾了强制就按提交的 YAML 覆盖，并把字段管理者改成 `opsone`。界面上默认关闭。
+- **提交 YAML 的限制**：单个对象（多段 `---` 直接拒绝）、必须写明 `metadata.namespace`（不替它猜 default）、`apiVersion` 必须与白名单一致、单次上限 256 KB。
+- **读回的 YAML 会清掉 status 与集群自己维护的 metadata**（`resourceVersion` / `uid` / `generation` / `managedFields` / `creationTimestamp` / `ownerReferences`，以及 kubectl 的 `last-applied-configuration`），避免把集群的账本回填进 apply。嵌套的 `template.metadata.creationTimestamp: null` 与 kubectl 输出一样保留，不影响提交。
 - **集群地址由管理员填写，服务端主动外联**：和 Jenkins、Webhook、证书巡检同一类出站面，拥有 `kube:manage` 的人可以让平台去连内网任意 HTTPS 端口。
 - **支持 `insecure-skip-tls-verify`**：kubeconfig 里显式声明时才生效，平台不会自己关校验。开了它就等于接受中间人风险。
 - **只接受内嵌凭据**：`client-certificate-data` / `client-key-data` / `token`。指向本地文件路径的 kubeconfig 会被拒绝 —— 平台是集中纳管，依赖某台机器上的文件会让「能不能连上」变得不可预期。
-- **不缓存集群资源**：每次查询都现场调 API，页面上看到的就是集群当下的状态；代价是集群慢的时候页面也慢（单次调用 10 秒超时）。
+- **不缓存集群资源**：每次查询都现场调 API，页面上看到的就是集群当下的状态；代价是集群慢的时候页面也慢（只读 10 秒超时，写操作 30 秒 —— 准入 webhook 也在这条链路上）。
 - **健康检查会写告警**：不可达算 critical、有节点 NotReady 算 warning，指纹按集群固定，恢复时自动关闭。定时检查由 `OPS_KUBE_CHECK_SPEC` 控制（默认每 5 分钟），是代码内置任务，界面上无法停用。
 - **移除集群只删平台里的记录**：不会对集群本身做任何改动。
 

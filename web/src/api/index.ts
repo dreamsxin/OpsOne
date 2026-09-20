@@ -1908,6 +1908,92 @@ export const listKubeEvents = (id: number, namespace?: string, onlyWarning?: boo
     params: { ...(namespace ? { namespace } : {}), ...(onlyWarning ? { onlyWarning: 'true' } : {}) }
   })
 
+// ---------- 集群资源管理 ----------
+
+export interface KubeResourceKind {
+  kind: string
+  apiVersion: string
+  resource: string
+  namespaced: boolean
+  scalable: boolean
+}
+
+export interface KubeResourceItem {
+  kind: string
+  namespace: string
+  name: string
+  summary: string
+  createdAt: string
+}
+
+export interface KubeResourceDetail {
+  kind: string
+  namespace: string
+  name: string
+  scalable: boolean
+  yaml: string
+  hint: string
+}
+
+export interface KubeApplyResult {
+  kind: string
+  namespace: string
+  name: string
+  dryRun: boolean
+  forced: boolean
+  replicas: number
+  detail: string
+}
+
+export interface KubeScaleResult {
+  kind: string
+  namespace: string
+  name: string
+  previous: number
+  current: number
+  dryRun: boolean
+  detail: string
+}
+
+export interface KubeChangeLog {
+  id: number
+  clusterId: number
+  clusterName: string
+  kind: string
+  namespace: string
+  name: string
+  action: 'apply' | 'scale'
+  dryRun: boolean
+  forced: boolean
+  payload: string
+  status: 'success' | 'failed'
+  detail: string
+  username: string
+  clientIp: string
+  costMs: number
+  createdAt: string
+}
+
+export const listKubeResourceKinds = () => request<KubeResourceKind[]>({ url: '/kube/resource-kinds' })
+export const listKubeResources = (id: number, kind: string, namespace?: string) =>
+  request<{ items: KubeResourceItem[]; total: number; scalable: boolean }>({
+    url: `/kube/clusters/${id}/resources`,
+    params: { kind, ...(namespace ? { namespace } : {}) }
+  })
+export const getKubeResource = (id: number, kind: string, namespace: string, name: string) =>
+  request<KubeResourceDetail>({
+    url: `/kube/clusters/${id}/resource`,
+    params: { kind, namespace, name }
+  })
+export const applyKubeResource = (id: number, data: { yaml: string; dryRun: boolean; force?: boolean }) =>
+  request<KubeApplyResult>({ url: `/kube/clusters/${id}/resource/apply`, method: 'POST', data })
+export const scaleKubeResource = (
+  id: number,
+  data: { kind: string; namespace: string; name: string; replicas: number; dryRun: boolean }
+) => request<KubeScaleResult>({ url: `/kube/clusters/${id}/resource/scale`, method: 'POST', data })
+export const listKubeChangeLogs = (params: Record<string, any>) =>
+  request<PageData<KubeChangeLog>>({ url: '/kube/change-logs', params })
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

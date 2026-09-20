@@ -1,0 +1,327 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"ops-platform/server/internal/k8s"
+	"ops-platform/server/internal/middleware"
+	"ops-platform/server/internal/model"
+	"ops-platform/server/internal/response"
+)
+
+// kubeApplyTimeout 写操作的超时。比只读列表给得宽一点：准入控制、webhook
+// 都在这条链路上，10 秒偶尔真不够。
+const kubeApplyTimeout = 30 * time.Second
+
+// kubePayloadMaxBytes 提交的 YAML 上限。再大基本不是「改一处配置」的场景了
+const kubePayloadMaxBytes = 256 << 10
+
+// kubeChangeLogPageMax 留痕列表单页上限
+const kubeChangeLogPageMax = 100
+
+// KubeResourceKinds 平台允许操作的资源类型白名单
+func (h *Handler) KubeResourceKinds(c *gin.Context) {
+	response.OK(c, k8s.SupportedKinds())
+}
+
+// requireKind 取并校验 kind 参数
+func requireKind(c *gin.Context, raw string) (k8s.ResourceKind, bool) {
+	kind, ok := k8s.LookupKind(strings.TrimSpace(raw))
+	if !ok {
+		response.BadRequest(c, "不支持的资源类型，平台只开放了 "+supportedKindNames())
+		return k8s.ResourceKind{}, false
+	}
+	return kind, true
+}
+
+func supportedKindNames() string {
+	kinds := k8s.SupportedKinds()
+	names := make([]string, 0, len(kinds))
+	for _, item := range kinds {
+		names = append(names, item.Kind)
+	}
+	return strings.Join(names, " / ")
+}
+
+// KubeResources 列某类资源。namespace 留空表示全集群。
+func (h *Handler) KubeResources(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	kind, ok := requireKind(c, c.Query("kind"))
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kubeCallTimeout)
+	defer cancel()
+
+	items, err := client.ListObjects(ctx, kind, strings.TrimSpace(c.Query("namespace")))
+	if err != nil {
+		response.Error(c, "读取"+kind.Kind+"失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items), "scalable": kind.Scalable})
+}
+
+// KubeResourceDetail 取单个对象，返回清理过的可编辑 YAML
+func (h *Handler) KubeResourceDetail(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	kind, ok := requireKind(c, c.Query("kind"))
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(c.Query("name"))
+	namespace := strings.TrimSpace(c.Query("namespace"))
+	if name == "" || namespace == "" {
+		response.BadRequest(c, "命名空间与名称都不能为空")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kubeCallTimeout)
+	defer cancel()
+
+	obj, err := client.GetObject(ctx, kind, namespace, name)
+	if err != nil {
+		response.Error(c, "读取对象失败: "+err.Error())
+		return
+	}
+	editable, err := k8s.ToEditableYAML(obj)
+	if err != nil {
+		response.Error(c, "转换 YAML 失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{
+		"kind": kind.Kind, "namespace": namespace, "name": name,
+		"scalable": kind.Scalable, "yaml": string(editable),
+		"hint": "已去掉 status 与集群自己维护的字段（resourceVersion / uid / managedFields 等），可以直接改完提交",
+	})
+}
+
+// ApplyKubeResource 提交一段 YAML。dryRun=true 时只让 API Server 校验不落盘。
+func (h *Handler) ApplyKubeResource(c *gin.Context) {
+	cluster, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		YAML   string `json:"yaml"`
+		DryRun bool   `json:"dryRun"`
+		Force  bool   `json:"force"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	if len(req.YAML) > kubePayloadMaxBytes {
+		response.BadRequest(c, fmt.Sprintf("YAML 超过 %d KB 上限", kubePayloadMaxBytes>>10))
+		return
+	}
+
+	manifest, err := k8s.ParseManifest(req.YAML)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	kind, ok := k8s.LookupKind(manifest.Kind)
+	if !ok {
+		response.BadRequest(c, "平台不允许改动 "+manifest.Kind+"，只开放了 "+supportedKindNames())
+		return
+	}
+	if manifest.APIVersion != kind.APIVersion {
+		response.BadRequest(c, fmt.Sprintf("%s 的 apiVersion 应为 %s，收到 %s",
+			kind.Kind, kind.APIVersion, manifest.APIVersion))
+		return
+	}
+	if manifest.Namespace == "" {
+		// 不替它猜默认命名空间：apply 到 default 去往往不是本意
+		response.BadRequest(c, "YAML 里必须写明 metadata.namespace")
+		return
+	}
+
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), kubeApplyTimeout)
+	defer cancel()
+
+	obj, applyErr := client.Apply(ctx, kind, manifest.Namespace, manifest.Name,
+		[]byte(req.YAML), k8s.ApplyOptions{DryRun: req.DryRun, Force: req.Force})
+
+	entry := model.KubeChangeLog{
+		ClusterID: cluster.ID, ClusterName: cluster.Name,
+		Kind: kind.Kind, Namespace: manifest.Namespace, Name: manifest.Name,
+		Action: "apply", DryRun: req.DryRun, Forced: req.Force,
+		Payload: req.YAML, CostMs: time.Since(started).Milliseconds(),
+	}
+	if applyErr != nil {
+		h.recordKubeChange(c, entry, "", applyErr)
+		detail := applyErr.Error()
+		if strings.Contains(detail, "conflict") || strings.Contains(detail, "Conflict") {
+			detail += "（这些字段现在由别人管着，确认要接管就勾上「强制接管字段」重试）"
+		}
+		respondKubeError(c, "提交失败: "+detail, applyErr)
+		return
+	}
+
+	summary := "已应用"
+	if req.DryRun {
+		summary = "预检通过，集群未改动"
+	}
+	// 从返回对象里读回副本数，让人确认真正生效的值
+	replicas := -1
+	if spec, hit := obj["spec"].(map[string]any); hit {
+		if value, hit := spec["replicas"].(float64); hit {
+			replicas = int(value)
+			summary += fmt.Sprintf("，当前期望副本 %d", replicas)
+		}
+	}
+	h.recordKubeChange(c, entry, summary, nil)
+	response.OK(c, gin.H{
+		"kind": kind.Kind, "namespace": manifest.Namespace, "name": manifest.Name,
+		"dryRun": req.DryRun, "forced": req.Force, "replicas": replicas, "detail": summary,
+	})
+}
+
+// ScaleKubeResource 改副本数。只对支持 /scale 的类型开放。
+func (h *Handler) ScaleKubeResource(c *gin.Context) {
+	cluster, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+		Replicas  *int   `json:"replicas"`
+		DryRun    bool   `json:"dryRun"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	kind, ok := requireKind(c, req.Kind)
+	if !ok {
+		return
+	}
+	if !kind.Scalable {
+		response.BadRequest(c, kind.Kind+" 不支持直接改副本数")
+		return
+	}
+	req.Namespace, req.Name = strings.TrimSpace(req.Namespace), strings.TrimSpace(req.Name)
+	if req.Namespace == "" || req.Name == "" {
+		response.BadRequest(c, "命名空间与名称都不能为空")
+		return
+	}
+	if req.Replicas == nil {
+		response.BadRequest(c, "请填写目标副本数")
+		return
+	}
+	if *req.Replicas < 0 || *req.Replicas > 200 {
+		response.BadRequest(c, "副本数需在 0 到 200 之间")
+		return
+	}
+
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), kubeApplyTimeout)
+	defer cancel()
+
+	result, scaleErr := client.Scale(ctx, kind, req.Namespace, req.Name, *req.Replicas, req.DryRun)
+	entry := model.KubeChangeLog{
+		ClusterID: cluster.ID, ClusterName: cluster.Name,
+		Kind: kind.Kind, Namespace: req.Namespace, Name: req.Name,
+		Action: "scale", DryRun: req.DryRun,
+		Payload: "replicas=" + strconv.Itoa(*req.Replicas),
+		CostMs:  time.Since(started).Milliseconds(),
+	}
+	if scaleErr != nil {
+		h.recordKubeChange(c, entry, "", scaleErr)
+		respondKubeError(c, "改副本数失败: "+scaleErr.Error(), scaleErr)
+		return
+	}
+
+	summary := fmt.Sprintf("副本数 %d → %d", result.Previous, result.Current)
+	if req.DryRun {
+		summary = fmt.Sprintf("预检通过，副本数仍是 %d（目标 %d）", result.Previous, *req.Replicas)
+	}
+	h.recordKubeChange(c, entry, summary, nil)
+	response.OK(c, gin.H{
+		"kind": kind.Kind, "namespace": req.Namespace, "name": req.Name,
+		"previous": result.Previous, "current": result.Current,
+		"dryRun": req.DryRun, "detail": summary,
+	})
+}
+
+// respondKubeError 按 API Server 的说法挑一个合适的状态码。
+// 对象不存在是操作者填错了名字，报 404 比 500 好判断。
+func respondKubeError(c *gin.Context, message string, opErr error) {
+	if strings.Contains(opErr.Error(), "not found") {
+		response.NotFound(c, message)
+		return
+	}
+	response.Error(c, message)
+}
+
+// recordKubeChange 落一条集群写操作留痕。失败也记，且记下 API Server 的原话。
+func (h *Handler) recordKubeChange(c *gin.Context, entry model.KubeChangeLog, detail string, opErr error) {
+	entry.Status, entry.Detail = "success", truncate(detail, 480)
+	if opErr != nil {
+		entry.Status, entry.Detail = "failed", truncate(opErr.Error(), 480)
+	}
+	entry.ClientIP = c.ClientIP()
+	if user := middleware.CurrentUser(c); user != nil {
+		entry.UserID, entry.Username = user.ID, user.Username
+	}
+	if err := h.DB.Create(&entry).Error; err != nil {
+		// 留痕写失败不该把已经成功的改动回滚成一个错误响应
+		log.Printf("[kube] 写入集群改动留痕失败: %v", err)
+	}
+}
+
+// ListKubeChangeLogs 集群改动留痕检索
+func (h *Handler) ListKubeChangeLogs(c *gin.Context) {
+	page, size := pageParams(c)
+	if size > kubeChangeLogPageMax {
+		size = kubeChangeLogPageMax
+	}
+	query := h.DB.Model(&model.KubeChangeLog{})
+	if raw := strings.TrimSpace(c.Query("clusterId")); raw != "" {
+		if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+			query = query.Where("cluster_id = ?", id)
+		}
+	}
+	if action := strings.TrimSpace(c.Query("action")); action != "" {
+		query = query.Where("action = ?", action)
+	}
+	if status := strings.TrimSpace(c.Query("status")); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR namespace LIKE ?", like, like)
+	}
+	if c.Query("realOnly") == "true" {
+		// 只看真改过集群的，预检记录不算
+		query = query.Where("dry_run = ?", false)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		response.Error(c, "查询留痕失败")
+		return
+	}
+	var list []model.KubeChangeLog
+	if err := query.Order("id desc").Offset((page - 1) * size).Limit(size).
+		Find(&list).Error; err != nil {
+		response.Error(c, "查询留痕失败")
+		return
+	}
+	response.OKPage(c, list, total, page, size)
+}

@@ -948,6 +948,35 @@ type Script struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
+// KubeChangeLog 集群写操作留痕。
+//
+// 通用操作审计只记「谁调了哪个接口、返回多少」，但改集群这件事必须能答出
+// 「改的是哪个对象、提交的是什么、是不是只预检」，所以单独存一张表。
+type KubeChangeLog struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ClusterID   uint   `gorm:"index" json:"clusterId"`
+	ClusterName string `gorm:"size:64" json:"clusterName"`
+	Kind        string `gorm:"size:32" json:"kind"`
+	Namespace   string `gorm:"size:128" json:"namespace"`
+	Name        string `gorm:"size:191" json:"name"`
+	// Action apply | scale
+	Action string `gorm:"size:16" json:"action"`
+	// DryRun 只做服务端预检，集群没有真被改
+	DryRun bool `json:"dryRun"`
+	// Forced apply 时强行接管了别人管着的字段
+	Forced bool `json:"forced"`
+	// Payload apply 提交的 YAML 原文，或 scale 的目标副本数
+	Payload string `gorm:"type:text" json:"payload"`
+	Status  string `gorm:"size:16" json:"status"` // success | failed
+	Detail  string `gorm:"size:500" json:"detail"`
+	UserID  uint   `gorm:"index;default:0" json:"userId"`
+	// Username 落冗余名字，用户改名或删号之后留痕仍然可读
+	Username  string    `gorm:"size:64" json:"username"`
+	ClientIP  string    `gorm:"size:64" json:"clientIp"`
+	CostMs    int64     `json:"costMs"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // Topology 业务拓扑：把一条业务链路画成图，回答「这个业务现在哪一环挂了」。
 //
 // 拓扑本身不产生任何监控数据，节点健康度实时取自它绑定的资源（主机/数据库/拨测/证书），

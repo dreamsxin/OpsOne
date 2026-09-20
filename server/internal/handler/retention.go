@@ -20,6 +20,7 @@ const (
 	CfgRetentionHostMetric   = "retention.host_metric_days"
 	CfgRetentionNotifyRecord = "retention.notify_record_days"
 	CfgRetentionAuditLog     = "retention.audit_log_days"
+	CfgRetentionKubeChange   = "retention.kube_change_days"
 	CfgRetentionSession      = "retention.session_days"
 	CfgRetentionAlert        = "retention.alert_days"
 )
@@ -121,6 +122,19 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.AuditLog{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionKubeChange, label: "集群改动留痕",
+		note: "对集群 apply / 改副本数的记录，含提交的 YAML 原文", irreverse: true,
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.KubeChangeLog{}).Count(&total)
+			h.DB.Model(&model.KubeChangeLog{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.KubeChangeLog{}).RowsAffected
 		},
 	},
 	{
