@@ -1163,6 +1163,62 @@ export const resetUserTOTP = (id: number) =>
     method: 'POST'
   })
 
+// ---------- 告警规则 ----------
+
+export interface AlertRuleMetric {
+  key: string
+  label: string
+  unit: string
+  windowed: boolean
+  hint: string
+  currentValue: number
+  detail: string
+}
+
+export interface AlertRule {
+  id: number
+  name: string
+  metric: string
+  comparator: 'gt' | 'gte' | 'lt' | 'lte'
+  threshold: number
+  windowMinutes: number
+  consecutiveTimes: number
+  severity: string
+  hitStreak: number
+  lastValue: number
+  lastStatus: string
+  lastDetail: string
+  lastEvalAt: string | null
+  lastFireAt: string | null
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface AlertRuleEvalResult {
+  status: string
+  value: number
+  threshold: number
+  expression: string
+  hit: boolean
+  hitStreak: number
+  needStreak: number
+  detail: string
+}
+
+export const listAlertRuleMetrics = (windowMinutes?: number) =>
+  request<AlertRuleMetric[]>({ url: '/monitor/alert-rules/metrics', params: { windowMinutes } })
+export const listAlertRules = (params?: Record<string, any>) =>
+  request<AlertRule[]>({ url: '/monitor/alert-rules', params })
+export const createAlertRule = (data: Record<string, any>) =>
+  request<AlertRule>({ url: '/monitor/alert-rules', method: 'POST', data })
+export const updateAlertRule = (id: number, data: Record<string, any>) =>
+  request<AlertRule>({ url: `/monitor/alert-rules/${id}`, method: 'PUT', data })
+export const deleteAlertRule = (id: number) =>
+  request({ url: `/monitor/alert-rules/${id}`, method: 'DELETE' })
+export const evaluateAlertRule = (id: number) =>
+  request<AlertRuleEvalResult>({ url: `/monitor/alert-rules/${id}/evaluate`, method: 'POST' })
+
 
 
 

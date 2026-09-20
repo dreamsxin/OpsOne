@@ -669,3 +669,34 @@ type Certificate struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// AlertRule 基于平台自身数据的告警规则。
+//
+// 指标全部来自平台已有的表（主机探测状态、证书巡检、执行记录、告警积压等），
+// 不依赖 Prometheus。规则周期评估，命中即写告警并走通知路由，不命中则恢复。
+type AlertRule struct {
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	Name   string `gorm:"size:64;not null" json:"name"`
+	Metric string `gorm:"size:32;not null" json:"metric"` // 见 handler 里的内置指标注册表
+
+	Comparator string  `gorm:"size:4;default:gt" json:"comparator"` // gt | gte | lt | lte
+	Threshold  float64 `json:"threshold"`
+	// WindowMinutes 仅对「最近 N 分钟」类指标有效，其余指标忽略
+	WindowMinutes int `gorm:"default:60" json:"windowMinutes"`
+	// ConsecutiveTimes 连续命中多少次才真正告警，用于抑制抖动
+	ConsecutiveTimes int    `gorm:"default:1" json:"consecutiveTimes"`
+	Severity         string `gorm:"size:16;default:warning" json:"severity"` // info | warning | critical
+
+	HitStreak  int        `json:"hitStreak"`                                 // 当前连续命中次数
+	LastValue  float64    `json:"lastValue"`                                 // 最近一次取到的指标值
+	LastStatus string     `gorm:"size:16;default:unknown" json:"lastStatus"` // unknown | ok | firing | error
+	LastDetail string     `gorm:"size:255" json:"lastDetail"`
+	LastEvalAt *time.Time `json:"lastEvalAt"`
+	LastFireAt *time.Time `json:"lastFireAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

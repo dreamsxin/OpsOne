@@ -44,6 +44,14 @@ func main() {
 	} else {
 		log.Println("[cert] 证书定时巡检未启用（OPS_CERT_CHECK_SPEC 为空），只能手动巡检")
 	}
+	if cfg.AlertRuleSpec != "" {
+		if err := sched.AddFixed(cfg.AlertRuleSpec, h.EvaluateAlertRulesForSchedule); err != nil {
+			log.Fatalf("告警规则 cron 表达式无效(%s): %v", cfg.AlertRuleSpec, err)
+		}
+		log.Printf("[rule] 告警规则定时评估已启用: %s", cfg.AlertRuleSpec)
+	} else {
+		log.Println("[rule] 告警规则定时评估未启用（OPS_ALERT_RULE_SPEC 为空），只能手动试跑")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -294,6 +302,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/me/totp/confirm", h.ConfirmMyTOTP)
 		auth.POST("/me/totp/disable", h.DisableMyTOTP)
 		auth.POST("/system/users/:id/totp/reset", middleware.RequirePerm("totp:reset"), h.ResetUserTOTP)
+
+		auth.GET("/monitor/alert-rules/metrics", h.ListAlertRuleMetrics)
+		auth.GET("/monitor/alert-rules", h.ListAlertRules)
+		auth.POST("/monitor/alert-rules", middleware.RequirePerm("alertrule:manage"), h.CreateAlertRule)
+		auth.PUT("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.UpdateAlertRule)
+		auth.DELETE("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.DeleteAlertRule)
+		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
 	}
 
 	return r

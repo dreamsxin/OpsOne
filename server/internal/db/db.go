@@ -35,7 +35,7 @@ func Migrate(g *gorm.DB) error {
 		&model.CloudAccount{}, &model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
-		&model.Certificate{},
+		&model.Certificate{}, &model.AlertRule{},
 	)
 }
 
@@ -106,7 +106,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 401, ParentID: 400, Name: "AlertSituation", Title: "告警态势", Path: "/monitor/situation", Component: "/monitor/situation/index", Icon: "DataAnalysis", Sort: 1},
 		{ID: 402, ParentID: 400, Name: "AlertList", Title: "告警列表", Path: "/monitor/alerts", Component: "/monitor/alerts/index", Icon: "Bell", Sort: 2},
 		{ID: 420, ParentID: 402, Title: "确认与恢复", Type: "button", AuthCode: "alert:handle", Sort: 1},
-		{ID: 403, ParentID: 400, Name: "AlertRule", Title: "告警规则", Path: "/monitor/alert-rules", Component: todo, Icon: "Tickets", Sort: 3},
+		{ID: 403, ParentID: 400, Name: "AlertRule", Title: "告警规则", Path: "/monitor/alert-rules", Component: "/monitor/alert-rules/index", Icon: "Tickets", Sort: 3},
+		{ID: 422, ParentID: 403, Title: "维护与试跑规则", Type: "button", AuthCode: "alertrule:manage", Sort: 1},
 		{ID: 404, ParentID: 400, Name: "DetectionRule", Title: "检测规则", Path: "/monitor/detection-rules", Component: todo, Icon: "Aim", Sort: 4},
 		{ID: 405, ParentID: 400, Name: "NotifyRouting", Title: "通知路由", Path: "/monitor/routing", Component: "/monitor/routing/index", Icon: "Guide", Sort: 5},
 		{ID: 421, ParentID: 405, Title: "维护路由", Type: "button", AuthCode: "route:manage", Sort: 1},

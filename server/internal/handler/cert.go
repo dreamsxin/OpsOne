@@ -233,7 +233,13 @@ func (h *Handler) syncCertAlerts(cert model.Certificate) {
 }
 
 func certAlertFingerprint(certID uint, kind string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("certificate|%d|%s", certID, kind)))
+	return internalAlertFingerprint(fmt.Sprintf("certificate|%d|%s", certID, kind))
+}
+
+// internalAlertFingerprint 平台内部产生的告警统一用它算指纹，
+// 保证同一对象重复上报只累加次数
+func internalAlertFingerprint(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
 	return hex.EncodeToString(sum[:20])
 }
 

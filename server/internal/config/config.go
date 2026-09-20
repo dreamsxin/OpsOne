@@ -27,6 +27,10 @@ type Config struct {
 	// CertCheckSpec 证书巡检的 cron 表达式（标准五段）。留空表示不做定时巡检，
 	// 只能在界面上手动触发。
 	CertCheckSpec string
+
+	// AlertRuleSpec 告警规则评估的 cron 表达式。留空表示不做定时评估，
+	// 规则只能在界面上手动试跑。
+	AlertRuleSpec string
 }
 
 func Load() *Config {
@@ -40,6 +44,7 @@ func Load() *Config {
 		RecordDir:        env("OPS_RECORD_DIR", "recordings"),
 		SSHStrictHostKey: env("OPS_SSH_STRICT_HOST_KEY", "false") == "true",
 		CertCheckSpec:    strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
+		AlertRuleSpec:    strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

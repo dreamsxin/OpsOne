@@ -50,7 +50,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 告警态势 `/monitor/situation` — 趋势折线（24h/7d/30d 分桶）、级别与来源分布、Top 标签、平均确认与恢复时长
 
 - [x] 告警列表 `/monitor/alerts` — 概览卡片、级别/状态/关键字筛选、确认与恢复、投递流水
-- [ ] 告警规则 `/monitor/alert-rules`
+- [x] 告警规则 `/monitor/alert-rules` — 11 个内置指标（全部取平台自身数据，不依赖 Prometheus）、比较符 + 阈值 + 统计窗口 + 连续命中降噪、定时评估与手动试跑、命中写告警并自动恢复；**不含 PromQL 与外部指标源**
 - [ ] 检测规则 `/monitor/detection-rules` — 顺序链、并发窗、窗口 Join、降噪
 - [x] 通知路由 `/monitor/routing` — 优先级 + 级别/标签匹配、兜底路由、选路预演
 
