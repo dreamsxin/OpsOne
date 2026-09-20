@@ -31,7 +31,7 @@ func Migrate(g *gorm.DB) error {
 		&model.NotifyRoute{}, &model.NotifyRecord{},
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
-		&model.SiteLink{}, &model.EmailTemplate{},
+		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
 	)
 }
 
@@ -149,7 +149,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 809, ParentID: 800, Name: "SysMenu", Title: "菜单管理", Path: "/system/menu", Component: "/system/menu/index", Icon: "Menu", Sort: 5},
 		{ID: 826, ParentID: 809, Title: "维护菜单", Type: "button", AuthCode: "menu:manage", Sort: 1},
 		{ID: 810, ParentID: 800, Name: "DataPermission", Title: "数据权限", Path: "/system/data-permission", Component: "/system/data-permission/index", Icon: "Filter", Sort: 6},
-		{ID: 811, ParentID: 800, Name: "ResourceGrant", Title: "资源授权", Path: "/system/resource-grant", Component: todo, Icon: "Unlock", Sort: 7},
+		{ID: 811, ParentID: 800, Name: "ResourceGrant", Title: "资源授权", Path: "/system/resource-grant", Component: "/system/resource-grant/index", Icon: "Unlock", Sort: 7},
+		{ID: 827, ParentID: 811, Title: "维护授权", Type: "button", AuthCode: "grant:manage", Sort: 1},
 		{ID: 812, ParentID: 800, Name: "NotifyChannel", Title: "通知渠道", Path: "/system/notify-channel", Component: "/system/notify-channel/index", Icon: "Message", Sort: 8},
 		{ID: 823, ParentID: 812, Title: "维护渠道", Type: "button", AuthCode: "channel:manage", Sort: 1},
 		{ID: 813, ParentID: 800, Name: "NotifyRecord", Title: "通知记录", Path: "/system/notify-record", Component: "/system/notify-record/index", Icon: "MessageBox", Sort: 9},

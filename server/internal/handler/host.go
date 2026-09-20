@@ -28,24 +28,38 @@ type hostReq struct {
 	DeptID      uint   `json:"deptId"`      // 归属部门，参与数据权限过滤
 }
 
-// loadHostScoped 按数据权限加载主机，越权访问一律按「不存在」处理，不泄露存在性
+// loadHostScoped 按数据权限（含资源授权）加载主机，不校验具体动作
 func (h *Handler) loadHostScoped(c *gin.Context) (*model.Host, bool) {
+	return h.loadHostForAction(c, "")
+}
+
+// loadHostForAction 加载主机并校验动作权限。
+//
+// 不可见一律按「不存在」处理，不泄露存在性；可见但动作未被授权时返回 403，
+// 让操作人知道是权限不足而不是资源不存在。
+func (h *Handler) loadHostForAction(c *gin.Context, action string) (*model.Host, bool) {
 	var host model.Host
 	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
 		response.NotFound(c, "主机不存在")
 		return nil, false
 	}
-	if !h.hostVisible(middleware.CurrentUser(c), &host) {
+
+	user := middleware.CurrentUser(c)
+	if !h.hostVisibleWithGrants(user, &host) {
 		response.NotFound(c, "主机不存在")
+		return nil, false
+	}
+	if action != "" && !h.hostActionAllowed(user, &host, action) {
+		response.Forbidden(c, "该主机未授权此操作: "+action)
 		return nil, false
 	}
 	return &host, true
 }
 
-// ListHosts 主机清单，支持关键字与环境过滤，结果受数据权限约束
+// ListHosts 主机清单，支持关键字与环境过滤，结果受数据权限与资源授权约束
 func (h *Handler) ListHosts(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.applyHostScope(h.DB.Model(&model.Host{}), middleware.CurrentUser(c))
+	q := h.applyScopeWithGrants(h.DB.Model(&model.Host{}), middleware.CurrentUser(c), "host")
 
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
 		like := "%" + kw + "%"
@@ -108,7 +122,7 @@ func (h *Handler) CreateHost(c *gin.Context) {
 
 // UpdateHost 编辑主机
 func (h *Handler) UpdateHost(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionManage)
 	if !ok {
 		return
 	}
@@ -153,7 +167,7 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 
 // DeleteHost 删除主机
 func (h *Handler) DeleteHost(c *gin.Context) {
-	host, ok := h.loadHostScoped(c)
+	host, ok := h.loadHostForAction(c, model.ActionManage)
 	if !ok {
 		return
 	}

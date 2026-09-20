@@ -76,7 +76,7 @@ func (w *safeConn) Alert(text string) {
 
 // Terminal 打开目标主机的交互式 SSH 会话，全程录像并审计命令
 func (h *Handler) Terminal(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionTerminal)
 	if !ok {
 		return
 	}

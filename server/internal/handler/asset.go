@@ -141,7 +141,7 @@ type dbInstanceReq struct {
 
 func (h *Handler) ListDBInstances(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.applyScope(h.DB.Model(&model.DBInstance{}), middleware.CurrentUser(c))
+	q := h.applyScopeWithGrants(h.DB.Model(&model.DBInstance{}), middleware.CurrentUser(c), "database")
 
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
 		like := "%" + kw + "%"
@@ -189,22 +189,37 @@ func (h *Handler) CreateDBInstance(c *gin.Context) {
 	response.OK(c, item)
 }
 
-// loadDBScoped 按数据权限加载数据库实例
+// loadDBScoped 按数据权限（含资源授权）加载数据库实例，不校验具体动作
 func (h *Handler) loadDBScoped(c *gin.Context) (*model.DBInstance, bool) {
+	return h.loadDBForAction(c, "")
+}
+
+// loadDBForAction 加载数据库实例并校验动作权限，语义与主机一致：
+// 数据范围内不限动作，仅靠授权可见时按授权动作集合判断
+func (h *Handler) loadDBForAction(c *gin.Context, action string) (*model.DBInstance, bool) {
 	var item model.DBInstance
 	if err := h.DB.First(&item, idParam(c)).Error; err != nil {
 		response.NotFound(c, "数据库资产不存在")
 		return nil, false
 	}
-	if !h.resourceVisible(middleware.CurrentUser(c), item.DeptID, item.CreatedBy) {
+
+	user := middleware.CurrentUser(c)
+	inScope := h.resourceVisible(user, item.DeptID, item.CreatedBy)
+	actions := h.activeGrants(user, "database")[item.ID]
+
+	if !inScope && len(actions) == 0 {
 		response.NotFound(c, "数据库资产不存在")
+		return nil, false
+	}
+	if action != "" && !inScope && !grantAllows(actions, action) {
+		response.Forbidden(c, "该数据库资产未授权此操作: "+action)
 		return nil, false
 	}
 	return &item, true
 }
 
 func (h *Handler) UpdateDBInstance(c *gin.Context) {
-	itemPtr, ok := h.loadDBScoped(c)
+	itemPtr, ok := h.loadDBForAction(c, model.ActionManage)
 	if !ok {
 		return
 	}
@@ -231,7 +246,7 @@ func (h *Handler) UpdateDBInstance(c *gin.Context) {
 }
 
 func (h *Handler) DeleteDBInstance(c *gin.Context) {
-	item, ok := h.loadDBScoped(c)
+	item, ok := h.loadDBForAction(c, model.ActionManage)
 	if !ok {
 		return
 	}

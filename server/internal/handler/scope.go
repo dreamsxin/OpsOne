@@ -135,8 +135,13 @@ func (h *Handler) hostVisible(user *model.User, host *model.Host) bool {
 	return h.resourceVisible(user, host.DeptID, host.CreatedBy)
 }
 
-// filterVisibleHostIDs 从给定主机 ID 中筛出用户可见的部分
+// filterVisibleHostIDs 从给定主机 ID 中筛出用户可执行指定动作的部分
 func (h *Handler) filterVisibleHostIDs(user *model.User, ids []uint) []uint {
+	return h.filterHostIDsForAction(user, ids, model.ActionExec)
+}
+
+// filterHostIDsForAction 按动作过滤主机 ID：数据范围内直接通过，范围外需有覆盖该动作的授权
+func (h *Handler) filterHostIDsForAction(user *model.User, ids []uint, action string) []uint {
 	if len(ids) == 0 {
 		return ids
 	}
@@ -145,7 +150,7 @@ func (h *Handler) filterVisibleHostIDs(user *model.User, ids []uint) []uint {
 
 	allowed := make([]uint, 0, len(hosts))
 	for i := range hosts {
-		if h.hostVisible(user, &hosts[i]) {
+		if h.hostActionAllowed(user, &hosts[i], action) {
 			allowed = append(allowed, hosts[i].ID)
 		}
 	}

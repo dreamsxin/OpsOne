@@ -498,6 +498,28 @@ export interface EmailTemplate {
   builtin: boolean
 }
 
+export interface ResourceGrant {
+  id: number
+  subjectType: 'user' | 'role'
+  subjectId: number
+  subjectName: string
+  resourceType: 'host' | 'database'
+  resourceId: number
+  resourceName: string
+  actions: string
+  expiresAt: string | null
+  remark: string
+  operator: string
+  createdAt: string
+}
+
+export interface GrantDiagnosis {
+  user: { id: number; username: string }
+  scopedHosts: number
+  grantedHosts: { hostId: number; hostName: string; address: string; actions: string[] }[]
+}
+
+
 
 // ---------- 接口 ----------
 
@@ -770,6 +792,20 @@ export const deleteDepartment = (id: number) =>
 
 export const diagnoseDataScope = (userId: number) =>
   request<DataScopeDiagnosis>({ url: `/system/data-permission/diagnose/${userId}` })
+
+// ---------- 资源授权 ----------
+
+export const listResourceGrants = (params: Record<string, any>) =>
+  request<PageData<ResourceGrant>>({ url: '/resource-grants', params })
+export const createResourceGrant = (data: Record<string, any>) =>
+  request<ResourceGrant>({ url: '/resource-grants', method: 'POST', data })
+export const updateResourceGrant = (id: number, data: Record<string, any>) =>
+  request<ResourceGrant>({ url: `/resource-grants/${id}`, method: 'PUT', data })
+export const deleteResourceGrant = (id: number) =>
+  request({ url: `/resource-grants/${id}`, method: 'DELETE' })
+export const diagnoseResourceGrants = (userId: number) =>
+  request<GrantDiagnosis>({ url: `/resource-grants/diagnose/${userId}` })
+
 
 // ---------- 平台配置 ----------
 

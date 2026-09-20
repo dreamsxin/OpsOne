@@ -87,6 +87,35 @@ type Menu struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// 资源授权支持的动作
+const (
+	ActionTerminal = "terminal" // 打开 Web 终端
+	ActionFile     = "file"     // 文件管理
+	ActionExec     = "exec"     // 批量执行与定时任务
+	ActionManage   = "manage"   // 编辑与删除资产
+	ActionAll      = "*"        // 全部动作
+)
+
+// ResourceGrant 资源授权：在数据范围之外，把指定资源额外授予某个用户或角色。
+//
+// 与数据范围是「叠加」关系：数据范围决定默认能看到什么，授权额外放开具体资源，
+// 并可限定动作集合与有效期。授权只放开、不收窄，数据范围内已有的权限不受影响。
+type ResourceGrant struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	SubjectType  string     `gorm:"size:16;index;not null" json:"subjectType"` // user | role
+	SubjectID    uint       `gorm:"index;not null" json:"subjectId"`
+	SubjectName  string     `gorm:"size:64" json:"subjectName"`
+	ResourceType string     `gorm:"size:16;index;default:host" json:"resourceType"` // host | database
+	ResourceID   uint       `gorm:"index;not null" json:"resourceId"`
+	ResourceName string     `gorm:"size:128" json:"resourceName"`
+	Actions      string     `gorm:"size:128;default:*" json:"actions"` // 逗号分隔，或 *
+	ExpiresAt    *time.Time `json:"expiresAt"`                         // 空表示长期有效
+	Remark       string     `gorm:"size:255" json:"remark"`
+	Operator     string     `gorm:"size:64" json:"operator"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
 // SiteLink 站点导航条目，用于集中收拢内部系统入口
 type SiteLink struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

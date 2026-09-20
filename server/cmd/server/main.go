@@ -204,6 +204,12 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		auth.GET("/system/data-permission/diagnose/:id", h.DiagnoseDataScope)
 
+		auth.GET("/resource-grants", h.ListResourceGrants)
+		auth.POST("/resource-grants", middleware.RequirePerm("grant:manage"), h.CreateResourceGrant)
+		auth.PUT("/resource-grants/:id", middleware.RequirePerm("grant:manage"), h.UpdateResourceGrant)
+		auth.DELETE("/resource-grants/:id", middleware.RequirePerm("grant:manage"), h.DeleteResourceGrant)
+		auth.GET("/resource-grants/diagnose/:id", h.DiagnoseResourceGrants)
+
 		auth.GET("/system/configs", h.ListConfigs)
 		auth.POST("/system/configs", middleware.RequirePerm("config:manage"), h.CreateConfig)
 		auth.PUT("/system/configs", middleware.RequirePerm("config:manage"), h.UpdateConfigs)

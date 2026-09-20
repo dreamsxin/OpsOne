@@ -74,7 +74,7 @@ func cleanRemotePath(p string) (string, error) {
 
 // ListFiles 列出远端目录
 func (h *Handler) ListFiles(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
@@ -115,7 +115,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 
 // DownloadFile 下载远端文件
 func (h *Handler) DownloadFile(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
@@ -164,7 +164,7 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 
 // UploadFile 上传文件到远端目录
 func (h *Handler) UploadFile(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
@@ -225,7 +225,7 @@ type filePathReq struct {
 
 // MakeDir 新建远端目录
 func (h *Handler) MakeDir(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
@@ -265,7 +265,7 @@ type renameReq struct {
 
 // RenameFile 重命名或移动
 func (h *Handler) RenameFile(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
@@ -305,7 +305,7 @@ func (h *Handler) RenameFile(c *gin.Context) {
 
 // DeleteFile 删除文件或空目录
 func (h *Handler) DeleteFile(c *gin.Context) {
-	hostPtr, ok := h.loadHostScoped(c)
+	hostPtr, ok := h.loadHostForAction(c, model.ActionFile)
 	if !ok {
 		return
 	}
