@@ -1284,3 +1284,79 @@ type KubeCluster struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// ModelUpstream 模型资源池里的一条上游。
+//
+// 一条记录 = 「某个供应商的某个模型」。多条记录用同一个 Alias 就组成一个池：
+// 调用方只认 Alias，平台按权重挑一条转发，失败自动换下一条。
+// 这样换供应商、加降级备份都不用改调用方的代码。
+//
+// 只支持 OpenAI 兼容的 /chat/completions（多数供应商都兼容这套），
+// 不做流式：SSE 要维持长连接，而且中途拿不到完整的 usage，用量就算不准。
+type ModelUpstream struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Alias 对外的逻辑模型名，调用方传这个；同 Alias 的多条记录互为备份
+	Alias string `gorm:"size:64;index;not null" json:"alias"`
+	// Provider 供应商标识，只为展示与归类（openai / deepseek / qwen / ollama ...）
+	Provider string `gorm:"size:32;default:openai" json:"provider"`
+	// BaseURL OpenAI 兼容根地址，含 /v1，例如 https://api.deepseek.com/v1
+	BaseURL string `gorm:"size:255;not null" json:"baseUrl"`
+	// APIKey 上游密钥，明文存库（与主机凭据同等对待，见 docs/SECURITY.md），不出接口
+	APIKey string `gorm:"size:255" json:"-"`
+	// Model 上游真实模型名，例如 deepseek-chat
+	Model string `gorm:"size:128;not null" json:"model"`
+	// Weight 挑选权重，越大越优先；同权重按 id 顺序
+	Weight     int `gorm:"default:10" json:"weight"`
+	TimeoutSec int `gorm:"default:60" json:"timeoutSec"`
+	// InputPrice / OutputPrice 每千 token 单价（元），用来算成本。
+	// 这是按登记单价算出的估值，不等于供应商账单 —— 平台不做对账。
+	InputPrice  float64 `gorm:"default:0" json:"inputPrice"`
+	OutputPrice float64 `gorm:"default:0" json:"outputPrice"`
+
+	// 以下由连通性检查回填
+	ModelStatus string `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
+	// ModelListed 检查时在上游 /models 列表里确实看到了这个模型名
+	ModelListed bool       `gorm:"default:false" json:"modelListed"`
+	LatencyMs   int64      `json:"latencyMs"`
+	LastError   string     `gorm:"size:500" json:"lastError"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ModelCall 一次模型调用的流水，用量与成本都从这里统计。
+//
+// 只记元数据：提示词与回复正文一律不落库 —— 那等于把业务数据（可能含客户信息）
+// 抄进运维平台的库里。要看具体内容，应该在调用方自己的日志里看。
+type ModelCall struct {
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	UpstreamID   uint   `gorm:"index;default:0" json:"upstreamId"`
+	UpstreamName string `gorm:"size:64" json:"upstreamName"`
+	Alias        string `gorm:"size:64;index" json:"alias"`
+	Provider     string `gorm:"size:32" json:"provider"`
+	Model        string `gorm:"size:128" json:"model"`
+	// Caller 调用来源：api（走网关接口）| console（界面上试调用）
+	Caller string `gorm:"size:16;index" json:"caller"`
+	UserID uint   `gorm:"index;default:0" json:"userId"`
+	// Username 落冗余名字，用户改名或删号之后流水仍然可读
+	Username string `gorm:"size:64" json:"username"`
+	ClientIP string `gorm:"size:64" json:"clientIp"`
+	// Tokens 以上游返回的 usage 为准；上游没给就是 0，成本也算不出来
+	PromptTokens     int     `json:"promptTokens"`
+	CompletionTokens int     `json:"completionTokens"`
+	TotalTokens      int     `json:"totalTokens"`
+	Cost             float64 `json:"cost"`
+	// UsageMissing 上游没返回 usage，这条的 token 与成本不可信
+	UsageMissing bool   `gorm:"default:false" json:"usageMissing"`
+	LatencyMs    int64  `json:"latencyMs"`
+	CallStatus   string `gorm:"size:16;index" json:"status"` // success | failed
+	ErrorMsg     string `gorm:"size:500" json:"errorMsg"`
+	// Retried 这一条是前一个上游失败后切过来的
+	Retried   bool      `gorm:"default:false" json:"retried"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}

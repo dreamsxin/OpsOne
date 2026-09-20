@@ -419,6 +419,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/kube/forwards", middleware.RequirePerm("kube:forward"), h.CreateKubeForward)
 		auth.DELETE("/kube/forwards/:id", middleware.RequirePerm("kube:forward"), h.CloseKubeForward)
 
+		auth.GET("/ai/upstreams", h.ListModelUpstreams)
+		auth.POST("/ai/upstreams", middleware.RequirePerm("model:manage"), h.CreateModelUpstream)
+		auth.PUT("/ai/upstreams/:id", middleware.RequirePerm("model:manage"), h.UpdateModelUpstream)
+		auth.DELETE("/ai/upstreams/:id", middleware.RequirePerm("model:manage"), h.DeleteModelUpstream)
+		auth.POST("/ai/upstreams/:id/check", middleware.RequirePerm("model:manage"), h.CheckModelUpstream)
+		// 网关入口：调用方按 Alias 请求，平台转发到池子里的上游
+		auth.POST("/ai/chat/completions", middleware.RequirePerm("model:call"), h.ChatCompletion)
+		auth.GET("/ai/calls", h.ListModelCalls)
+
 		auth.GET("/monitor/health", h.PlatformHealth)
 
 		auth.GET("/monitor/probes", h.ListProbes)

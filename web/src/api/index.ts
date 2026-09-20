@@ -2393,6 +2393,117 @@ export const createKubeForward = (data: {
 export const closeKubeForward = (id: number) =>
   request<{ closed: boolean; reason?: string }>({ url: `/kube/forwards/${id}`, method: 'DELETE' })
 
+// ---------- 模型资源池 ----------
+
+export interface ModelUpstream {
+  id: number
+  name: string
+  alias: string
+  provider: string
+  baseUrl: string
+  model: string
+  weight: number
+  timeoutSec: number
+  inputPrice: number
+  outputPrice: number
+  status: 'unknown' | 'healthy' | 'error'
+  modelListed: boolean
+  latencyMs: number
+  lastError: string
+  lastCheckAt: string | null
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+/** 同 Alias 的上游算一个池子，页面上要能看出哪个 Alias 压根没有可用上游 */
+export interface ModelPoolStat {
+  alias: string
+  total: number
+  enabled: number
+  healthy: number
+}
+
+export interface ModelCheckResult {
+  status: 'healthy' | 'error'
+  detail: string
+  modelListed?: boolean
+  latencyMs?: number
+  modelCount?: number
+}
+
+export interface ModelCall {
+  id: number
+  upstreamId: number
+  upstreamName: string
+  alias: string
+  provider: string
+  model: string
+  caller: 'api' | 'console'
+  username: string
+  clientIp: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cost: number
+  usageMissing: boolean
+  latencyMs: number
+  status: 'success' | 'failed'
+  errorMsg: string
+  retried: boolean
+  createdAt: string
+}
+
+export interface ModelCallSummary {
+  calls: number
+  failed: number
+  tokens: number
+  cost: number
+  avgLatencyMs: number
+  usageMissing: number
+}
+
+export interface ModelChatResult {
+  content: string
+  alias: string
+  model: string
+  provider: string
+  upstreamId: number
+  upstreamName: string
+  finishReason: string
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number; missing: boolean }
+  cost: number
+  latencyMs: number
+  callId: number
+  attempts: { upstreamId: number; upstreamName: string; status: string; error?: string }[]
+}
+
+export const listModelUpstreams = (params?: Record<string, any>) =>
+  request<{ list: ModelUpstream[]; pools: ModelPoolStat[] }>({ url: '/ai/upstreams', params })
+export const createModelUpstream = (data: Record<string, any>) =>
+  request<{ upstream: ModelUpstream; check: ModelCheckResult }>({
+    url: '/ai/upstreams',
+    method: 'POST',
+    data
+  })
+export const updateModelUpstream = (id: number, data: Record<string, any>) =>
+  request<ModelUpstream>({ url: `/ai/upstreams/${id}`, method: 'PUT', data })
+export const deleteModelUpstream = (id: number) =>
+  request({ url: `/ai/upstreams/${id}`, method: 'DELETE' })
+export const checkModelUpstream = (id: number) =>
+  request<ModelCheckResult>({ url: `/ai/upstreams/${id}/check`, method: 'POST' })
+/** 走网关调模型：传 Alias 走池子挑选，传 upstreamId 则指定试某一条 */
+export const chatCompletion = (data: {
+  model?: string
+  upstreamId?: number
+  messages: { role: string; content: string }[]
+  temperature?: number
+  maxTokens?: number
+  caller?: 'console'
+}) => request<ModelChatResult>({ url: '/ai/chat/completions', method: 'POST', data })
+export const listModelCalls = (params: Record<string, any>) =>
+  request<PageData<ModelCall> & { summary: ModelCallSummary }>({ url: '/ai/calls', params })
+
 // ---------- 主机指标 ----------
 
 export interface HostMetric {

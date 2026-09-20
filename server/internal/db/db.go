@@ -47,6 +47,7 @@ func Migrate(g *gorm.DB) error {
 		&model.OnCallSchedule{}, &model.OnCallOverride{}, &model.AlertEscalation{},
 		&model.ExposureTarget{}, &model.ExposureScan{},
 		&model.MetricSource{}, &model.SavedMetricQuery{}, &model.LogSource{}, &model.TraceSource{},
+		&model.ModelUpstream{}, &model.ModelCall{},
 	)
 }
 
@@ -163,7 +164,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},
-		{ID: 601, ParentID: 600, Name: "ModelPool", Title: "模型资源池", Path: "/ai/model-pool", Component: todo, Icon: "Cpu", Sort: 1},
+		{ID: 601, ParentID: 600, Name: "ModelPool", Title: "模型资源池", Path: "/ai/model-pool", Component: "/ai/model-pool/index", Icon: "Cpu", Sort: 1},
+		{ID: 605, ParentID: 601, Title: "维护上游", Type: "button", AuthCode: "model:manage", Sort: 1},
+		{ID: 606, ParentID: 601, Title: "调用模型", Type: "button", AuthCode: "model:call", Sort: 2},
 		{ID: 602, ParentID: 600, Name: "ModelUsage", Title: "用量与成本", Path: "/ai/model-usage", Component: todo, Icon: "Money", Sort: 2},
 		{ID: 603, ParentID: 600, Name: "AgentRuns", Title: "Agent 运行", Path: "/ai/agent-runs", Component: todo, Icon: "Cpu", Sort: 3},
 		{ID: 604, ParentID: 600, Name: "AgentConfig", Title: "Agent 配置", Path: "/ai/agent-config", Component: todo, Icon: "SetUp", Sort: 4},
