@@ -1300,6 +1300,71 @@ export const runProbe = (id: number) =>
 export const listProbeRecords = (params: Record<string, any>) =>
   request<PageData<ProbeRecord>>({ url: '/monitor/probe-records', params })
 
+// ---------- 暴露面监测 ----------
+
+export interface ExposureTarget {
+  id: number
+  name: string
+  address: string
+  ports: string
+  baseline: string
+  timeoutMs: number
+  alertEnabled: boolean
+  lastStatus: 'unknown' | 'ok' | 'unexpected' | 'failed'
+  lastOpen: string
+  lastUnexpected: string
+  lastMissing: string
+  lastCostMs: number
+  lastError: string
+  lastScanAt: string | null
+  totalScans: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ExposureScan {
+  id: number
+  targetId: number
+  status: 'ok' | 'unexpected' | 'failed'
+  scanned: number
+  openPorts: string
+  unexpected: string
+  missing: string
+  costMs: number
+  errorMsg: string
+  operator: string
+  createdAt: string
+}
+
+export interface ExposureScanResult {
+  status: string
+  scanned: number
+  open: string
+  unexpected: string
+  missing: string
+  costMs: number
+  error: string
+}
+
+export const listExposureTargets = (params?: Record<string, any>) =>
+  request<ExposureTarget[]>({ url: '/monitor/exposures', params: params || {} })
+export const createExposureTarget = (data: Record<string, any>) =>
+  request<{ target: ExposureTarget; result: ExposureScanResult }>({
+    url: '/monitor/exposures',
+    method: 'POST',
+    data
+  })
+export const updateExposureTarget = (id: number, data: Record<string, any>) =>
+  request<ExposureTarget>({ url: `/monitor/exposures/${id}`, method: 'PUT', data })
+export const deleteExposureTarget = (id: number) =>
+  request<{ detail: string }>({ url: `/monitor/exposures/${id}`, method: 'DELETE' })
+export const scanExposureTarget = (id: number) =>
+  request<ExposureScanResult>({ url: `/monitor/exposures/${id}/scan`, method: 'POST' })
+export const listExposureScans = (params: Record<string, any>) =>
+  request<PageData<ExposureScan>>({ url: '/monitor/exposure-scans', params })
+
 // ---------- 聚合策略 ----------
 
 export interface AggregationPolicy {

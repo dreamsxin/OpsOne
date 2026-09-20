@@ -146,11 +146,64 @@ type EmailTemplate struct {
 	Subject   string    `gorm:"size:255;not null" json:"subject"`
 	Body      string    `gorm:"type:text" json:"body"`
 	Variables string    `gorm:"size:255" json:"variables"` // 可用变量提示，逗号分隔
+	Builtin   bool      `gorm:"default:false" json:"builtin"`
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
-	Builtin   bool      `gorm:"default:false" json:"builtin"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ExposureTarget 暴露面监测目标。
+//
+// 回答的是「这台机器对外开着哪些端口，和我登记的一不一样」——新开的端口
+// 往往不是谁刻意配置的，而是某次改动的副作用，平时没人发现。
+type ExposureTarget struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Address IP 或域名，不带端口
+	Address string `gorm:"size:191;not null" json:"address"`
+	// Ports 要扫的端口清单，支持 22,80,443 与 8000-8010 混写
+	Ports string `gorm:"size:500;not null" json:"ports"`
+	// Baseline 登记在册、允许开放的端口。留空表示任何开放端口都要提示
+	Baseline string `gorm:"size:500" json:"baseline"`
+	// TimeoutMs 单个端口的连接超时。公网目标建议放宽到 1500ms 以上
+	TimeoutMs    int  `gorm:"default:800" json:"timeoutMs"`
+	AlertEnabled bool `gorm:"default:true" json:"alertEnabled"`
+
+	// 以下由扫描回填，不接受手工录入
+	LastStatus string `gorm:"size:16;default:unknown" json:"lastStatus"` // unknown | ok | unexpected | failed
+	// LastOpen / LastUnexpected / LastMissing 逗号分隔的端口，便于列表直接展示
+	LastOpen       string     `gorm:"size:500" json:"lastOpen"`
+	LastUnexpected string     `gorm:"size:500" json:"lastUnexpected"`
+	LastMissing    string     `gorm:"size:500" json:"lastMissing"`
+	LastCostMs     int64      `json:"lastCostMs"`
+	LastError      string     `gorm:"size:255" json:"lastError"`
+	LastScanAt     *time.Time `json:"lastScanAt"`
+	TotalScans     int        `json:"totalScans"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ExposureScan 一次扫描的结果。留着历史才能回答「这个端口是什么时候开的」
+type ExposureScan struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	TargetID uint   `gorm:"index;not null" json:"targetId"`
+	Status   string `gorm:"size:16" json:"status"` // ok | unexpected | failed
+	// Scanned 本次实际扫了多少个端口
+	Scanned    int    `json:"scanned"`
+	OpenPorts  string `gorm:"size:500" json:"openPorts"`
+	Unexpected string `gorm:"size:500" json:"unexpected"`
+	Missing    string `gorm:"size:500" json:"missing"`
+	CostMs     int64  `json:"costMs"`
+	ErrorMsg   string `gorm:"size:255" json:"errorMsg"`
+	// Operator 手动扫描记操作人，定时记 scheduler
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
 // HostMetric 主机性能采样点。

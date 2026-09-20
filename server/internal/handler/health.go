@@ -151,6 +151,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_HOST_METRIC_SPEC 为空，指标只能手动采集"))
 	items = append(items, h.fixedTaskItem("oncall", "值班升级扫描", h.Cfg.OnCallSpec,
 		"OPS_ONCALL_SPEC 为空，未确认的告警不会自动叫人"))
+	items = append(items, h.fixedTaskItem("exposure", "暴露面扫描", h.Cfg.ExposureSpec,
+		"OPS_EXPOSURE_SPEC 为空，端口暴露面只能手动扫描"))
 	return items
 }
 

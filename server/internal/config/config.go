@@ -55,6 +55,10 @@ type Config struct {
 	// OnCallSpec 值班升级扫描的 cron 表达式。留空表示不自动叫人，
 	// 只能在界面上手动试跑。升级判定是分钟级的，默认每分钟扫一次。
 	OnCallSpec string
+
+	// ExposureSpec 暴露面扫描的 cron 表达式。留空表示不自动扫，
+	// 只能在界面上手动扫。扫描会对目标发起大量 TCP 连接，默认每天一次。
+	ExposureSpec string
 }
 
 func Load() *Config {
@@ -75,6 +79,7 @@ func Load() *Config {
 		KubeCheckSpec:    strings.TrimSpace(env("OPS_KUBE_CHECK_SPEC", "*/5 * * * *")),
 		HostMetricSpec:   strings.TrimSpace(env("OPS_HOST_METRIC_SPEC", "*/5 * * * *")),
 		OnCallSpec:       strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
+		ExposureSpec:     strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

@@ -17,6 +17,7 @@ import (
 const (
 	CfgRetentionExecJob      = "retention.exec_job_days"
 	CfgRetentionProbeRecord  = "retention.probe_record_days"
+	CfgRetentionExposure     = "retention.exposure_scan_days"
 	CfgRetentionHostMetric   = "retention.host_metric_days"
 	CfgRetentionNotifyRecord = "retention.notify_record_days"
 	CfgRetentionAuditLog     = "retention.audit_log_days"
@@ -83,6 +84,19 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.ProbeRecord{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionExposure, label: "暴露面扫描记录",
+		note: "每个目标每次扫描一条，留着才能回答「这个端口什么时候开的」",
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.ExposureScan{}).Count(&total)
+			h.DB.Model(&model.ExposureScan{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.ExposureScan{}).RowsAffected
 		},
 	},
 	{

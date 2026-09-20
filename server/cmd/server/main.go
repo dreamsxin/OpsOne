@@ -100,6 +100,14 @@ func main() {
 	} else {
 		log.Println("[oncall] 定时升级未启用（OPS_ONCALL_SPEC 为空），只能手动试跑")
 	}
+	if cfg.ExposureSpec != "" {
+		if err := sched.AddFixed(cfg.ExposureSpec, h.ScanExposuresForSchedule); err != nil {
+			log.Fatalf("暴露面扫描 cron 表达式无效(%s): %v", cfg.ExposureSpec, err)
+		}
+		log.Printf("[exposure] 定时扫描已启用: %s", cfg.ExposureSpec)
+	} else {
+		log.Println("[exposure] 定时扫描未启用（OPS_EXPOSURE_SPEC 为空），只能手动扫描")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -411,6 +419,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/monitor/probes/:id", middleware.RequirePerm("probe:manage"), h.DeleteProbe)
 		auth.POST("/monitor/probes/:id/run", middleware.RequirePerm("probe:manage"), h.RunProbe)
 		auth.GET("/monitor/probe-records", h.ListProbeRecords)
+
+		auth.GET("/monitor/exposures", h.ListExposureTargets)
+		auth.POST("/monitor/exposures", middleware.RequirePerm("exposure:manage"), h.CreateExposureTarget)
+		auth.PUT("/monitor/exposures/:id", middleware.RequirePerm("exposure:manage"), h.UpdateExposureTarget)
+		auth.DELETE("/monitor/exposures/:id", middleware.RequirePerm("exposure:manage"), h.DeleteExposureTarget)
+		auth.POST("/monitor/exposures/:id/scan", middleware.RequirePerm("exposure:manage"), h.ScanExposureTarget)
+		auth.GET("/monitor/exposure-scans", h.ListExposureScans)
 
 		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
 		auth.GET("/monitor/aggregation/overlaps", h.DetectAggregationOverlaps)
