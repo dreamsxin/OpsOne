@@ -74,11 +74,11 @@ func cleanRemotePath(p string) (string, error) {
 
 // ListFiles 列出远端目录
 func (h *Handler) ListFiles(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	dir, err := cleanRemotePath(c.Query("path"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -115,11 +115,11 @@ func (h *Handler) ListFiles(c *gin.Context) {
 
 // DownloadFile 下载远端文件
 func (h *Handler) DownloadFile(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	target, err := cleanRemotePath(c.Query("path"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -164,11 +164,11 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 
 // UploadFile 上传文件到远端目录
 func (h *Handler) UploadFile(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	dir, err := cleanRemotePath(c.PostForm("path"))
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -224,11 +224,11 @@ type filePathReq struct {
 
 // MakeDir 新建远端目录
 func (h *Handler) MakeDir(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	var req filePathReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "目录路径不能为空")
@@ -264,11 +264,11 @@ type renameReq struct {
 
 // RenameFile 重命名或移动
 func (h *Handler) RenameFile(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	var req renameReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "源路径与目标路径均为必填")
@@ -304,11 +304,11 @@ func (h *Handler) RenameFile(c *gin.Context) {
 
 // DeleteFile 删除文件或空目录
 func (h *Handler) DeleteFile(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 	target, err := cleanRemotePath(c.Query("path"))
 	if err != nil {
 		response.BadRequest(c, err.Error())

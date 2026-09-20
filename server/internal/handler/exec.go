@@ -103,8 +103,15 @@ func (h *Handler) RunExecJob(c *gin.Context) {
 	}
 
 	user := middleware.CurrentUser(c)
+	// 只允许下发到数据权限内的主机，越权的 ID 直接剔除
+	allowed := h.filterVisibleHostIDs(user, req.HostIDs)
+	if len(allowed) == 0 {
+		response.Forbidden(c, "目标主机不在你的数据权限范围内")
+		return
+	}
+
 	job, err := h.RunOnHosts(c.Request.Context(), ExecRequest{
-		Name: req.Name, Command: req.Command, Timeout: req.Timeout, HostIDs: req.HostIDs,
+		Name: req.Name, Command: req.Command, Timeout: req.Timeout, HostIDs: allowed,
 		UserID: user.ID, Operator: user.Username, Source: "manual",
 	})
 	if err != nil {

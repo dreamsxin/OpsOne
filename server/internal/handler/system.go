@@ -16,6 +16,7 @@ type userReq struct {
 	Password string `json:"password"`
 	Nickname string `json:"nickname"`
 	Email    string `json:"email"`
+	DeptID   uint   `json:"deptId"`
 	Status   *int   `json:"status"`
 	RoleIDs  []uint `json:"roleIds"`
 }
@@ -57,7 +58,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	}
 	user := model.User{
 		Username: req.Username, PasswordHash: string(hash),
-		Nickname: req.Nickname, Email: req.Email, Status: 1,
+		Nickname: req.Nickname, Email: req.Email, DeptID: req.DeptID, Status: 1,
 	}
 	if req.Status != nil {
 		user.Status = *req.Status
@@ -85,6 +86,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		return
 	}
 	user.Nickname, user.Email = req.Nickname, req.Email
+	user.DeptID = req.DeptID
 	if req.Status != nil {
 		user.Status = *req.Status
 	}
@@ -148,6 +150,27 @@ type roleReq struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
 	MenuIDs     []uint `json:"menuIds"`
+	DataScope   string `json:"dataScope"`
+	DataDeptIDs []uint `json:"dataDeptIds"`
+}
+
+// roleDetailView 角色返回结构，把数据范围的部门列表还原成数组
+type roleDetailView struct {
+	model.Role
+	DataDeptIDs []uint `json:"dataDeptIds"`
+}
+
+func toRoleView(role model.Role) roleDetailView {
+	return roleDetailView{Role: role, DataDeptIDs: parseIDList(role.DataDeptIDs)}
+}
+
+func normalizeDataScope(s string) string {
+	switch s {
+	case model.ScopeDept, model.ScopeDeptBelow, model.ScopeSelf, model.ScopeCustom:
+		return s
+	default:
+		return model.ScopeAll
+	}
 }
 
 func (h *Handler) ListRoles(c *gin.Context) {
@@ -156,7 +179,11 @@ func (h *Handler) ListRoles(c *gin.Context) {
 		response.Error(c, "查询角色失败")
 		return
 	}
-	response.OK(c, list)
+	views := make([]roleDetailView, 0, len(list))
+	for _, role := range list {
+		views = append(views, toRoleView(role))
+	}
+	response.OK(c, views)
 }
 
 func (h *Handler) CreateRole(c *gin.Context) {
@@ -165,7 +192,10 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		response.BadRequest(c, "角色编码与名称为必填项")
 		return
 	}
-	role := model.Role{Code: req.Code, Name: req.Name, Description: req.Description}
+	role := model.Role{
+		Code: req.Code, Name: req.Name, Description: req.Description,
+		DataScope: normalizeDataScope(req.DataScope), DataDeptIDs: marshalIDs(req.DataDeptIDs),
+	}
 	if err := h.DB.Create(&role).Error; err != nil {
 		response.BadRequest(c, "创建失败，角色编码可能已存在")
 		return
@@ -174,7 +204,7 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		response.Error(c, "菜单权限绑定失败")
 		return
 	}
-	response.OK(c, role)
+	response.OK(c, toRoleView(role))
 }
 
 func (h *Handler) UpdateRole(c *gin.Context) {
@@ -189,6 +219,8 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		return
 	}
 	role.Name, role.Description = req.Name, req.Description
+	role.DataScope = normalizeDataScope(req.DataScope)
+	role.DataDeptIDs = marshalIDs(req.DataDeptIDs)
 	if err := h.DB.Save(&role).Error; err != nil {
 		response.Error(c, "角色更新失败")
 		return
@@ -199,7 +231,7 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 			return
 		}
 	}
-	response.OK(c, role)
+	response.OK(c, toRoleView(role))
 }
 
 func (h *Handler) DeleteRole(c *gin.Context) {

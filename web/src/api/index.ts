@@ -45,8 +45,11 @@ export interface Host {
   checkedAt: string | null
   remark: string
   proxyHostId: number
+  deptId: number
+  createdBy: number
   createdAt: string
 }
+
 
 export interface SessionCommand {
   id: number
@@ -292,6 +295,8 @@ export interface Role {
   code: string
   name: string
   description: string
+  dataScope: 'all' | 'dept' | 'dept_below' | 'self' | 'custom'
+  dataDeptIds: number[]
   menus?: { id: number }[]
 }
 
@@ -300,10 +305,42 @@ export interface User {
   username: string
   nickname: string
   email: string
+  deptId: number
   status: number
   lastLoginAt: string | null
   roles?: Role[]
 }
+
+export interface Company {
+  id: number
+  name: string
+  code: string
+  remark: string
+  createdAt: string
+}
+
+export interface DeptNode {
+  id: number
+  companyId: number
+  parentId: number
+  name: string
+  code: string
+  leader: string
+  sort: number
+  userCount: number
+  hostCount: number
+  children?: DeptNode[]
+}
+
+export interface DataScopeDiagnosis {
+  user: { id: number; username: string; deptId: number }
+  roles: { id: number; name: string; code: string; dataScope: string; dataDeptIds: number[] }[]
+  scope: { all: boolean; deptIds: number[]; includeSelf: boolean }
+  deptNames: string[]
+  visibleHosts: number
+  totalHosts: number
+}
+
 
 export interface AuditLog {
   id: number
@@ -545,6 +582,29 @@ export const readMessage = (id: number) =>
   request({ url: `/me/messages/${id}/read`, method: 'POST' })
 export const readAllMessages = () =>
   request<{ updated: number }>({ url: '/me/messages/read-all', method: 'POST' })
+
+// ---------- 组织与数据权限 ----------
+
+export const listCompanies = () => request<Company[]>({ url: '/system/companies' })
+export const createCompany = (data: Record<string, any>) =>
+  request<Company>({ url: '/system/companies', method: 'POST', data })
+export const updateCompany = (id: number, data: Record<string, any>) =>
+  request<Company>({ url: `/system/companies/${id}`, method: 'PUT', data })
+export const deleteCompany = (id: number) =>
+  request({ url: `/system/companies/${id}`, method: 'DELETE' })
+
+export const getDepartmentTree = (companyId?: number) =>
+  request<DeptNode[]>({ url: '/system/departments/tree', params: { companyId } })
+export const createDepartment = (data: Record<string, any>) =>
+  request({ url: '/system/departments', method: 'POST', data })
+export const updateDepartment = (id: number, data: Record<string, any>) =>
+  request({ url: `/system/departments/${id}`, method: 'PUT', data })
+export const deleteDepartment = (id: number) =>
+  request({ url: `/system/departments/${id}`, method: 'DELETE' })
+
+export const diagnoseDataScope = (userId: number) =>
+  request<DataScopeDiagnosis>({ url: `/system/data-permission/diagnose/${userId}` })
+
 
 
 

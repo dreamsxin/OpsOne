@@ -172,6 +172,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/me/messages/summary", h.MessageSummary)
 		auth.POST("/me/messages/:id/read", h.ReadMessage)
 		auth.POST("/me/messages/read-all", h.ReadAllMessages)
+
+		auth.GET("/system/companies", h.ListCompanies)
+		auth.POST("/system/companies", middleware.RequirePerm("org:manage"), h.CreateCompany)
+		auth.PUT("/system/companies/:id", middleware.RequirePerm("org:manage"), h.UpdateCompany)
+		auth.DELETE("/system/companies/:id", middleware.RequirePerm("org:manage"), h.DeleteCompany)
+
+		auth.GET("/system/departments/tree", h.DepartmentTree)
+		auth.POST("/system/departments", middleware.RequirePerm("org:manage"), h.CreateDepartment)
+		auth.PUT("/system/departments/:id", middleware.RequirePerm("org:manage"), h.UpdateDepartment)
+		auth.DELETE("/system/departments/:id", middleware.RequirePerm("org:manage"), h.DeleteDepartment)
+
+		auth.GET("/system/data-permission/diagnose/:id", h.DiagnoseDataScope)
 	}
 
 	return r

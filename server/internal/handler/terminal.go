@@ -76,11 +76,11 @@ func (w *safeConn) Alert(text string) {
 
 // Terminal 打开目标主机的交互式 SSH 会话，全程录像并审计命令
 func (h *Handler) Terminal(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 
 	cols, _ := strconv.Atoi(c.DefaultQuery("cols", "120"))
 	rows, _ := strconv.Atoi(c.DefaultQuery("rows", "30"))

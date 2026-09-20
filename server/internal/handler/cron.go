@@ -84,13 +84,18 @@ func (h *Handler) CreateCronJob(c *gin.Context) {
 		return
 	}
 
+	user := middleware.CurrentUser(c)
+	if len(h.filterVisibleHostIDs(user, req.HostIDs)) != len(req.HostIDs) {
+		response.Forbidden(c, "目标主机中包含你无权访问的主机")
+		return
+	}
+
 	hostIDs, err := json.Marshal(req.HostIDs)
 	if err != nil {
 		response.Error(c, "主机列表序列化失败")
 		return
 	}
 
-	user := middleware.CurrentUser(c)
 	job := model.CronJob{
 		Name: req.Name, Spec: req.Spec, Command: req.Command, HostIDs: string(hostIDs),
 		Timeout: normalizeTimeout(req.Timeout), Enabled: true,

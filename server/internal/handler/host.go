@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
 	"ops-platform/server/internal/sshx"
@@ -24,12 +25,27 @@ type hostReq struct {
 	Tags        string `json:"tags"`
 	Remark      string `json:"remark"`
 	ProxyHostID uint   `json:"proxyHostId"` // 跳板机，0 表示直连
+	DeptID      uint   `json:"deptId"`      // 归属部门，参与数据权限过滤
 }
 
-// ListHosts 主机清单，支持关键字与环境过滤
+// loadHostScoped 按数据权限加载主机，越权访问一律按「不存在」处理，不泄露存在性
+func (h *Handler) loadHostScoped(c *gin.Context) (*model.Host, bool) {
+	var host model.Host
+	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
+		response.NotFound(c, "主机不存在")
+		return nil, false
+	}
+	if !h.hostVisible(middleware.CurrentUser(c), &host) {
+		response.NotFound(c, "主机不存在")
+		return nil, false
+	}
+	return &host, true
+}
+
+// ListHosts 主机清单，支持关键字与环境过滤，结果受数据权限约束
 func (h *Handler) ListHosts(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.DB.Model(&model.Host{})
+	q := h.applyHostScope(h.DB.Model(&model.Host{}), middleware.CurrentUser(c))
 
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
 		like := "%" + kw + "%"
@@ -40,6 +56,9 @@ func (h *Handler) ListHosts(c *gin.Context) {
 	}
 	if status := c.Query("status"); status != "" {
 		q = q.Where("status = ?", status)
+	}
+	if deptID := c.Query("deptId"); deptID != "" {
+		q = q.Where("dept_id = ?", deptID)
 	}
 
 	var total int64
@@ -77,7 +96,8 @@ func (h *Handler) CreateHost(c *gin.Context) {
 		Name: req.Name, Address: req.Address, Port: defaultPort(req.Port),
 		Username: req.Username, AuthType: defaultAuth(req.AuthType), Secret: req.Secret,
 		Env: defaultEnv(req.Env), Tags: req.Tags, Remark: req.Remark, Status: "unknown",
-		ProxyHostID: req.ProxyHostID,
+		ProxyHostID: req.ProxyHostID, DeptID: req.DeptID,
+		CreatedBy: middleware.CurrentUser(c).ID,
 	}
 	if err := h.DB.Create(&host).Error; err != nil {
 		response.Error(c, "主机创建失败")
@@ -88,11 +108,12 @@ func (h *Handler) CreateHost(c *gin.Context) {
 
 // UpdateHost 编辑主机
 func (h *Handler) UpdateHost(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
+
 	var req hostReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数校验失败")
@@ -118,6 +139,7 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 	host.Username, host.AuthType = req.Username, defaultAuth(req.AuthType)
 	host.Env, host.Tags, host.Remark = defaultEnv(req.Env), req.Tags, req.Remark
 	host.ProxyHostID = req.ProxyHostID
+	host.DeptID = req.DeptID
 
 	if req.Secret != "" {
 		host.Secret = req.Secret
@@ -131,7 +153,12 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 
 // DeleteHost 删除主机
 func (h *Handler) DeleteHost(c *gin.Context) {
-	id := idParam(c)
+	host, ok := h.loadHostScoped(c)
+	if !ok {
+		return
+	}
+	id := host.ID
+
 	var refCount int64
 	h.DB.Model(&model.Host{}).Where("proxy_host_id = ?", id).Count(&refCount)
 	if refCount > 0 {
@@ -147,11 +174,11 @@ func (h *Handler) DeleteHost(c *gin.Context) {
 
 // CheckHost 连通性探测，顺带采集系统信息
 func (h *Handler) CheckHost(c *gin.Context) {
-	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
-		response.NotFound(c, "主机不存在")
+	hostPtr, ok := h.loadHostScoped(c)
+	if !ok {
 		return
 	}
+	host := *hostPtr
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()

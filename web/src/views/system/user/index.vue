@@ -1,7 +1,18 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { createUser, deleteUser, listRoles, listUsers, updateUser, type Role, type User } from '@/api'
+import {
+  createUser,
+  deleteUser,
+  getDepartmentTree,
+  listRoles,
+  listUsers,
+  updateUser,
+  type DeptNode,
+  type Role,
+  type User
+} from '@/api'
+
 
 const loading = ref(false)
 const rows = ref<User[]>([])
@@ -18,8 +29,23 @@ const form = reactive({
   nickname: '',
   email: '',
   status: 1,
+  deptId: 0,
   roleIds: [] as number[]
 })
+
+const deptTree = ref<DeptNode[]>([])
+const deptNameMap = computed(() => {
+  const map = new Map<number, string>()
+  const walk = (nodes: DeptNode[]) => {
+    for (const node of nodes) {
+      map.set(node.id, node.name)
+      if (node.children?.length) walk(node.children)
+    }
+  }
+  walk(deptTree.value)
+  return map
+})
+
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }]
@@ -38,7 +64,7 @@ async function load() {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { username: '', password: '', nickname: '', email: '', status: 1, roleIds: [] })
+  Object.assign(form, { username: '', password: '', nickname: '', email: '', status: 1, deptId: 0, roleIds: [] })
   dialogVisible.value = true
 }
 
@@ -50,10 +76,12 @@ function openEdit(row: User) {
     nickname: row.nickname,
     email: row.email,
     status: row.status,
+    deptId: row.deptId || 0,
     roleIds: (row.roles || []).map((r) => r.id)
   })
   dialogVisible.value = true
 }
+
 
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
@@ -83,8 +111,10 @@ async function remove(row: User) {
 
 onMounted(async () => {
   roles.value = await listRoles()
+  deptTree.value = await getDepartmentTree()
   load()
 })
+
 </script>
 
 <template>
@@ -107,6 +137,13 @@ onMounted(async () => {
         <el-table-column prop="username" label="用户名" min-width="120" />
         <el-table-column prop="nickname" label="昵称" min-width="110" />
         <el-table-column prop="email" label="邮箱" min-width="150" />
+        <el-table-column label="部门" min-width="130">
+          <template #default="{ row }">
+            <span v-if="row.deptId">{{ deptNameMap.get(row.deptId) || '#' + row.deptId }}</span>
+            <span v-else style="color: #9ca3af">未归属</span>
+          </template>
+        </el-table-column>
+
         <el-table-column label="角色" min-width="160">
           <template #default="{ row }">
             <el-tag v-for="role in row.roles || []" :key="role.id" size="small" style="margin-right: 4px">
@@ -164,6 +201,18 @@ onMounted(async () => {
             <el-option v-for="role in roles" :key="role.id" :label="role.name" :value="role.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="所属部门">
+          <el-tree-select
+            v-model="form.deptId"
+            :data="deptTree"
+            :props="{ label: 'name', children: 'children' }"
+            node-key="id"
+            check-strictly
+            style="width: 100%"
+            placeholder="未归属"
+          />
+        </el-form-item>
+
         <el-form-item label="状态">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
         </el-form-item>

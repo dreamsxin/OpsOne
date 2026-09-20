@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { checkHost, createHost, deleteHost, listHosts, updateHost, type Host } from '@/api'
+import { checkHost, createHost, deleteHost, getDepartmentTree, listHosts, updateHost, type DeptNode, type Host } from '@/api'
+
 
 const loading = ref(false)
 const rows = ref<Host[]>([])
@@ -22,8 +23,24 @@ const form = reactive({
   env: 'dev' as 'dev' | 'test' | 'prod',
   tags: '',
   remark: '',
-  proxyHostId: 0
+  proxyHostId: 0,
+  deptId: 0
 })
+
+// 部门树用于归属选择与列表展示
+const deptTree = ref<DeptNode[]>([])
+const deptNameMap = computed(() => {
+  const map = new Map<number, string>()
+  const walk = (nodes: DeptNode[]) => {
+    for (const node of nodes) {
+      map.set(node.id, node.name)
+      if (node.children?.length) walk(node.children)
+    }
+  }
+  walk(deptTree.value)
+  return map
+})
+
 
 
 const rules = {
@@ -86,10 +103,12 @@ function openCreate() {
     env: 'dev',
     tags: '',
     remark: '',
-    proxyHostId: 0
+    proxyHostId: 0,
+    deptId: 0
   })
   dialogVisible.value = true
 }
+
 
 
 function openEdit(row: Host) {
@@ -140,7 +159,9 @@ async function check(row: Host) {
 onMounted(() => {
   load()
   loadAllHosts()
+  getDepartmentTree().then((data) => (deptTree.value = data))
 })
+
 
 </script>
 
@@ -198,6 +219,13 @@ onMounted(() => {
             <el-tag v-else size="small" type="info">直连</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="归属部门" min-width="130">
+          <template #default="{ row }">
+            <span v-if="row.deptId">{{ deptNameMap.get(row.deptId) || '#' + row.deptId }}</span>
+            <span v-else style="color: #9ca3af">未归属</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="tags" label="标签" min-width="110" show-overflow-tooltip />
 
         <el-table-column label="操作" width="230" fixed="right">
@@ -269,7 +297,19 @@ onMounted(() => {
           </el-select>
         </el-form-item>
 
+        <el-form-item label="归属部门">
+          <el-tree-select
+            v-model="form.deptId"
+            :data="deptTree"
+            :props="{ label: 'name', children: 'children' }"
+            node-key="id"
+            check-strictly
+            style="width: 100%"
+            placeholder="未归属（仅「全部数据」范围可见）"
+          />
+        </el-form-item>
         <el-form-item label="标签">
+
           <el-input v-model="form.tags" placeholder="逗号分隔，如 web,nginx" />
         </el-form-item>
         <el-form-item label="备注">

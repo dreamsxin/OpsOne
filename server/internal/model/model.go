@@ -2,6 +2,29 @@ package model
 
 import "time"
 
+// Company 公司，部门树的根归属
+type Company struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	Code      string    `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Department 部门，支持多级，ParentID=0 为公司下的一级部门
+type Department struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	CompanyID uint      `gorm:"index" json:"companyId"`
+	ParentID  uint      `gorm:"index;default:0" json:"parentId"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	Code      string    `gorm:"size:64" json:"code"`
+	Leader    string    `gorm:"size:64" json:"leader"`
+	Sort      int       `gorm:"default:0" json:"sort"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // User 平台用户
 type User struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
@@ -9,6 +32,7 @@ type User struct {
 	PasswordHash string     `gorm:"size:120;not null" json:"-"`
 	Nickname     string     `gorm:"size:64" json:"nickname"`
 	Email        string     `gorm:"size:128" json:"email"`
+	DeptID       uint       `gorm:"index;default:0" json:"deptId"`
 	Status       int        `gorm:"default:1" json:"status"` // 1 启用 0 禁用
 	LastLoginAt  *time.Time `json:"lastLoginAt"`
 	CreatedAt    time.Time  `json:"createdAt"`
@@ -17,12 +41,25 @@ type User struct {
 	Roles []Role `gorm:"many2many:user_roles" json:"roles,omitempty"`
 }
 
-// Role 角色
+// 数据范围取值
+const (
+	ScopeAll       = "all"        // 全部数据
+	ScopeDept      = "dept"       // 本部门
+	ScopeDeptBelow = "dept_below" // 本部门及下级
+	ScopeSelf      = "self"       // 仅本人创建
+	ScopeCustom    = "custom"     // 指定部门
+)
+
+// Role 角色。DataScope 决定该角色能看到哪些业务数据（当前作用于主机资产）。
 type Role struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Code        string    `gorm:"size:64;uniqueIndex;not null" json:"code"`
-	Name        string    `gorm:"size:64;not null" json:"name"`
-	Description string    `gorm:"size:255" json:"description"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Code        string `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Name        string `gorm:"size:64;not null" json:"name"`
+	Description string `gorm:"size:255" json:"description"`
+	// DataScope all | dept | dept_below | self | custom，缺省 all
+	DataScope string `gorm:"size:16;default:all" json:"dataScope"`
+	// DataDeptIDs DataScope=custom 时生效，JSON 数组；接口层用 dataDeptIds 暴露
+	DataDeptIDs string    `gorm:"type:text" json:"-"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 
@@ -59,15 +96,19 @@ type Host struct {
 	// HostKey 主机公钥（authorized_keys 格式），开启指纹校验后首次连接自动记录
 	HostKey string `gorm:"type:text" json:"-"`
 	// ProxyHostID 跳板机，0 表示直连。目标主机不可直达时经该主机建立隧道
-	ProxyHostID uint       `gorm:"index;default:0" json:"proxyHostId"`
-	Env         string     `gorm:"size:16;default:dev" json:"env"` // dev | test | prod
-	Tags        string     `gorm:"size:255" json:"tags"`
-	OSInfo      string     `gorm:"size:128" json:"osInfo"`
-	Status      string     `gorm:"size:16;default:unknown" json:"status"` // online | offline | unknown
-	CheckedAt   *time.Time `json:"checkedAt"`
-	Remark      string     `gorm:"size:255" json:"remark"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ProxyHostID uint `gorm:"index;default:0" json:"proxyHostId"`
+	// DeptID 归属部门，数据权限按此字段过滤；0 表示未归属（仅全部数据范围可见）
+	DeptID uint `gorm:"index;default:0" json:"deptId"`
+	// CreatedBy 录入人，数据范围为「仅本人」时按此过滤
+	CreatedBy uint       `gorm:"index;default:0" json:"createdBy"`
+	Env       string     `gorm:"size:16;default:dev" json:"env"` // dev | test | prod
+	Tags      string     `gorm:"size:255" json:"tags"`
+	OSInfo    string     `gorm:"size:128" json:"osInfo"`
+	Status    string     `gorm:"size:16;default:unknown" json:"status"` // online | offline | unknown
+	CheckedAt *time.Time `json:"checkedAt"`
+	Remark    string     `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // CommandRule 命令审计规则，命中后按 Action 处理

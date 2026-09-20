@@ -92,11 +92,12 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 操作审计 `/system/audit` — 写操作流水
 - [x] 通知渠道 `/system/notify-channel` — webhook / silent 两类渠道、鉴权头、试发
 - [x] 通知记录 `/system/notify-record` — 投递流水、失败原因与耗时
-- [ ] 部门管理 `/system/department` — 部门树与部门角色
-- [ ] 公司管理 `/system/company` — 多公司隔离
+- [x] 部门管理 `/system/department` — 多级部门树、负责人、人员与主机计数，删除前校验引用
+- [x] 公司管理 `/system/company` — 公司台账，作为部门树的根
 - [ ] 菜单管理 `/system/menu` — 菜单树维护、拖拽排序（当前由种子数据维护）
-- [ ] 数据权限 `/system/data-permission` — 资源目录、生效诊断
+- [x] 数据权限 `/system/data-permission` — 角色级数据范围（全部/本部门/含下级/仅本人/指定部门）+ 生效诊断
 - [ ] 资源授权 `/system/resource-grant` — 按主机/账号/凭据粒度授权
+
 - [x] 公告管理 `/system/announcement` — 草稿/发布/下线，发布即向全员投递站内消息，下线撤回未读
 
 
