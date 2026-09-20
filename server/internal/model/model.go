@@ -190,6 +190,69 @@ type HostMetric struct {
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
+// OnCallSchedule 值班表：回答"这条告警半夜该叫谁"。
+//
+// 和通知路由的分工：路由决定"发到哪个渠道"（群机器人、邮件组），
+// 值班表决定"发给哪个人"，并在没人确认时一级级往上叫。
+type OnCallSchedule struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Members 有序的用户 ID，JSON 数组。轮换与升级都按这个顺序走
+	Members string `gorm:"type:text" json:"members"`
+	// Rotation 轮换周期：hourly | daily | weekly
+	Rotation string `gorm:"size:16;default:daily" json:"rotation"`
+	// StartAt 轮换基准时间。"现在轮到谁"= 从这个时刻起算过了几个周期。
+	// 交接时刻就藏在这个时间的时分里，所以不需要再单独配一个"几点交班"
+	StartAt time.Time `json:"startAt"`
+	// MatchSeverity 只对这些级别的告警叫人，逗号分隔；空表示全部级别
+	MatchSeverity string `gorm:"size:64" json:"matchSeverity"`
+	// AckWaitMinutes 告警多久没人确认就升到下一级
+	AckWaitMinutes int `gorm:"default:10" json:"ackWaitMinutes"`
+	// MaxLevel 最多叫到第几级（1 表示只叫当班的人，不升级）
+	MaxLevel int `gorm:"default:3" json:"maxLevel"`
+	// NotifyEmail 是否同时发邮件（要求 SMTP 已配置且用户填了邮箱）
+	NotifyEmail bool `gorm:"default:false" json:"notifyEmail"`
+
+	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// OnCallOverride 代班：某段时间由指定的人顶替当班者。
+// 只影响"当班"这一级，升级仍按成员顺序往下走。
+type OnCallOverride struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	ScheduleID uint      `gorm:"index;not null" json:"scheduleId"`
+	UserID     uint      `gorm:"index;not null" json:"userId"`
+	StartAt    time.Time `gorm:"index" json:"startAt"`
+	EndAt      time.Time `gorm:"index" json:"endAt"`
+	Reason     string    `gorm:"size:255" json:"reason"`
+	CreatedBy  uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// AlertEscalation 一次"叫人"的记录：某条告警在第几级通知了谁、走的什么渠道。
+//
+// 既是去重依据（同一告警同一级别只叫一次），也是事后复盘"到底有没有叫到人"的凭据。
+type AlertEscalation struct {
+	ID         uint `gorm:"primaryKey" json:"id"`
+	AlertID    uint `gorm:"index;not null" json:"alertId"`
+	ScheduleID uint `gorm:"index;not null" json:"scheduleId"`
+	// Level 0 表示当班，1 及以上是逐级升级
+	Level    int    `json:"level"`
+	UserID   uint   `gorm:"index" json:"userId"`
+	UserName string `gorm:"size:64" json:"userName"`
+	// Source rotation | override，说明这一级是按轮换算出来的还是代班顶上的
+	Source string `gorm:"size:16" json:"source"`
+	// Channel message | email，同一级别两个渠道各记一条
+	Channel   string    `gorm:"size:16" json:"channel"`
+	Status    string    `gorm:"size:16;default:sent" json:"status"` // sent | failed
+	Detail    string    `gorm:"size:255" json:"detail"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // Host 主机资产
 type Host struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`

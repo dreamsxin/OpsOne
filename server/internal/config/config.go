@@ -51,6 +51,10 @@ type Config struct {
 	// HostMetricSpec 主机性能采集的 cron 表达式。留空表示不做定时采集，
 	// 只能在界面上手动采集。采集走 SSH，节奏太密会给主机和平台都加压。
 	HostMetricSpec string
+
+	// OnCallSpec 值班升级扫描的 cron 表达式。留空表示不自动叫人，
+	// 只能在界面上手动试跑。升级判定是分钟级的，默认每分钟扫一次。
+	OnCallSpec string
 }
 
 func Load() *Config {
@@ -70,6 +74,7 @@ func Load() *Config {
 		DetectionSpec:    strings.TrimSpace(env("OPS_DETECTION_SPEC", "*/5 * * * *")),
 		KubeCheckSpec:    strings.TrimSpace(env("OPS_KUBE_CHECK_SPEC", "*/5 * * * *")),
 		HostMetricSpec:   strings.TrimSpace(env("OPS_HOST_METRIC_SPEC", "*/5 * * * *")),
+		OnCallSpec:       strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
 	}
 
 	if s := os.Getenv("OPS_JWT_SECRET"); s != "" {

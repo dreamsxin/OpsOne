@@ -154,7 +154,8 @@ var retentionSpecs = []retentionSpec{
 	},
 	{
 		key: CfgRetentionAlert, label: "已恢复告警",
-		note: "只清理 status=resolved 的告警，未恢复的一律不动",
+		cascade: "值班升级记录",
+		note:    "只清理 status=resolved 的告警，未恢复的一律不动",
 		count: func(h *Handler, deadline time.Time) (int64, int64) {
 			var total, expired int64
 			h.DB.Model(&model.Alert{}).Where("status = ?", "resolved").Count(&total)
@@ -163,8 +164,15 @@ var retentionSpecs = []retentionSpec{
 			return total, expired
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
-			return h.DB.Where("status = ? AND last_seen_at < ?", "resolved", deadline).
-				Delete(&model.Alert{}).RowsAffected
+			// 先把要删的告警 ID 取出来，连带清掉它们的升级记录，避免留下指不到告警的孤儿
+			var ids []uint
+			h.DB.Model(&model.Alert{}).
+				Where("status = ? AND last_seen_at < ?", "resolved", deadline).Pluck("id", &ids)
+			if len(ids) == 0 {
+				return 0
+			}
+			h.DB.Where("alert_id IN ?", ids).Delete(&model.AlertEscalation{})
+			return h.DB.Where("id IN ?", ids).Delete(&model.Alert{}).RowsAffected
 		},
 	},
 }

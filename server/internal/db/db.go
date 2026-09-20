@@ -44,6 +44,7 @@ func Migrate(g *gorm.DB) error {
 		&model.DetectionRule{},
 		&model.KubeCluster{},
 		&model.HostMetric{},
+		&model.OnCallSchedule{}, &model.OnCallOverride{}, &model.AlertEscalation{},
 	)
 }
 
@@ -138,6 +139,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 414, ParentID: 400, Name: "PublicIPMonitor", Title: "公网监测", Path: "/monitor/public-ip", Component: todo, Icon: "Compass", Sort: 14},
 		{ID: 415, ParentID: 400, Name: "HostMetric", Title: "主机指标", Path: "/monitor/host-metrics", Component: "/monitor/host-metrics/index", Icon: "Odometer", Sort: 15},
 		{ID: 428, ParentID: 415, Title: "手动采集", Type: "button", AuthCode: "host:check", Sort: 1},
+		{ID: 416, ParentID: 400, Name: "OnCall", Title: "值班升级", Path: "/monitor/oncall", Component: "/monitor/oncall/index", Icon: "AlarmClock", Sort: 16},
+		{ID: 429, ParentID: 416, Title: "维护值班表", Type: "button", AuthCode: "oncall:manage", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},

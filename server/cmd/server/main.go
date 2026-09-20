@@ -92,6 +92,14 @@ func main() {
 	} else {
 		log.Println("[metric] 定时采集未启用（OPS_HOST_METRIC_SPEC 为空），只能手动采集")
 	}
+	if cfg.OnCallSpec != "" {
+		if err := sched.AddFixed(cfg.OnCallSpec, h.EscalateOnCallForSchedule); err != nil {
+			log.Fatalf("值班升级 cron 表达式无效(%s): %v", cfg.OnCallSpec, err)
+		}
+		log.Printf("[oncall] 定时升级已启用: %s", cfg.OnCallSpec)
+	} else {
+		log.Println("[oncall] 定时升级未启用（OPS_ONCALL_SPEC 为空），只能手动试跑")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
@@ -363,6 +371,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.UpdateDetectionRule)
 		auth.DELETE("/monitor/detection-rules/:id", middleware.RequirePerm("detection:manage"), h.DeleteDetectionRule)
 		auth.POST("/monitor/detection-rules/:id/evaluate", middleware.RequirePerm("detection:manage"), h.EvaluateDetectionRule)
+
+		auth.GET("/monitor/oncall/candidates", h.OnCallCandidates)
+		auth.GET("/monitor/oncall/escalations", h.ListAlertEscalations)
+		auth.GET("/monitor/oncall/schedules", h.ListOnCallSchedules)
+		auth.POST("/monitor/oncall/schedules", middleware.RequirePerm("oncall:manage"), h.CreateOnCallSchedule)
+		auth.PUT("/monitor/oncall/schedules/:id", middleware.RequirePerm("oncall:manage"), h.UpdateOnCallSchedule)
+		auth.DELETE("/monitor/oncall/schedules/:id", middleware.RequirePerm("oncall:manage"), h.DeleteOnCallSchedule)
+		auth.GET("/monitor/oncall/schedules/:id/preview", h.PreviewOnCall)
+		auth.POST("/monitor/oncall/schedules/:id/run", middleware.RequirePerm("oncall:manage"), h.RunOnCallEscalation)
+		auth.GET("/monitor/oncall/schedules/:id/overrides", h.ListOnCallOverrides)
+		auth.POST("/monitor/oncall/schedules/:id/overrides", middleware.RequirePerm("oncall:manage"), h.CreateOnCallOverride)
+		auth.DELETE("/monitor/oncall/schedules/:id/overrides/:overrideId", middleware.RequirePerm("oncall:manage"), h.DeleteOnCallOverride)
 
 		auth.POST("/kube/contexts", middleware.RequirePerm("kube:manage"), h.KubeconfigContexts)
 		auth.GET("/kube/clusters", h.ListKubeClusters)

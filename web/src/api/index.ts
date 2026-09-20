@@ -1970,6 +1970,110 @@ export const listHostMetricHistory = (hostId: number, hours: number) =>
     params: { hours }
   })
 
+// ---------- 值班升级 ----------
+
+export type OnCallRotation = 'hourly' | 'daily' | 'weekly'
+
+export interface UserBrief {
+  id: number
+  username: string
+  nickname: string
+  email: string
+}
+
+export interface OnCallPerson {
+  level: number
+  userId: number
+  userName: string
+  nickname: string
+  email: string
+  source: 'rotation' | 'override'
+}
+
+export interface OnCallSchedule {
+  id: number
+  name: string
+  members: string
+  rotation: OnCallRotation
+  rotationLabel: string
+  startAt: string
+  matchSeverity: string
+  ackWaitMinutes: number
+  maxLevel: number
+  notifyEmail: boolean
+  enabled: boolean
+  remark: string
+  memberList: UserBrief[]
+  current: OnCallPerson | null
+  nextRotateAt: string | null
+}
+
+export interface OnCallShift {
+  startAt: string
+  endAt: string
+  person: OnCallPerson | null
+}
+
+export interface OnCallOverride {
+  id: number
+  scheduleId: number
+  userId: number
+  userName: string
+  startAt: string
+  endAt: string
+  reason: string
+  active: boolean
+}
+
+export interface AlertEscalation {
+  id: number
+  alertId: number
+  alertTitle: string
+  scheduleId: number
+  level: number
+  userId: number
+  userName: string
+  source: string
+  channel: string
+  status: string
+  detail: string
+  createdAt: string
+}
+
+export const listOnCallSchedules = () => request<OnCallSchedule[]>({ url: '/monitor/oncall/schedules' })
+export const listOnCallCandidates = () =>
+  request<{ users: UserBrief[]; rotations: { key: OnCallRotation; label: string }[] }>({
+    url: '/monitor/oncall/candidates'
+  })
+export const createOnCallSchedule = (data: Record<string, any>) =>
+  request<OnCallSchedule>({ url: '/monitor/oncall/schedules', method: 'POST', data })
+export const updateOnCallSchedule = (id: number, data: Record<string, any>) =>
+  request<OnCallSchedule>({ url: `/monitor/oncall/schedules/${id}`, method: 'PUT', data })
+export const deleteOnCallSchedule = (id: number) =>
+  request<{ detail: string }>({ url: `/monitor/oncall/schedules/${id}`, method: 'DELETE' })
+export const previewOnCall = (id: number, days: number) =>
+  request<{ shifts: OnCallShift[]; rotationLabel: string }>({
+    url: `/monitor/oncall/schedules/${id}/preview`,
+    params: { days }
+  })
+/** 手动试跑：和定时扫描同一条路径，会真实发站内消息并落升级记录 */
+export const runOnCallEscalation = (id: number) =>
+  request<{ called: number; detail: string }>({
+    url: `/monitor/oncall/schedules/${id}/run`,
+    method: 'POST'
+  })
+export const listOnCallOverrides = (id: number) =>
+  request<OnCallOverride[]>({ url: `/monitor/oncall/schedules/${id}/overrides` })
+export const createOnCallOverride = (id: number, data: Record<string, any>) =>
+  request<OnCallOverride>({ url: `/monitor/oncall/schedules/${id}/overrides`, method: 'POST', data })
+export const deleteOnCallOverride = (id: number, overrideId: number) =>
+  request<{ detail: string }>({
+    url: `/monitor/oncall/schedules/${id}/overrides/${overrideId}`,
+    method: 'DELETE'
+  })
+export const listAlertEscalations = (params: Record<string, any>) =>
+  request<PageData<AlertEscalation>>({ url: '/monitor/oncall/escalations', params })
+
 
 
 
