@@ -382,6 +382,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 	api.GET("/auth/im/authorize", h.ImAuthorize)
 	api.GET("/auth/im/callback", h.ImLoginCallback)
 	api.POST("/auth/im/exchange", h.ImLoginExchange)
+	// 登录页提示「本平台已接入域账号」，只回一个布尔，不暴露目录地址
+	api.GET("/public/ldap-login", h.ListLdapLoginHint)
 
 	auth := api.Group("")
 	auth.Use(middleware.Auth(cfg.JWTSecret, gormDB), middleware.RequireTOTP(gormDB), middleware.Audit(gormDB))
@@ -687,6 +689,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/system/im/sync-runs", h.ListImSyncRuns)
 		auth.GET("/system/im/accounts", h.ListImAccounts)
 		auth.DELETE("/system/im/accounts/:id", middleware.RequirePerm("im:manage"), h.UnbindImAccount)
+
+		// LDAP / AD 账号接入
+		auth.GET("/system/ldap/servers", h.ListLdapServers)
+		auth.POST("/system/ldap/servers", middleware.RequirePerm("ldap:manage"), h.CreateLdapServer)
+		auth.PUT("/system/ldap/servers/:id", middleware.RequirePerm("ldap:manage"), h.UpdateLdapServer)
+		auth.DELETE("/system/ldap/servers/:id", middleware.RequirePerm("ldap:manage"), h.DeleteLdapServer)
+		auth.POST("/system/ldap/servers/:id/check", middleware.RequirePerm("ldap:manage"), h.CheckLdapServer)
+		auth.GET("/system/ldap/servers/:id/users", middleware.RequirePerm("ldap:manage"), h.SearchLdapUsers)
+		auth.POST("/system/ldap/try-login", middleware.RequirePerm("ldap:manage"), h.TryLdapLogin)
+		auth.GET("/system/ldap/accounts", h.ListLdapAccounts)
+		auth.POST("/system/ldap/accounts", middleware.RequirePerm("ldap:manage"), h.BindLdapAccount)
+		auth.DELETE("/system/ldap/accounts/:id", middleware.RequirePerm("ldap:manage"), h.UnbindLdapAccount)
 
 		auth.GET("/monitor/health", h.PlatformHealth)
 

@@ -2976,6 +2976,98 @@ export const listImAccounts = (params: Record<string, any>) =>
 export const unbindImAccount = (id: number) =>
   request<{ note: string }>({ url: `/system/im/accounts/${id}`, method: 'DELETE' })
 
+// ---------- LDAP / AD 账号接入 ----------
+
+export interface LdapServer {
+  id: number
+  name: string
+  host: string
+  port: number
+  encryption: 'none' | 'ldaps' | 'starttls'
+  skipVerify: boolean
+  bindDn: string
+  baseDn: string
+  userFilter: string
+  attrNickname: string
+  attrEmail: string
+  timeoutSec: number
+  enabled: boolean
+  loginEnabled: boolean
+  autoBind: boolean
+  lastCheckAt: string | null
+  lastStatus: string
+  lastMessage: string
+  createdAt: string
+  /** 只告诉界面「服务账号口令配过没有」，口令本身不回传 */
+  hasBindPassword: boolean
+  url: string
+  boundCount: number
+}
+
+export interface LdapDirectoryUser {
+  dn: string
+  uid: string
+  nickname: string
+  email: string
+  /** 非空表示已绑定到这个平台账号 */
+  boundTo: string
+}
+
+export interface LdapAccount {
+  id: number
+  serverId: number
+  ldapUid: string
+  ldapDn: string
+  ldapName: string
+  ldapEmail: string
+  userId: number
+  username: string
+  boundBy: string
+  lastLogin: string | null
+  createdAt: string
+}
+
+export interface LdapTryStep {
+  step: string
+  ok: boolean
+  detail: string
+}
+
+export const listLdapServers = () => request<LdapServer[]>({ url: '/system/ldap/servers' })
+export const createLdapServer = (data: Record<string, any>) =>
+  request<LdapServer>({ url: '/system/ldap/servers', method: 'POST', data })
+export const updateLdapServer = (id: number, data: Record<string, any>) =>
+  request<LdapServer>({ url: `/system/ldap/servers/${id}`, method: 'PUT', data })
+export const deleteLdapServer = (id: number) =>
+  request({ url: `/system/ldap/servers/${id}`, method: 'DELETE' })
+export const checkLdapServer = (id: number) =>
+  request<{ status: string; userCount: number; detail: string; url: string }>({
+    url: `/system/ldap/servers/${id}/check`,
+    method: 'POST'
+  })
+export const searchLdapUsers = (id: number, keyword: string) =>
+  request<{ list: LdapDirectoryUser[]; total: number; limit: number }>({
+    url: `/system/ldap/servers/${id}/users`,
+    params: { keyword }
+  })
+export const tryLdapLogin = (data: { serverId: number; username: string; password: string }) =>
+  request<{ ok: boolean; detail: string; steps: LdapTryStep[] }>({
+    url: '/system/ldap/try-login',
+    method: 'POST',
+    data
+  })
+export const listLdapAccounts = (params?: Record<string, any>) =>
+  request<PageData<LdapAccount>>({ url: '/system/ldap/accounts', params })
+export const bindLdapAccount = (data: {
+  serverId: number
+  userId: number
+  ldapDn: string
+  ldapUid?: string
+}) => request<LdapAccount>({ url: '/system/ldap/accounts', method: 'POST', data })
+export const unbindLdapAccount = (id: number) =>
+  request<{ detail: string }>({ url: `/system/ldap/accounts/${id}`, method: 'DELETE' })
+
+
 // ---------- IM 扫码登录（免鉴权） ----------
 
 export interface ImLoginProvider {

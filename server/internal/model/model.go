@@ -1630,3 +1630,59 @@ type ImSyncRun struct {
 	Operator   string    `gorm:"size:64" json:"operator"`
 	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
 }
+
+// LdapServer 一台 LDAP / AD 目录服务器。
+//
+// 平台只读目录：用它校验口令、查人，不写回、也不做组织同步（那条路是「IM 组织同步」）。
+// BindPassword 明文存库，与主机凭据同等对待，接口一律不返回。
+type LdapServer struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	Name       string `gorm:"size:64;not null" json:"name"`
+	Host       string `gorm:"size:128;not null" json:"host"`
+	Port       int    `gorm:"default:389" json:"port"`
+	Encryption string `gorm:"size:16;default:none" json:"encryption"` // none | ldaps | starttls
+	// SkipVerify 内网自签证书常见，是否跳过证书校验由管理员显式决定
+	SkipVerify   bool   `gorm:"default:false" json:"skipVerify"`
+	BindDN       string `gorm:"size:255" json:"bindDn"` // 服务账号，留空为匿名（只影响搜索）
+	BindPassword string `gorm:"size:255" json:"-"`
+	BaseDN       string `gorm:"size:255" json:"baseDn"`
+	// UserFilter 必须含一个 %s，登录名会被转义后替换进去
+	UserFilter   string `gorm:"size:255" json:"userFilter"`
+	AttrNickname string `gorm:"size:64;default:displayName" json:"attrNickname"`
+	AttrEmail    string `gorm:"size:64;default:mail" json:"attrEmail"`
+	TimeoutSec   int    `gorm:"default:8" json:"timeoutSec"`
+
+	Enabled bool `gorm:"default:true" json:"enabled"`
+	// LoginEnabled 关掉之后，已绑定的账号立刻回落到本地口令都登不进来（见 handler 说明）
+	LoginEnabled bool `gorm:"default:true" json:"loginEnabled"`
+	// AutoBind 首次用域口令登录时，若平台已存在同名账号则自动建立绑定。
+	// 不存在的账号一律拒绝——平台永远不按目录自动建号。
+	AutoBind bool `gorm:"default:false" json:"autoBind"`
+
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastStatus  string     `gorm:"size:16" json:"lastStatus"` // success | failed
+	LastMessage string     `gorm:"size:500" json:"lastMessage"`
+	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// LdapAccount 平台账号与目录条目的绑定关系。
+//
+// 绑定存在就意味着「这个平台账号的口令由目录说了算」，本地口令哈希不再参与登录判定。
+type LdapAccount struct {
+	ID       uint `gorm:"primaryKey" json:"id"`
+	ServerID uint `gorm:"index;not null" json:"serverId"`
+	// LdapUID 目录里的登录名（uid / sAMAccountName 的值）
+	LdapUID string `gorm:"size:128;index;not null" json:"ldapUid"`
+	// LdapDN 条目 DN，登录时直接拿它做 bind
+	LdapDN    string     `gorm:"size:255;not null" json:"ldapDn"`
+	LdapName  string     `gorm:"size:64" json:"ldapName"`
+	LdapEmail string     `gorm:"size:128" json:"ldapEmail"`
+	UserID    uint       `gorm:"index;not null" json:"userId"`
+	Username  string     `gorm:"size:64" json:"username"`
+	BoundBy   string     `gorm:"size:64" json:"boundBy"` // 谁建立的绑定，auto 表示首次登录自动绑定
+	LastLogin *time.Time `json:"lastLogin"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}

@@ -32,7 +32,20 @@ func (h *Handler) Login(c *gin.Context) {
 		response.Unauthorized(c, "用户名或密码错误")
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
+
+	// 目录托管的账号只认目录口令，本地哈希完全不参与——否则域账号停用后
+	// 平台里那份旧口令就是个后门。详见 handler/ldap.go 的说明。
+	ldapResult := h.ldapAuthenticate(&user, req.Password)
+	if ldapResult.Handled {
+		if !ldapResult.OK {
+			if ldapResult.Reason == "用户名或密码错误" {
+				response.Unauthorized(c, ldapResult.Reason)
+			} else {
+				response.Forbidden(c, ldapResult.Reason)
+			}
+			return
+		}
+	} else if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
 		response.Unauthorized(c, "用户名或密码错误")
 		return
 	}
@@ -42,6 +55,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	// 口令通过后再要第二因子。口令错误时不暴露「这个账号开了双因子」这类信息。
+	// 域账号登录同样要过双因子——目录只解决「口令由谁管」，不代替第二因子。
 	if user.TOTPEnabled {
 		ok, detail := h.verifyLoginTOTP(&user, req.Code)
 		if !ok {
@@ -61,9 +75,15 @@ func (h *Handler) Login(c *gin.Context) {
 	now := time.Now()
 	h.DB.Model(&user).Update("last_login_at", &now)
 
+	loginBy := "local"
+	if ldapResult.Handled {
+		loginBy = "ldap"
+		h.markLdapLogin(ldapResult.Binding)
+	}
 	response.OK(c, gin.H{
 		"token":     token,
 		"expiresAt": expire.Unix(),
+		"loginBy":   loginBy,
 		"user":      gin.H{"id": user.ID, "username": user.Username, "nickname": user.Nickname},
 	})
 }
