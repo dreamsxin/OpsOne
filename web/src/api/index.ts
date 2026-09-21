@@ -2623,6 +2623,58 @@ export const restartKubeWorkload = (
   data: { kind: string; namespace: string; name: string; dryRun: boolean }
 ) => request<KubeRestartResult>({ url: `/kube/clusters/${id}/resource/restart`, method: 'POST', data })
 
+export interface KubePodContainer {
+  name: string
+  image: string
+  init: boolean
+  ready: boolean
+  restarts: number
+  /** running | waiting | terminated | unknown（status 里还没有这个容器） */
+  state: string
+  reason: string
+  message: string
+  /** -1 表示没有这个信息；0 是正常退出 */
+  exitCode: number
+  /** 上一次退出的原因与退出码，CrashLoop 时最关键的一行 */
+  lastTerminated: string
+  startedAt: string
+  ports: string
+  requests: string
+  limits: string
+  probes: string
+  mounts: string[]
+}
+
+export interface KubePodDetailData {
+  name: string
+  namespace: string
+  phase: string
+  reason: string
+  message: string
+  nodeName: string
+  podIp: string
+  hostIp: string
+  qosClass: string
+  serviceAccount: string
+  startedAt: string
+  owner: string
+  restarts: number
+  readyCount: number
+  totalCount: number
+  containers: KubePodContainer[]
+  conditions: { type: string; status: string; reason: string; message: string; lastTransition: string }[]
+  volumes: { name: string; type: string; source: string }[]
+  nodeSelector: string
+  logContainers: string[]
+}
+
+export const getKubePodDetail = (id: number, namespace: string, name: string) =>
+  request<{ detail: KubePodDetailData; note: string }>({
+    url: `/kube/clusters/${id}/pod`,
+    params: { namespace, name }
+  })
+
+
 export const applyKubeResource = (id: number, data: { yaml: string; dryRun: boolean; force?: boolean }) =>
   request<KubeApplyResult>({ url: `/kube/clusters/${id}/resource/apply`, method: 'POST', data })
 export const scaleKubeResource = (

@@ -14,6 +14,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   applyKubeResource,
+  getKubePodDetail,
+  getKubePodLogs,
   getKubeResource,
   listKubeChangeLogs,
   listKubeClusters,
@@ -27,9 +29,11 @@ import {
   type KubeChangeLog,
   type KubeCluster,
   type KubeEventItem,
+  type KubePodDetailData,
   type KubeResourceItem,
   type KubeResourceKind
 } from '@/api'
+
 import Pagination from '@/components/Pagination.vue'
 
 const clusters = ref<KubeCluster[]>([])
@@ -42,7 +46,17 @@ const namespace = ref('')
 const keyword = ref('')
 const tab = ref('resource')
 
-const loading = reactive({ list: false, detail: false, submit: false, log: false, events: false, pods: false })
+const loading = reactive({
+  list: false,
+  detail: false,
+  submit: false,
+  log: false,
+  events: false,
+  pods: false,
+  pod: false,
+  logs: false
+})
+
 const items = ref<KubeResourceItem[]>([])
 const namespaceIgnored = ref(false)
 const currentCluster = computed(() => clusters.value.find((c) => c.id === clusterId.value))
@@ -90,6 +104,22 @@ const events = ref<KubeEventItem[]>([])
 const eventNote = ref('')
 const relatedPods = ref<KubeResourceItem[]>([])
 const podNote = ref('')
+
+// ---------- Pod 专属：结构化概况 + 按容器看日志 ----------
+const podDetail = ref<KubePodDetailData | null>(null)
+const podDetailNote = ref('')
+const logView = reactive({
+  container: '',
+  tailLines: 200,
+  previous: false,
+  timestamps: false,
+  text: '',
+  lines: 0,
+  truncated: false,
+  error: ''
+})
+const isPod = computed(() => detail.kind === 'Pod')
+
 
 // ---------- 副本数对话框 ----------
 const scaler = reactive({
@@ -168,10 +198,15 @@ function searchLogs() {
   loadLogs()
 }
 
-async function openDetail(row: KubeResourceItem) {
+/**
+ * 打开详情。kindName 可以与当前列表的类型不同 ——
+ * 从「关联 Pod」点进某个 Pod 时，用的就是这条路径，所以标记必须按传进来的类型取，
+ * 不能取当前下拉选中的类型（那样 Pod 会被当成 Deployment 显示出编辑按钮）。
+ */
+async function openDetail(row: KubeResourceItem, kindName = row.kind) {
+  const meta = kinds.value.find((k) => k.kind === kindName)
   detail.visible = true
-  detail.tab = 'yaml'
-  detail.kind = row.kind
+  detail.kind = kindName
   detail.namespace = row.namespace
   detail.name = row.name
   detail.yaml = ''
@@ -179,15 +214,25 @@ async function openDetail(row: KubeResourceItem) {
   detail.hint = ''
   detail.force = false
   detail.result = ''
-  detail.readOnly = !!currentKind.value?.readOnly
-  detail.redacted = !!currentKind.value?.redacted
-  detail.restartable = !!currentKind.value?.restartable
+  detail.readOnly = !!meta?.readOnly
+  detail.redacted = !!meta?.redacted
+  detail.restartable = !!meta?.restartable
   detail.podSelector = ''
   events.value = []
   relatedPods.value = []
+  podDetail.value = null
+  logView.text = ''
+  logView.error = ''
+  logView.container = ''
+  // Pod 默认落在「概况」：要看的是容器状态，不是 YAML
+  detail.tab = kindName === 'Pod' ? 'pod' : 'yaml'
+  if (kindName === 'Pod') {
+    loadPodDetail()
+    return
+  }
   loading.detail = true
   try {
-    const res = await getKubeResource(clusterId.value, row.kind, row.namespace, row.name)
+    const res = await getKubeResource(clusterId.value, kindName, row.namespace, row.name)
     detail.yaml = res.yaml
     detail.original = res.yaml
     detail.hint = res.hint
@@ -201,6 +246,68 @@ async function openDetail(row: KubeResourceItem) {
     loading.detail = false
   }
 }
+
+async function loadPodDetail() {
+  loading.pod = true
+  try {
+    const res = await getKubePodDetail(clusterId.value, detail.namespace, detail.name)
+    podDetail.value = res.detail
+    podDetailNote.value = res.note
+    // 默认选第一个主容器（不是 init 容器）：多数时候要看的是它的日志
+    const main = res.detail.containers.find((c) => !c.init) || res.detail.containers[0]
+    logView.container = main?.name || ''
+  } catch (err: any) {
+    podDetail.value = null
+    ElMessage.error(err?.message || '读取 Pod 详情失败')
+  } finally {
+    loading.pod = false
+  }
+}
+
+async function loadPodYaml() {
+  if (detail.yaml) return
+  loading.detail = true
+  try {
+    const res = await getKubeResource(clusterId.value, 'Pod', detail.namespace, detail.name)
+    detail.yaml = res.yaml
+    detail.original = res.yaml
+    detail.hint = res.hint
+  } catch (err: any) {
+    ElMessage.error(err?.message || '读取对象失败')
+  } finally {
+    loading.detail = false
+  }
+}
+
+async function loadPodLogs() {
+  if (!logView.container) {
+    ElMessage.warning('请选择容器')
+    return
+  }
+  loading.logs = true
+  logView.error = ''
+  try {
+    const res = await getKubePodLogs(clusterId.value, {
+      namespace: detail.namespace,
+      pod: detail.name,
+      container: logView.container,
+      tailLines: logView.tailLines,
+      ...(logView.previous ? { previous: 'true' } : {}),
+      ...(logView.timestamps ? { timestamps: 'true' } : {})
+    })
+    logView.text = res.logs
+    logView.lines = res.lines
+    logView.truncated = res.truncated
+  } catch (err: any) {
+    logView.text = ''
+    logView.lines = 0
+    // 「上一次的日志」在容器没重启过时集群会直接报错，这不是平台的 bug，照实显示
+    logView.error = err?.message || '读取日志失败'
+  } finally {
+    loading.logs = false
+  }
+}
+
 
 async function loadEvents() {
   loading.events = true
@@ -230,15 +337,18 @@ async function loadRelatedPods() {
   }
 }
 
-// 页签是懒加载的：一次点开就发三个请求太浪费，尤其事件那条在大集群上不快
+// 页签是懒加载的：一次点开就发好几个请求太浪费，尤其事件那条在大集群上不快
 watch(
   () => detail.tab,
   (value) => {
     if (!detail.visible) return
     if (value === 'events' && !events.value.length) loadEvents()
     if (value === 'pods' && !relatedPods.value.length) loadRelatedPods()
+    if (value === 'logs' && !logView.text && !logView.error) loadPodLogs()
+    if (value === 'yaml' && isPod.value) loadPodYaml()
   }
 )
+
 
 async function submitApply(dryRun: boolean) {
   if (!detail.yaml.trim()) {
@@ -540,7 +650,146 @@ onMounted(async () => {
 
     <el-drawer v-model="detail.visible" size="62%" :title="`${detail.kind}/${detail.name}`">
       <el-tabs v-model="detail.tab">
+        <el-tab-pane v-if="isPod" label="概况" name="pod">
+          <div v-loading="loading.pod">
+            <template v-if="podDetail">
+              <div class="facts">
+                <span><b>状态</b> {{ podDetail.phase }}{{ podDetail.reason ? `（${podDetail.reason}）` : '' }}</span>
+                <span><b>容器就绪</b> {{ podDetail.readyCount }}/{{ podDetail.totalCount }}</span>
+                <span><b>重启</b> {{ podDetail.restarts }} 次</span>
+                <span><b>节点</b> {{ podDetail.nodeName || '—' }}</span>
+                <span><b>Pod IP</b> {{ podDetail.podIp || '—' }}</span>
+                <span><b>QoS</b> {{ podDetail.qosClass }}</span>
+                <span><b>归属</b> {{ podDetail.owner || '—' }}</span>
+                <span><b>服务账号</b> {{ podDetail.serviceAccount || '—' }}</span>
+                <span><b>启动时间</b> {{ podDetail.startedAt || '—' }}</span>
+                <span v-if="podDetail.nodeSelector"><b>节点选择器</b> {{ podDetail.nodeSelector }}</span>
+              </div>
+              <el-alert
+                v-if="podDetail.message"
+                type="warning"
+                :closable="false"
+                :title="podDetail.message"
+                style="margin-bottom: 8px"
+              />
+
+              <div class="sub-title">容器</div>
+              <el-table :data="podDetail.containers" border stripe size="small">
+                <el-table-column label="容器" min-width="160">
+                  <template #default="{ row }">
+                    {{ row.name }}
+                    <el-tag v-if="row.init" size="small" type="info" style="margin-left: 4px">init</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="image" label="镜像" min-width="200" show-overflow-tooltip />
+                <el-table-column label="状态" min-width="200">
+                  <template #default="{ row }">
+                    <el-tag
+                      size="small"
+                      :type="row.state === 'running' ? 'success' : row.state === 'terminated' ? 'info' : 'warning'"
+                    >
+                      {{ row.state }}
+                    </el-tag>
+                    <span v-if="row.reason" class="mono"> {{ row.reason }}</span>
+                    <div v-if="row.exitCode >= 0" class="muted">退出码 {{ row.exitCode }}</div>
+                    <div v-if="row.lastTerminated" class="muted">上次：{{ row.lastTerminated }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="就绪" width="70" align="center">
+                  <template #default="{ row }">{{ row.ready ? '是' : '否' }}</template>
+                </el-table-column>
+                <el-table-column prop="restarts" label="重启" width="70" align="center" />
+                <el-table-column label="资源 / 探针" min-width="190">
+                  <template #default="{ row }">
+                    <div class="muted">requests：{{ row.requests || '未配' }}</div>
+                    <div class="muted">limits：{{ row.limits || '未配' }}</div>
+                    <div class="muted">探针：{{ row.probes || '未配' }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="端口 / 挂载" min-width="200">
+                  <template #default="{ row }">
+                    <div v-if="row.ports" class="muted">{{ row.ports }}</div>
+                    <div v-for="m in row.mounts" :key="m" class="muted">{{ m }}</div>
+                    <span v-if="!row.ports && !row.mounts?.length" class="muted">—</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="sub-title">条件</div>
+              <el-table :data="podDetail.conditions" border stripe size="small" empty-text="没有条件信息">
+                <el-table-column prop="type" label="类型" width="150" />
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.status === 'True' ? 'success' : 'warning'">
+                      {{ row.status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="reason" label="原因" width="180" />
+                <el-table-column prop="message" label="说明" min-width="240" show-overflow-tooltip />
+                <el-table-column prop="lastTransition" label="变更时间" min-width="170" />
+              </el-table>
+
+              <div class="sub-title">卷</div>
+              <el-table :data="podDetail.volumes" border stripe size="small" empty-text="没有挂载卷">
+                <el-table-column prop="name" label="卷名" min-width="160" />
+                <el-table-column prop="type" label="类型" width="130" />
+                <el-table-column label="来源" min-width="200">
+                  <template #default="{ row }">{{ row.source || '—' }}</template>
+                </el-table-column>
+              </el-table>
+
+              <el-alert
+                v-if="podDetailNote"
+                type="info"
+                :closable="false"
+                :title="podDetailNote"
+                style="margin-top: 12px"
+              />
+            </template>
+            <el-empty v-else-if="!loading.pod" description="读不到这个 Pod（可能已经被重建）" />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane v-if="isPod" label="日志" name="logs">
+          <div class="page-toolbar">
+            <el-select v-model="logView.container" placeholder="选择容器" style="width: 200px">
+              <el-option
+                v-for="name in podDetail?.logContainers || []"
+                :key="name"
+                :label="name"
+                :value="name"
+              />
+            </el-select>
+            <el-select v-model="logView.tailLines" style="width: 130px">
+              <el-option :label="'最近 100 行'" :value="100" />
+              <el-option :label="'最近 200 行'" :value="200" />
+              <el-option :label="'最近 1000 行'" :value="1000" />
+              <el-option :label="'最近 5000 行'" :value="5000" />
+            </el-select>
+            <el-checkbox v-model="logView.previous">上一次的（重启前）</el-checkbox>
+            <el-checkbox v-model="logView.timestamps">带时间戳</el-checkbox>
+            <el-button type="primary" :loading="loading.logs" @click="loadPodLogs">拉取</el-button>
+          </div>
+          <el-alert
+            v-if="logView.error"
+            type="error"
+            :closable="false"
+            :title="logView.error"
+            style="margin-bottom: 8px"
+          />
+          <el-alert
+            v-else-if="logView.text"
+            type="info"
+            :closable="false"
+            :title="`${logView.lines} 行${logView.truncated ? '（已到 1MB 上限，更早的内容被截断）' : ''}；日志不落库、不做流式跟随`"
+            style="margin-bottom: 8px"
+          />
+          <pre v-loading="loading.logs" class="log-box">{{ logView.text || '（没有日志）' }}</pre>
+        </el-tab-pane>
+
         <el-tab-pane label="YAML" name="yaml">
+
           <div v-loading="loading.detail">
             <el-alert
               v-if="detail.hint"
@@ -599,11 +848,17 @@ onMounted(async () => {
             size="small"
             empty-text="按标签选择器没有匹配到 Pod"
           >
-            <el-table-column prop="name" label="Pod" min-width="220" show-overflow-tooltip />
+            <el-table-column label="Pod" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <!-- 点进去看容器状态与日志，不用回列表重新选类型 -->
+                <el-button link type="primary" @click="openDetail(row, 'Pod')">{{ row.name }}</el-button>
+              </template>
+            </el-table-column>
             <el-table-column prop="summary" label="状态" min-width="220" show-overflow-tooltip />
             <el-table-column prop="createdAt" label="创建时间" min-width="170" />
           </el-table>
         </el-tab-pane>
+
       </el-tabs>
 
       <template #footer>
@@ -686,4 +941,43 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 12px;
 }
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.facts b {
+  margin-right: 4px;
+  color: var(--el-text-color-secondary);
+}
+.sub-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 12px 0 6px;
+}
+.mono {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+}
+.muted {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.log-box {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #1b1b1f;
+  color: #d4d4d8;
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 480px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-height: 200px;
+}
 </style>
+

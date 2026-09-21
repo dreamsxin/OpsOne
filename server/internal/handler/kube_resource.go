@@ -284,6 +284,46 @@ func (h *Handler) RestartKubeWorkload(c *gin.Context) {
 	})
 }
 
+// KubePodDetail Pod 的结构化详情。
+//
+// 与「YAML」并列而不是替代它：排查时要的是「哪个容器挂了、为什么挂、上次退出码多少、
+// 挂载的是哪个 ConfigMap」，这些散在 spec 与 status 的不同角落，让人在 YAML 里翻
+// 等于把解析工作推给值班的人。顺带把「能取哪些容器的日志」也给出来，
+// 免得在日志页手填容器名。
+func (h *Handler) KubePodDetail(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(c.Query("name"))
+	namespace := strings.TrimSpace(c.Query("namespace"))
+	if name == "" || namespace == "" {
+		response.BadRequest(c, "命名空间与 Pod 名称都不能为空")
+		return
+	}
+	kind, ok := k8s.LookupKind("Pod")
+	if !ok {
+		response.Error(c, "Pod 类型未注册")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), kubeCallTimeout)
+	defer cancel()
+
+	obj, err := client.GetObject(ctx, kind, namespace, name)
+	if err != nil {
+		respondKubeError(c, "读取 Pod 失败: "+err.Error(), err)
+		return
+	}
+	detail := k8s.DescribePod(obj)
+	response.OK(c, gin.H{
+		"detail": detail,
+		// 这两句是为了让人知道看到的是什么：结构化视图只算不编，
+		// 字段缺失就留空；QoS 直接取 API Server 算好的值
+		"note": "字段全部取自对象本身，取不到的留空而不是给默认值；QoS 用的是 API Server 算好的 status.qosClass",
+	})
+}
+
 // ApplyKubeResource 提交一段 YAML。dryRun=true 时只让 API Server 校验不落盘。
 func (h *Handler) ApplyKubeResource(c *gin.Context) {
 	cluster, client, ok := h.requireKubeCluster(c)
