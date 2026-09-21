@@ -729,6 +729,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/monitor/aggregation/:id", middleware.RequirePerm("aggregation:manage"), h.DeleteAggregationPolicy)
 		auth.GET("/monitor/aggregation/:id/preview", h.PreviewAggregation)
 
+		// 告警静默 / 维护窗口：只拦外发通知，告警照常入库
+		auth.GET("/monitor/silences", h.ListAlertSilences)
+		auth.POST("/monitor/silences", middleware.RequirePerm("silence:manage"), h.CreateAlertSilence)
+		auth.POST("/monitor/silences/preview", h.PreviewAlertSilence)
+		auth.PUT("/monitor/silences/:id", middleware.RequirePerm("silence:manage"), h.UpdateAlertSilence)
+		auth.POST("/monitor/silences/:id/end", middleware.RequirePerm("silence:manage"), h.EndAlertSilence)
+		auth.DELETE("/monitor/silences/:id", middleware.RequirePerm("silence:manage"), h.DeleteAlertSilence)
+		auth.GET("/monitor/silences/:id/hits", h.ListAlertSilenceHits)
+
 		auth.GET("/monitor/topology/resources", h.TopologyResources)
 		auth.GET("/monitor/topologies", h.ListTopologies)
 		auth.GET("/monitor/topologies/:id", h.GetTopology)

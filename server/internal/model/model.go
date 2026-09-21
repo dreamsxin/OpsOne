@@ -502,6 +502,57 @@ type Alert struct {
 	HandleNote  string     `gorm:"size:255" json:"handleNote"`
 	// SuppressedBy 命中聚合策略而未发通知时记下策略名，用来解释「为什么没收到通知」
 	SuppressedBy string `gorm:"size:64" json:"suppressedBy"`
+	// SilencedBy / SilenceID 命中静默或维护窗口而未发通知时记下是哪一条。
+	// 与 SuppressedBy 分开存：聚合抑制用 SuppressedBy=="" 判断「首条是否已通知」，
+	// 静默要是复用同一个字段，会把被静默的告警当成「已通知过的首条」，破坏聚合语义。
+	SilencedBy string `gorm:"size:64" json:"silencedBy"`
+	SilenceID  uint   `gorm:"index;default:0" json:"silenceId"`
+}
+
+// AlertSilence 告警静默 / 维护窗口。
+//
+// 语义：只拦「外发通知」，告警照常入库并标记是谁拦的 —— 维护窗口期间平台该看见的
+// 还是要看见，只是不半夜叫人。窗口结束后新产生的告警自动恢复外发，不需要手工解除。
+type AlertSilence struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Kind silence（临时静默）| maintenance（维护窗口）。只影响展示与筛选，判定逻辑相同。
+	Kind string `gorm:"size:16;default:silence" json:"kind"`
+
+	// ---------- 匹配条件（都为空且 MatchAll=false 时不允许保存）----------
+
+	// MatchSeverity 逗号分隔的级别，空表示不限
+	MatchSeverity string `gorm:"size:64" json:"matchSeverity"`
+	// MatchLabels JSON 对象，要求告警标签逐项相等（与通知路由同语义）
+	MatchLabels string `gorm:"type:text" json:"matchLabels"`
+	// MatchTitle 标题包含该关键字（区分大小写按原文比较）
+	MatchTitle string `gorm:"size:128" json:"matchTitle"`
+	// MatchSource 逗号分隔的告警来源名，空表示不限
+	MatchSource string `gorm:"size:255" json:"matchSource"`
+	// MatchAll 显式勾选「匹配全部告警」，防止手滑漏填条件造成全局静音
+	MatchAll bool `gorm:"default:false" json:"matchAll"`
+
+	// ---------- 时间窗 ----------
+
+	StartAt time.Time `gorm:"index" json:"startAt"`
+	EndAt   time.Time `gorm:"index" json:"endAt"`
+
+	Reason  string `gorm:"size:255" json:"reason"`
+	Enabled bool   `gorm:"default:true" json:"enabled"`
+
+	// ---------- 运行痕迹 ----------
+
+	// HitCount 拦下过多少条告警的通知；LastHitAt 最近一次拦下的时间
+	HitCount  int        `gorm:"default:0" json:"hitCount"`
+	LastHitAt *time.Time `json:"lastHitAt"`
+	// EndedAt / EndedBy 提前结束（维护提前完成时用），提前结束后立即失效
+	EndedAt *time.Time `json:"endedAt"`
+	EndedBy string     `gorm:"size:64" json:"endedBy"`
+
+	CreatedBy   uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatorName string    `gorm:"size:64" json:"creatorName"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // AggregationPolicy 告警聚合策略：把同类告警按维度归到一个桶，

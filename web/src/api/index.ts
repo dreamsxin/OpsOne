@@ -1683,6 +1683,68 @@ export const previewAggregation = (id: number) =>
 export const detectAggregationOverlaps = () =>
   request<{ overlaps: AggregationOverlap[]; detail: string }>({ url: '/monitor/aggregation/overlaps' })
 
+// ---------- 告警静默 / 维护窗口 ----------
+
+export interface AlertSilence {
+  id: number
+  name: string
+  kind: string // silence | maintenance
+  matchSeverity: string
+  matchLabels: string
+  matchTitle: string
+  matchSource: string
+  matchAll: boolean
+  startAt: string
+  endAt: string
+  reason: string
+  enabled: boolean
+  hitCount: number
+  lastHitAt: string | null
+  endedAt: string | null
+  endedBy: string
+  creatorName: string
+  createdAt: string
+  status: string // active | pending | expired | ended | disabled
+  remainSeconds: number
+}
+
+export interface AlertSilenceList {
+  list: AlertSilence[]
+  total: number
+  summary: Record<string, number>
+}
+
+export interface AlertSilencePreview {
+  scanned: number
+  matched: number
+  samples: {
+    id: number
+    title: string
+    severity: string
+    sourceName: string
+    labels: string
+    lastSeenAt: string
+  }[]
+  window: { startAt: string; endAt: string }
+}
+
+export const listAlertSilences = (params?: Record<string, any>) =>
+  request<AlertSilenceList>({ url: '/monitor/silences', params })
+export const createAlertSilence = (data: Record<string, any>) =>
+  request<AlertSilence>({ url: '/monitor/silences', method: 'POST', data })
+export const updateAlertSilence = (id: number, data: Record<string, any>) =>
+  request<AlertSilence>({ url: `/monitor/silences/${id}`, method: 'PUT', data })
+export const endAlertSilence = (id: number) =>
+  request<AlertSilence>({ url: `/monitor/silences/${id}/end`, method: 'POST' })
+export const deleteAlertSilence = (id: number) =>
+  request({ url: `/monitor/silences/${id}`, method: 'DELETE' })
+export const previewAlertSilence = (data: Record<string, any>) =>
+  request<AlertSilencePreview>({ url: '/monitor/silences/preview', method: 'POST', data })
+export const listAlertSilenceHits = (id: number) =>
+  request<{ silence: AlertSilence; list: any[]; total: number }>({
+    url: `/monitor/silences/${id}/hits`
+  })
+
 // ---------- 事件中心 ----------
 
 export interface OpsEvent {

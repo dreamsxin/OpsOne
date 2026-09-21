@@ -38,6 +38,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Certificate{}, &model.AlertRule{},
 		&model.Probe{}, &model.ProbeRecord{},
 		&model.AggregationPolicy{},
+		&model.AlertSilence{},
 		&model.Event{}, &model.EventLog{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
@@ -151,6 +152,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 428, ParentID: 415, Title: "手动采集", Type: "button", AuthCode: "host:check", Sort: 1},
 		{ID: 416, ParentID: 400, Name: "OnCall", Title: "值班升级", Path: "/monitor/oncall", Component: "/monitor/oncall/index", Icon: "AlarmClock", Sort: 16},
 		{ID: 429, ParentID: 416, Title: "维护值班表", Type: "button", AuthCode: "oncall:manage", Sort: 1},
+		{ID: 417, ParentID: 400, Name: "AlertSilence", Title: "静默与维护窗口", Path: "/monitor/silences", Component: "/monitor/silences/index", Icon: "MuteNotification", Sort: 17},
+		{ID: 434, ParentID: 417, Title: "维护静默窗口", Type: "button", AuthCode: "silence:manage", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},

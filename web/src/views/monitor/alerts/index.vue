@@ -164,6 +164,20 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column prop="count" label="次数" width="70" />
+        <el-table-column label="通知" width="110">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.silencedBy" :content="`被「${row.silencedBy}」静默，未外发通知`">
+              <el-tag size="small" type="warning">已静默</el-tag>
+            </el-tooltip>
+            <el-tooltip
+              v-else-if="row.suppressedBy"
+              :content="`被聚合策略「${row.suppressedBy}」抑制，未外发通知`"
+            >
+              <el-tag size="small" type="info">已抑制</el-tag>
+            </el-tooltip>
+            <span v-else>已外发</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="lastSeenAt" label="最近出现" min-width="180" />
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">

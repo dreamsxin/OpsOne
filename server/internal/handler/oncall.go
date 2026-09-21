@@ -689,9 +689,17 @@ func (h *Handler) escalateSchedule(schedule model.OnCallSchedule) (int, string) 
 
 	called := 0
 	skipped := 0
+	silenced := 0
 	for _, alert := range alerts {
 		if !severityMatches(schedule.MatchSeverity, alert.Severity) {
 			skipped++
+			continue
+		}
+		// 静默 / 维护窗口按「当下」重新判定：窗口里不叫人，窗口一结束又会照常升级。
+		// 不能只看 alert.silenced_by —— 那是入库那一刻的结论，窗口早就可能结束了。
+		if hit, ok := h.matchSilence(alert, now); ok {
+			silenced++
+			log.Printf("[oncall] 告警 %d 在「%s」窗口内，本轮不叫人", alert.ID, hit.Name)
 			continue
 		}
 		minutes := int(now.Sub(alert.FirstSeenAt).Minutes())
@@ -721,6 +729,9 @@ func (h *Handler) escalateSchedule(schedule model.OnCallSchedule) (int, string) 
 	}
 
 	detail := fmt.Sprintf("扫描 %d 条未确认告警，叫人 %d 次", len(alerts)-skipped, called)
+	if silenced > 0 {
+		detail += fmt.Sprintf("，另有 %d 条在静默/维护窗口内未叫", silenced)
+	}
 	return called, detail
 }
 

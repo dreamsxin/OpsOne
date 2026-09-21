@@ -118,6 +118,12 @@ func (h *Handler) ingestAlert(source *model.AlertSource, item alertPayload) {
 		return
 	}
 
+	// 静默 / 维护窗口：只拦外发，不拦入库。放在聚合抑制之前，
+	// 因为它拦的是「这段时间别叫人」，与告警是不是噪音无关。
+	if h.silencedForAlert(&alert) {
+		return
+	}
+
 	// 聚合策略可能判定这条属于「同一批噪音」，此时只入库不通知，并记下是哪条策略拦的
 	if policyName, suppressed := h.suppressedByAggregation(alert); suppressed {
 		alert.SuppressedBy = policyName
