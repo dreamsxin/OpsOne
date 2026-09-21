@@ -104,6 +104,66 @@ func TestTamperDetected(t *testing.T) {
 	}
 }
 
+// 运行时换密钥：这是「换密钥 / 取消加密」能做成的前提。
+// 没有它，库里换成新密钥之后进程还拿着旧的，凭据会一直用不了直到有人重启。
+func TestSetKeySwitchesAtRuntime(t *testing.T) {
+	b := New("key-a")
+	sealedA := b.Seal("payload")
+
+	b.SetKey("key-b")
+	if _, err := b.Open(sealedA); err == nil {
+		t.Fatal("换成 key-b 之后还能解开 key-a 的密文")
+	}
+	sealedB := b.Seal("payload")
+	if got, err := b.Open(sealedB); err != nil || got != "payload" {
+		t.Fatalf("新密钥自己加的密文解不开: %q %v", got, err)
+	}
+
+	// 换回去要能继续读老密文，否则「填错了新密钥」就没有退路
+	b.SetKey("key-a")
+	if got, err := b.Open(sealedA); err != nil || got != "payload" {
+		t.Fatalf("换回 key-a 后读不出老密文: %q %v", got, err)
+	}
+}
+
+// 切成明文模式：Enabled 要如实变 false，新写入不再加密，
+// 而已有密文必须报 ErrNoKey 而不是返回空串
+func TestSetKeyToPlainMode(t *testing.T) {
+	b := New("key-a")
+	sealed := b.Seal("payload")
+
+	b.SetKey("")
+	if b.Enabled() {
+		t.Fatal("切到明文模式后仍报启用")
+	}
+	if got := b.Seal("payload"); got != "payload" {
+		t.Fatalf("明文模式下还在加密: %q", got)
+	}
+	if _, err := b.Open(sealed); !errors.Is(err, ErrNoKey) {
+		t.Fatalf("明文模式读旧密文应报 ErrNoKey，实际 %v", err)
+	}
+}
+
+// 换密钥与读写并发：go test -race 下不能有数据竞争。
+// 换密钥是在线操作（有人点按钮时其它请求正在解密凭据），这条不保证就会偶发崩
+func TestConcurrentSetKeyAndUse(t *testing.T) {
+	b := New("key-a")
+	sealed := b.Seal("payload")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			b.SetKey("key-a")
+			b.SetKey("")
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_, _ = b.Open(sealed)
+		_ = b.Seal("x")
+		_ = b.Enabled()
+	}
+	<-done
+}
 
 func min(a, b int) int {
 	if a < b {

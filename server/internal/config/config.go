@@ -84,9 +84,10 @@ type Config struct {
 	// 只能在界面上手动扫。扫描会对目标发起大量 TCP 连接，默认每天一次。
 	ExposureSpec string
 
-	// SecretKey 凭证库的字段加密密钥（AES-GCM，任意长度口令派生）。留空表示凭据明文存库，
-	// 界面上会如实标出来 —— 不能让人以为「有凭证库就等于加密了」。
-	// 一旦设过就不要改：改了之后已有密文全部解不开（平台会明确报错而不是当口令错误）。
+	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。留空表示**不加密存储**，
+	// 这是被允许的配置，界面上会如实标出来 —— 不能让人以为「有凭证库就等于加密了」。
+	// 要换密钥或退回明文，走凭证库页的「更换密钥 / 取消加密」（先备份、再逐行重写、
+	// 进程内密钥热切换），不要直接改这个值：直接改等于让已有密文全部解不开。
 	SecretKey string
 
 	// ---------- 备份 ----------
@@ -275,7 +276,7 @@ func (c *Config) Validate() error {
 		add(false, "OPS_WEB_DIR 为空：后端不托管前端静态文件，需要另配 nginx 之类")
 	}
 	if c.SecretKey == "" {
-		add(false, "OPS_SECRET_KEY 未设置：凭证库里的口令与私钥以明文落库（页面上会标出来）")
+		add(false, "OPS_SECRET_KEY 未设置：凭据以明文落库（这是被允许的配置，页面上会标成「不加密存储」）")
 	} else if len(c.SecretKey) < 16 {
 		add(false, "OPS_SECRET_KEY 只有 %d 字节，偏短，建议 32 字节以上随机串", len(c.SecretKey))
 	}

@@ -129,7 +129,7 @@ docker build -t opsone:latest \
 
 另外 prod 下 `OPS_DEBUG` 默认关闭，显式开启会被拒（它会打含参数的 SQL 日志）。
 
-以下项目配不好只会 warn，但都值得看一眼：`OPS_SSH_STRICT_HOST_KEY`（主机指纹校验）、`OPS_FORWARD_BIND`（隧道监听地址，隧道本身无认证）、`OPS_TRUSTED_PROXIES`、`OPS_BACKUP_SPEC`、`OPS_WEB_DIR`、`OPS_SECRET_KEY`（凭证库字段加密，留空则凭据明文落库；设过之后不要改，改了现有密文全部解不开）。
+以下项目配不好只会 warn，但都值得看一眼：`OPS_SSH_STRICT_HOST_KEY`（主机指纹校验）、`OPS_FORWARD_BIND`（隧道监听地址，隧道本身无认证）、`OPS_TRUSTED_PROXIES`、`OPS_BACKUP_SPEC`、`OPS_WEB_DIR`、`OPS_SECRET_KEY`（凭据字段加密，留空即不加密存储 —— 这是被允许的选择，界面会照实标注；要换密钥或退回明文走「凭证库 → 密钥加密体检 → 更换密钥 / 取消加密」，不要直接改这个变量，直接改等于让现有密文全部解不开）。
 
 数字项与布尔项写错（如 `OPS_TOKEN_TTL_HOUR=twelve`）会直接报错退出，而不是悄悄用默认值。
 

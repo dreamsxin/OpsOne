@@ -2,13 +2,16 @@ package handler
 
 import (
 	"fmt"
+	"log"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"ops-platform/server/internal/backup"
 	"ops-platform/server/internal/cryptox"
 	"ops-platform/server/internal/response"
 )
-
 
 // 密钥落库加密的推广。
 //
@@ -114,15 +117,15 @@ func (h *Handler) openSecret(label, stored string) (string, error) {
 // ---------- 体检 ----------
 
 type secretAuditRow struct {
-	Label    string `json:"label"`
-	Table    string `json:"table"`
-	Column   string `json:"column"`
-	Note     string `json:"note"`
-	Total    int64  `json:"total"`
-	Sealed   int64  `json:"sealed"`
-	Plain    int64  `json:"plain"`
-	Covered  bool   `json:"covered"`
-	ReadErr  string `json:"readErr"`
+	Label   string `json:"label"`
+	Table   string `json:"table"`
+	Column  string `json:"column"`
+	Note    string `json:"note"`
+	Total   int64  `json:"total"`
+	Sealed  int64  `json:"sealed"`
+	Plain   int64  `json:"plain"`
+	Covered bool   `json:"covered"`
+	ReadErr string `json:"readErr"`
 }
 
 // countSecretRows 数某一列里有多少非空值、其中多少是密文。
@@ -153,10 +156,11 @@ func (h *Handler) countSecretRows(field secretField, covered bool) secretAuditRo
 // 而不是等到某天数据库被拷走才发现。
 func (h *Handler) GetSecretAudit(c *gin.Context) {
 	rows := make([]secretAuditRow, 0, len(secretFields)+len(pendingSecretFields))
-	var plainTotal int64
+	var plainTotal, sealedTotal int64
 	for _, field := range secretFields {
 		row := h.countSecretRows(field, true)
 		plainTotal += row.Plain
+		sealedTotal += row.Sealed
 		rows = append(rows, row)
 	}
 	for _, field := range pendingSecretFields {
@@ -164,15 +168,21 @@ func (h *Handler) GetSecretAudit(c *gin.Context) {
 	}
 
 	note := "已纳入加密的字段里还有明文行，多为加密开关打开之前留下的老数据：点「加密存量数据」重写一遍即可"
-	if !h.Crypto.Enabled() {
-		note = "未配置 OPS_SECRET_KEY：所有密钥都是明文落库，迁移按钮不会有任何效果（也不会破坏数据）"
-	} else if plainTotal == 0 {
+	switch {
+	case !h.Crypto.Enabled() && sealedTotal > 0:
+		note = fmt.Sprintf("当前是**不加密存储**，但库里还有 %d 行密文 —— 这些凭据一用就会报错。"+
+			"把原来的 OPS_SECRET_KEY 配回来启动，再用「更换密钥」选「不加密存储」把它们解回明文", sealedTotal)
+	case !h.Crypto.Enabled():
+		note = "当前是**不加密存储**（OPS_SECRET_KEY 为空）。这是被允许的配置：凭据以明文落库，" +
+			"拿到库文件就等于拿到全部凭据。要开启加密，用「更换密钥」填一个密钥"
+	case plainTotal == 0:
 		note = "已纳入加密的字段没有明文残留。注意「尚未纳入」的那些字段仍是明文，见下表 Covered 列"
 	}
 	response.OK(c, gin.H{
 		"encryptEnabled": h.Crypto.Enabled(),
 		"rows":           rows,
 		"plainTotal":     plainTotal,
+		"sealedTotal":    sealedTotal,
 		"note":           note,
 		// 这句是这一页最该被记住的一条：加密挡的是「库文件/备份被拷走」，不是万能的
 		"limit": "密钥能被平台解密使用，所以同时拿到数据库与 OPS_SECRET_KEY 的人仍能拿到全部凭据；" +
@@ -191,7 +201,7 @@ func (h *Handler) MigrateSecrets(c *gin.Context) {
 	}
 
 	type result struct {
-		Label     string `json:"label"`
+		Label      string `json:"label"`
 		Table      string `json:"table"`
 		Column     string `json:"column"`
 		Migrated   int    `json:"migrated"`
@@ -237,8 +247,203 @@ func (h *Handler) MigrateSecrets(c *gin.Context) {
 		"results": out, "migrated": totalMigrated,
 		"note": fmt.Sprintf("重写了 %d 行：值没有变，只是从明文换成 AES-GCM 密文。"+
 			"可以反复执行（已是密文的行会被跳过）；"+
-			"注意这一步不可逆地依赖 OPS_SECRET_KEY —— 换掉那个值之后这些行就解不开了", totalMigrated),
+			"这些行从此依赖 OPS_SECRET_KEY —— 要换密钥或退回明文，用「更换密钥」，"+
+			"不要直接改环境变量", totalMigrated),
 	})
 }
 
+// ---------- 换密钥 / 取消加密 ----------
 
+// rekeyReq 换密钥的入参。
+//
+// Mode="plain" 表示**取消加密**：把所有密文解回明文落库。这是一个被允许的选择
+// （内网自用、不想额外保管一把密钥的部署），平台不拿安全顾虑去堵，只把代价写清楚。
+// Mode="encrypt" 表示换成 NewKey。
+type rekeyReq struct {
+	Mode   string `json:"mode"`
+	NewKey string `json:"newKey"`
+	// Confirm 必须等于 REKEY，避免误点
+	Confirm string `json:"confirm"`
+}
+
+// RekeySecrets 用「当前进程里的密钥」解开全部凭据，再按新设置写回。
+//
+// 为什么这个接口必须存在：没有它，OPS_SECRET_KEY 就是一条单向路 —— 设过之后既不能换、
+// 也不能退回明文，改一下环境变量就等于把库里所有凭据作废。之前文档只能写「设好就不要再改」，
+// 那是把一个功能缺口说成了纪律要求。
+//
+// 三件事按顺序做，缺一不可：
+//  1. 先整库备份。值不变，但这是唯一能把人从「新旧密钥各一半」里救回来的东西；备份失败就不动数据
+//  2. 逐列逐行解开再写回。解不开的行跳过并计数，绝不把它覆盖成空值
+//  3. 换掉进程内存里的密钥，让平台立刻能继续用；返回里明确要求把 OPS_SECRET_KEY 同步改掉 ——
+//     内存改了而环境变量没改，下次重启就会拿旧密钥去读新密文
+func (h *Handler) RekeySecrets(c *gin.Context) {
+	var req rekeyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	if strings.TrimSpace(req.Confirm) != "REKEY" {
+		response.BadRequest(c, "请在确认框里输入 REKEY")
+		return
+	}
+
+	mode := strings.TrimSpace(req.Mode)
+	newKey := strings.TrimSpace(req.NewKey)
+	switch mode {
+	case "plain":
+		newKey = ""
+	case "encrypt":
+		if newKey == "" {
+			response.BadRequest(c, "新密钥不能为空；要退回明文请选「不加密存储」")
+			return
+		}
+		if len([]rune(newKey)) < 4 {
+			response.BadRequest(c, "新密钥太短，至少 4 个字符（生产上建议 32 字节以上随机串）")
+			return
+		}
+	default:
+		response.BadRequest(c, "mode 只能是 encrypt（换密钥）或 plain（取消加密）")
+		return
+	}
+
+	snapshot, backupNote := h.backupBeforeRekey()
+	if snapshot == "" {
+		response.Error(c, "换密钥前的备份没做成，已中止（没有退路的操作不做）："+backupNote)
+		return
+	}
+
+	target := cryptox.New(newKey)
+	type rekeyResult struct {
+		Label     string `json:"label"`
+		Table     string `json:"table"`
+		Column    string `json:"column"`
+		Rewritten int    `json:"rewritten"`
+		Skipped   int    `json:"skipped"`
+		Failed    int    `json:"failed"`
+		// Unreadable 这张表读不出来（多半是这套部署里还没建过），不算「有行没换成」
+		Unreadable bool   `json:"unreadable"`
+		FirstError string `json:"firstError"`
+	}
+	out := make([]rekeyResult, 0, len(secretFields))
+	totalRewritten, totalSkipped, totalFailed := 0, 0, 0
+	unreadable := make([]string, 0)
+
+	for _, field := range secretFields {
+		item := rekeyResult{Label: field.Label, Table: field.Table, Column: field.Column}
+		type plainRow struct {
+			ID    uint
+			Value string
+		}
+		var rows []plainRow
+		query := fmt.Sprintf("SELECT id, %s AS value FROM %s WHERE %s",
+			field.Column, field.Table, field.filter())
+		if err := h.DB.Raw(query).Scan(&rows).Error; err != nil {
+			// 表读不出来（某些模块的表在这套部署里可能还没建过）不算「有行没换成」，
+			// 但要如实报出来 —— 否则会给人「全换完了」的错觉
+			item.Unreadable = true
+			item.FirstError = err.Error()
+			unreadable = append(unreadable, field.Table+"."+field.Column)
+			out = append(out, item)
+			continue
+		}
+		for _, row := range rows {
+			plain, err := h.Crypto.Open(row.Value)
+			if err != nil {
+				// 用当前密钥解不开：跳过并点名行号，绝不写成空值
+				item.Failed++
+				totalFailed++
+				if item.FirstError == "" {
+					item.FirstError = fmt.Sprintf("id=%d 解不开: %v", row.ID, err)
+				}
+				continue
+			}
+			next := target.Seal(plain)
+			if next == row.Value {
+				item.Skipped++
+				totalSkipped++
+				continue
+			}
+			update := fmt.Sprintf("UPDATE %s SET %s = ? WHERE id = ?", field.Table, field.Column)
+			if err := h.DB.Exec(update, next, row.ID).Error; err != nil {
+				item.Failed++
+				totalFailed++
+				if item.FirstError == "" {
+					item.FirstError = err.Error()
+				}
+				continue
+			}
+			item.Rewritten++
+			totalRewritten++
+		}
+		out = append(out, item)
+	}
+
+	// 库里已经换过去了，进程内存也要立刻跟上：否则从这一刻到重启之间所有凭据都用不了
+	h.Crypto.SetKey(newKey)
+	if h.Cfg != nil {
+		h.Cfg.SecretKey = newKey
+	}
+
+	envHint := "现在就把部署配置里的 OPS_SECRET_KEY 改成这次填的新密钥"
+	if mode == "plain" {
+		envHint = "现在就把部署配置里的 OPS_SECRET_KEY 删掉（留空）"
+	}
+	note := fmt.Sprintf("重写 %d 行、跳过 %d 行、失败 %d 行。**%s** —— "+
+		"进程内存里的密钥已经切过来了，平台现在就能继续用；但环境变量没有被改动，"+
+		"不改就重启会用回旧设置。换前的整库备份：%s",
+		totalRewritten, totalSkipped, totalFailed, envHint, snapshot)
+	if totalFailed > 0 {
+		note += "。有行用当前密钥解不开、已被跳过（多半是更早的另一把密钥留下的），" +
+			"它们仍是旧密文，要拿对应的旧密钥单独处理"
+	}
+	if len(unreadable) > 0 {
+		note += "。这些列这次读不到（表还没建过就是正常的，建了再点一次即可）：" +
+			strings.Join(unreadable, "、")
+	}
+
+	response.OK(c, gin.H{
+		"mode": mode, "encryptEnabled": h.Crypto.Enabled(),
+		"results": out, "rewritten": totalRewritten,
+		"skipped": totalSkipped, "failed": totalFailed,
+		"backup": snapshot, "note": note,
+	})
+}
+
+// backupBeforeRekey 换密钥前做一次整库备份，返回快照路径与一行说明
+func (h *Handler) backupBeforeRekey() (string, string) {
+	if h.Cfg == nil {
+		return "", "没有可用的配置（备份目录未知）"
+	}
+	res, err := backup.Run(h.DB, h.Cfg.RecordDir, h.Cfg.BackupDir, h.Cfg.BackupKeep, time.Now())
+	if err != nil {
+		return "", err.Error()
+	}
+	return res.DBPath, res.Summary()
+}
+
+// WarnSealedWithoutKey 启动时喊一句：库里有密文但进程没有密钥。
+//
+// 不做的事：不自动解密、不自动降级。只是把「这些凭据现在一用就报错」提前说出来，
+// 免得等到有人点「连接主机」时才发现，而那时报的是单条记录的错，看不出是全局设置问题。
+func (h *Handler) WarnSealedWithoutKey() {
+	if h.Crypto.Enabled() {
+		return
+	}
+	sealed := int64(0)
+	for _, field := range secretFields {
+		var n int64
+		q := fmt.Sprintf("SELECT COUNT(1) FROM %s WHERE %s AND %s LIKE 'enc:v1:%%'",
+			field.Table, field.filter(), field.Column)
+		if err := h.DB.Raw(q).Scan(&n).Error; err == nil {
+			sealed += n
+		}
+	}
+	if sealed == 0 {
+		log.Printf("[secret] 未配置 OPS_SECRET_KEY：凭据以明文落库（这是被允许的配置，界面会如实标注）")
+		return
+	}
+	log.Printf("[secret] 未配置 OPS_SECRET_KEY，但库里有 %d 行密文 —— 这些凭据现在一用就会报错。"+
+		"要么把原来的 OPS_SECRET_KEY 配回来，要么用原密钥启动后在「凭证库 → 密钥加密体检 → 更换密钥」"+
+		"里选「不加密存储」把它们解回明文", sealed)
+}

@@ -3774,6 +3774,7 @@ export const getSecretAudit = () =>
     encryptEnabled: boolean
     rows: SecretAuditRow[]
     plainTotal: number
+    sealedTotal: number
     note: string
     limit: string
   }>({ url: '/secrets/audit' })
@@ -3784,6 +3785,31 @@ export const migrateSecrets = () =>
     migrated: number
     note: string
   }>({ url: '/secrets/migrate', method: 'POST' })
+
+/**
+ * 换密钥 / 取消加密。mode=encrypt 时 newKey 必填；mode=plain 表示把密文解回明文。
+ * 平台会先做一次整库备份，成功后进程内存里的密钥立刻切换 ——
+ * 调用方必须同步改部署配置里的 OPS_SECRET_KEY，否则下次重启读不出来。
+ */
+export const rekeySecrets = (data: { mode: 'encrypt' | 'plain'; newKey?: string; confirm: string }) =>
+  request<{
+    mode: string
+    encryptEnabled: boolean
+    results: {
+      label: string
+      table: string
+      column: string
+      rewritten: number
+      skipped: number
+      failed: number
+      firstError: string
+    }[]
+    rewritten: number
+    skipped: number
+    failed: number
+    backup: string
+    note: string
+  }>({ url: '/secrets/rekey', method: 'POST', data })
 
 
 

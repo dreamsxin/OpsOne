@@ -24,6 +24,7 @@ import {
   listCredentials,
   listHosts,
   migrateSecrets,
+  rekeySecrets,
   rotateCredential,
   saveCredential,
   type Credential,
@@ -339,8 +340,15 @@ const auditRows = ref<SecretAuditRow[]>([])
 const auditNote = ref('')
 const auditLimit = ref('')
 const auditPlainTotal = ref(0)
+const auditSealedTotal = ref(0)
+const auditEncryptEnabled = ref(false)
 const auditLoading = ref(false)
 const migrating = ref(false)
+
+/* 换密钥 / 取消加密 */
+const rekeyVisible = ref(false)
+const rekeying = ref(false)
+const rekeyForm = reactive({ mode: 'encrypt' as 'encrypt' | 'plain', newKey: '', confirm: '' })
 
 async function loadAudit() {
   auditLoading.value = true
@@ -350,10 +358,49 @@ async function loadAudit() {
     auditNote.value = res.note
     auditLimit.value = res.limit
     auditPlainTotal.value = res.plainTotal
+    auditSealedTotal.value = res.sealedTotal
+    auditEncryptEnabled.value = res.encryptEnabled
   } catch (err: any) {
     ElMessage.error(err?.message || '读取加密体检失败')
   } finally {
     auditLoading.value = false
+  }
+}
+
+function openRekey() {
+  rekeyForm.mode = 'encrypt'
+  rekeyForm.newKey = ''
+  rekeyForm.confirm = ''
+  rekeyVisible.value = true
+}
+
+async function doRekey() {
+  if (rekeyForm.mode === 'encrypt' && !rekeyForm.newKey.trim()) {
+    ElMessage.warning('请填写新密钥，或改选「不加密存储」')
+    return
+  }
+  if (rekeyForm.confirm !== 'REKEY') {
+    ElMessage.warning('请输入 REKEY 确认')
+    return
+  }
+  rekeying.value = true
+  try {
+    const res = await rekeySecrets({
+      mode: rekeyForm.mode,
+      newKey: rekeyForm.mode === 'encrypt' ? rekeyForm.newKey.trim() : '',
+      confirm: rekeyForm.confirm
+    })
+    rekeyVisible.value = false
+    // 这条提示必须让人看见并读完：环境变量没改，重启就会用回旧设置
+    ElMessageBox.alert(res.note, res.failed > 0 ? '换完了，但有行没换成' : '换完了', {
+      type: res.failed > 0 ? 'warning' : 'success',
+      confirmButtonText: '我已知道要改 OPS_SECRET_KEY'
+    })
+    await Promise.all([loadAudit(), loadState(), load()])
+  } catch (err: any) {
+    ElMessage.error(err?.message || '换密钥失败')
+  } finally {
+    rekeying.value = false
   }
 }
 
@@ -530,6 +577,9 @@ onMounted(async () => {
           >
             加密存量数据{{ auditPlainTotal ? `（${auditPlainTotal} 行）` : '' }}
           </el-button>
+          <el-button v-perm="'credential:manage'" type="warning" plain @click="openRekey">
+            更换密钥 / 取消加密
+          </el-button>
         </div>
       </div>
 
@@ -568,6 +618,43 @@ onMounted(async () => {
       </el-table>
       <el-alert v-if="auditLimit" type="info" :closable="false" :title="auditLimit" style="margin-top: 8px" />
     </el-card>
+
+    <!-- 换密钥 / 取消加密 -->
+    <el-dialog v-model="rekeyVisible" title="更换密钥 / 取消加密" width="620px">
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 12px">
+        <template #title>这一步会把上表「已纳入加密」的每一行都解开再写回</template>
+        平台会先做一次整库备份（备份失败就中止）。做完之后进程内存里的密钥立刻切换，页面马上可用；
+        但**部署配置里的 OPS_SECRET_KEY 不会被改动** —— 不同步改掉，下次重启就会拿旧设置去读新数据。
+      </el-alert>
+      <el-form :model="rekeyForm" label-width="110px">
+        <el-form-item label="改成">
+          <el-radio-group v-model="rekeyForm.mode">
+            <el-radio label="encrypt">换一把新密钥</el-radio>
+            <el-radio label="plain">不加密存储（解回明文）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="rekeyForm.mode === 'encrypt'" label="新密钥" required>
+          <el-input v-model="rekeyForm.newKey" type="password" show-password placeholder="生产上建议 32 字节以上随机串" />
+          <div class="hint">这把密钥不会落库，只用来加密凭据；请与数据库备份分开保管</div>
+        </el-form-item>
+        <el-form-item v-else label="要知道的">
+          <div class="hint">
+            解回明文之后，拿到库文件（或备份）的人就等于拿到全部凭据。内网自用、不想额外保管一把密钥时
+            这是个合理选择，平台不拦，只是如实标注成「不加密存储」。
+          </div>
+        </el-form-item>
+        <el-form-item label="输入 REKEY" required>
+          <el-input v-model="rekeyForm.confirm" placeholder="REKEY" style="max-width: 200px" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rekeyVisible = false">取消</el-button>
+        <el-button type="warning" :loading="rekeying" @click="doRekey">
+          {{ rekeyForm.mode === 'plain' ? '解回明文' : '换成新密钥' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
 
     <el-alert type="info" :closable="false" show-icon class="scope-note">
 

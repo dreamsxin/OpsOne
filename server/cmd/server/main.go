@@ -66,6 +66,8 @@ func main() {
 	}
 
 	h := handler.New(gormDB, cfg)
+	// 库里有密文但进程没密钥时提前喊一声，别等到有人点「连接主机」才发现
+	h.WarnSealedWithoutKey()
 	// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
 	h.ResetForwards()
 	// 同理：上一轮没来得及收尾的会话不该一直显示「进行中」
@@ -419,6 +421,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
 		auth.GET("/secrets/audit", h.GetSecretAudit)
 		auth.POST("/secrets/migrate", middleware.RequirePerm("credential:manage"), h.MigrateSecrets)
+		// 换密钥 / 取消加密：解开再写回，并把进程内存里的密钥一起切过去
+		auth.POST("/secrets/rekey", middleware.RequirePerm("credential:manage"), h.RekeySecrets)
 
 		auth.GET("/hosts/:id/files", middleware.RequirePerm("file:read"), h.ListFiles)
 		auth.GET("/hosts/:id/files/download", middleware.RequirePerm("file:read"), h.DownloadFile)
