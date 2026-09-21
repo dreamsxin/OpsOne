@@ -28,6 +28,7 @@ const (
 	CfgRetentionAgentRun     = "retention.agent_run_days"
 	CfgRetentionDBQuery      = "retention.db_query_days"
 	CfgRetentionExecGuard    = "retention.exec_guard_days"
+	CfgRetentionFirewallSnap = "retention.firewall_snapshot_days"
 )
 
 // retentionTarget 一类可清理的数据
@@ -260,6 +261,20 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.ExecGuardLog{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionFirewallSnap, label: "防火墙快照",
+		note:      "每次下发前后各存一份真机规则原文，是回滚的唯一依据；删了就没法把规则还原到那个时点",
+		irreverse: true,
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.FirewallSnapshot{}).Count(&total)
+			h.DB.Model(&model.FirewallSnapshot{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.FirewallSnapshot{}).RowsAffected
 		},
 	},
 }

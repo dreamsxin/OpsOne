@@ -3312,6 +3312,182 @@ export const deleteOnCallOverride = (id: number, overrideId: number) =>
 export const listAlertEscalations = (params: Record<string, any>) =>
   request<PageData<AlertEscalation>>({ url: '/monitor/oncall/escalations', params })
 
+// ---------- 防火墙策略 ----------
+//
+// 关键约定：GetFirewallState 是「现读真机 + 与平台登记对账」，每次都真连主机，
+// 所以它慢（20s 量级超时），不要放在轮询里。rules 列表是平台侧登记，读的是数据库。
+
+/** 平台登记的一条规则 */
+export interface FirewallRule {
+  id: number
+  hostId: number
+  groupId: number
+  direction: 'in' | 'out'
+  action: 'accept' | 'drop' | 'reject'
+  protocol: string
+  source: string
+  port: string
+  service: string
+  ruleKey: string
+  description: string
+  owner: string
+  lifecycle: 'permanent' | 'temporary'
+  expiresAt: string | null
+  origin: 'platform' | 'discovered'
+  state: 'pending' | 'synced' | 'drift' | 'extra'
+  enabled: boolean
+  hits: number
+  hasCounter: boolean
+  lastCheckAt: string | null
+  lastHitAt: string | null
+  createdBy: string
+  createdAt: string
+}
+
+/** 真机规则与平台登记合并后的一行 */
+export interface FirewallMerged {
+  ruleId: number
+  direction: 'in' | 'out'
+  action: 'accept' | 'drop' | 'reject'
+  protocol: string
+  source: string
+  port: string
+  service: string
+  ruleKey: string
+  description: string
+  owner: string
+  lifecycle: string
+  expiresAt: string | null
+  origin: string
+  enabled: boolean
+  state: 'pending' | 'synced' | 'drift' | 'extra'
+  onHost: boolean
+  hits: number
+  hasCounter: boolean
+  raw: string
+  index: number
+}
+
+export interface FirewallState {
+  hostId: number
+  hostName: string
+  backend: 'firewalld' | 'ufw' | 'iptables' | 'none'
+  active: boolean
+  persistent: boolean
+  note: string
+  defaultPolicy: Record<string, string>
+  readOk: boolean
+  readError: string
+  costMs: number
+  rules: FirewallMerged[]
+  summary: Record<string, number>
+}
+
+export interface FirewallPlan {
+  backend: string
+  persistent: boolean
+  adds: string[]
+  removes: string[]
+  commands: string[]
+  skipped: string[]
+}
+
+export interface FirewallPrecheck {
+  plan: FirewallPlan
+  hostName: string
+  verdict: 'pass' | 'warn' | 'blocked' | 'unknown' | 'nothing'
+  reason: string
+  hits?: { line: string; rule: string; action: string }[]
+  prodHosts?: string[]
+  warning?: string
+}
+
+export interface FirewallSnapshot {
+  id: number
+  hostId: number
+  backend: string
+  reason: string
+  ruleCount: number
+  raw?: string
+  rules?: string
+  execJobId: number
+  operator: string
+  createdAt: string
+}
+
+export interface FirewallCleanupItem {
+  ruleId: number
+  hostId: number
+  level: 'error' | 'warning' | 'info'
+  reason: string
+  detail: string
+}
+
+export interface FirewallGroup {
+  id: number
+  name: string
+  description: string
+  memberHostIds: string
+  enabled: boolean
+  createdBy: string
+  memberCount: number
+  ruleCount: number
+}
+
+export const getFirewallState = (hostId: number) =>
+  request<FirewallState>({ url: '/firewall/state', params: { hostId } })
+export const listFirewallRules = (params: Record<string, any>) =>
+  request<PageData<FirewallRule>>({ url: '/firewall/rules', params })
+export const createFirewallRule = (data: Record<string, any>) =>
+  request<FirewallRule>({ url: '/firewall/rules', method: 'POST', data })
+export const updateFirewallRule = (id: number, data: Record<string, any>) =>
+  request<FirewallRule>({ url: `/firewall/rules/${id}`, method: 'PUT', data })
+export const deleteFirewallRule = (id: number) =>
+  request<{ deleted: number; note: string }>({ url: `/firewall/rules/${id}`, method: 'DELETE' })
+export const adoptFirewallRule = (data: Record<string, any>) =>
+  request<FirewallRule>({ url: '/firewall/rules/adopt', method: 'POST', data })
+export const precheckFirewall = (data: Record<string, any>) =>
+  request<FirewallPrecheck>({ url: '/firewall/precheck', method: 'POST', data })
+export const applyFirewall = (data: Record<string, any>) =>
+  request<{
+    applied: boolean
+    reason?: string
+    verified?: boolean
+    note?: string
+    plan: FirewallPlan
+    remaining?: FirewallPlan
+    snapshotId?: number
+    job?: ExecJob
+  }>({ url: '/firewall/apply', method: 'POST', data })
+export const listFirewallSnapshots = (params: Record<string, any>) =>
+  request<PageData<FirewallSnapshot>>({ url: '/firewall/snapshots', params })
+export const getFirewallSnapshot = (id: number) =>
+  request<FirewallSnapshot>({ url: `/firewall/snapshots/${id}` })
+export const rollbackFirewall = (id: number, data: Record<string, any>) =>
+  request<{ applied: boolean; reason?: string; plan: FirewallPlan; job?: ExecJob }>({
+    url: `/firewall/snapshots/${id}/rollback`,
+    method: 'POST',
+    data
+  })
+export const getFirewallCleanup = (hostId?: number) =>
+  request<{ idleDays: number; suggestions: FirewallCleanupItem[]; note: string }>({
+    url: '/firewall/cleanup',
+    params: hostId ? { hostId } : {}
+  })
+export const listFirewallGroups = () => request<FirewallGroup[]>({ url: '/firewall/groups' })
+export const saveFirewallGroup = (id: number, data: Record<string, any>) =>
+  id
+    ? request<FirewallGroup>({ url: `/firewall/groups/${id}`, method: 'PUT', data })
+    : request<FirewallGroup>({ url: '/firewall/groups', method: 'POST', data })
+export const deleteFirewallGroup = (id: number) =>
+  request<{ deleted: number; note: string }>({ url: `/firewall/groups/${id}`, method: 'DELETE' })
+export const dispatchFirewallGroup = (id: number) =>
+  request<{ hosts: number; created: number; skipped: number; note: string }>({
+    url: `/firewall/groups/${id}/dispatch`,
+    method: 'POST'
+  })
+
+
 
 
 

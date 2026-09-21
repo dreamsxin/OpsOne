@@ -54,6 +54,7 @@ func Migrate(g *gorm.DB) error {
 		&model.ImApp{}, &model.ImAccount{}, &model.ImSyncRun{},
 		&model.LdapServer{}, &model.LdapAccount{},
 		&model.ApiToken{},
+		&model.FirewallRule{}, &model.FirewallGroup{}, &model.FirewallSnapshot{},
 	); err != nil {
 		return err
 	}
@@ -206,7 +207,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 501, ParentID: 500, Name: "SSLCertificate", Title: "证书管理", Path: "/security/ssl", Component: "/security/ssl/index", Icon: "Stamp", Sort: 1},
 		{ID: 506, ParentID: 501, Title: "维护证书", Type: "button", AuthCode: "cert:manage", Sort: 1},
 		{ID: 507, ParentID: 501, Title: "执行巡检", Type: "button", AuthCode: "cert:check", Sort: 2},
-		{ID: 502, ParentID: 500, Name: "Firewall", Title: "防火墙策略", Path: "/security/firewall", Component: todo, Icon: "Lock", Sort: 2},
+		{ID: 502, ParentID: 500, Name: "Firewall", Title: "防火墙策略", Path: "/security/firewall", Component: "/security/firewall/index", Icon: "Lock", Sort: 2},
+		{ID: 509, ParentID: 502, Title: "维护规则", Type: "button", AuthCode: "firewall:manage", Sort: 1},
+		{ID: 510, ParentID: 502, Title: "下发与回滚", Type: "button", AuthCode: "firewall:apply", Sort: 2},
 		{ID: 503, ParentID: 500, Name: "TwoFA", Title: "双因子口令", Path: "/security/twofa", Component: "/security/twofa/index", Icon: "Key", Sort: 3},
 		{ID: 508, ParentID: 503, Title: "重置他人绑定", Type: "button", AuthCode: "totp:reset", Sort: 1},
 		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: todo, Icon: "Reading", Sort: 4},
@@ -451,6 +454,9 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.agent_run_days", Value: "365", Type: "int", Label: "Agent 运行记录保留天数", Remark: "含模型给出的结论正文；删了结论就找不回来了。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.db_query_days", Value: "180", Type: "int", Label: "数据库查询流水保留天数", Remark: "谁在哪个库跑过什么只读语句、被拦了哪些；能查库等于能看业务数据，建议与审计日志同档。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.exec_guard_days", Value: "365", Type: "int", Label: "下发拦截流水保留天数", Remark: "被闸门拦下的下发尝试不会产生执行记录，这张表是唯一线索；建议比执行记录留得更久。0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.firewall_snapshot_days", Value: "180", Type: "int", Label: "防火墙快照保留天数", Remark: "每次下发前后各存一份真机规则原文，删了就没法回滚到那个时点；0 表示永久保留", Builtin: true},
+		{Group: "security", Key: "firewall.sudo", Value: "true", Type: "bool", Label: "防火墙命令自动 sudo", Remark: "防火墙命令全都要 root。主机账号不是 root 时自动加 sudo -n，需要为该账号配置免密 sudo；关掉则原样执行", Builtin: true},
+		{Group: "security", Key: "firewall.idle_days", Value: "30", Type: "int", Label: "防火墙规则闲置天数", Remark: "创建超过这么多天且从未命中的放行规则会进清理建议", Builtin: true},
 	}
 
 	for i := range configs {

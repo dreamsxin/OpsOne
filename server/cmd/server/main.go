@@ -606,6 +606,26 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/certificates/:id/check", middleware.RequirePerm("cert:check"), h.CheckCertificate)
 		auth.POST("/certificates/check-all", middleware.RequirePerm("cert:check"), h.CheckAllCertificates)
 
+		// 防火墙策略：读真机规则、平台登记、对账、预检、下发、回滚。
+		// 下发与回滚都走 RunOnHosts，命令规则拦截与生产二次确认自动继承。
+		auth.GET("/firewall/state", h.GetFirewallState)
+		auth.GET("/firewall/rules", h.ListFirewallRules)
+		auth.POST("/firewall/rules", middleware.RequirePerm("firewall:manage"), h.CreateFirewallRule)
+		auth.PUT("/firewall/rules/:id", middleware.RequirePerm("firewall:manage"), h.UpdateFirewallRule)
+		auth.DELETE("/firewall/rules/:id", middleware.RequirePerm("firewall:manage"), h.DeleteFirewallRule)
+		auth.POST("/firewall/rules/adopt", middleware.RequirePerm("firewall:manage"), h.AdoptFirewallRule)
+		auth.POST("/firewall/precheck", middleware.RequirePerm("firewall:manage"), h.PrecheckFirewall)
+		auth.POST("/firewall/apply", middleware.RequirePerm("firewall:apply"), h.ApplyFirewall)
+		auth.GET("/firewall/snapshots", h.ListFirewallSnapshots)
+		auth.GET("/firewall/snapshots/:id", h.GetFirewallSnapshot)
+		auth.POST("/firewall/snapshots/:id/rollback", middleware.RequirePerm("firewall:apply"), h.RollbackFirewall)
+		auth.GET("/firewall/cleanup", h.FirewallCleanup)
+		auth.GET("/firewall/groups", h.ListFirewallGroups)
+		auth.POST("/firewall/groups", middleware.RequirePerm("firewall:manage"), h.SaveFirewallGroup)
+		auth.PUT("/firewall/groups/:id", middleware.RequirePerm("firewall:manage"), h.SaveFirewallGroup)
+		auth.DELETE("/firewall/groups/:id", middleware.RequirePerm("firewall:manage"), h.DeleteFirewallGroup)
+		auth.POST("/firewall/groups/:id/dispatch", middleware.RequirePerm("firewall:manage"), h.DispatchFirewallGroup)
+
 		auth.GET("/me/totp", h.GetMyTOTP)
 		auth.POST("/me/totp/setup", h.SetupMyTOTP)
 		auth.POST("/me/totp/confirm", h.ConfirmMyTOTP)

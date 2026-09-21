@@ -543,6 +543,89 @@ type ApiToken struct {
 	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
+// FirewallRule 平台侧登记的一条防火墙规则，即「我们期望这台机器上有这条规则」。
+//
+// 它不是真机状态的镜像：真机状态每次都是现读（见 internal/fwx），
+// 两者对账出来的差异写在 State 上。这样「谁加的、为什么加、什么时候该收」
+// 这些真机里根本不存在的信息才有地方放。
+//
+// Origin=discovered 的规则是从真机读回来、平台之前不知道的存量规则，
+// 补齐责任人和到期时间之后才算被平台接管。
+type FirewallRule struct {
+	ID     uint `gorm:"primaryKey" json:"id"`
+	HostID uint `gorm:"index;not null" json:"hostId"`
+	// GroupID 属于哪个安全组；0 表示是这台机器的独立规则
+	GroupID uint `gorm:"index;default:0" json:"groupId"`
+
+	Direction string `gorm:"size:8;not null" json:"direction"` // in | out
+	Action    string `gorm:"size:8;not null" json:"action"`    // accept | drop | reject
+	Protocol  string `gorm:"size:8" json:"protocol"`           // tcp | udp | icmp | all
+	Source    string `gorm:"size:64" json:"source"`            // IP 或 CIDR，any 表示不限
+	Port      string `gorm:"size:32" json:"port"`              // 22 或 6000-6010
+	Service   string `gorm:"size:32" json:"service"`           // firewalld 服务名，与 Port 二选一
+	// RuleKey fwx.Rule.Key() 的结果，对账靠它，落库时算好
+	RuleKey string `gorm:"size:128;index" json:"ruleKey"`
+
+	Description string `gorm:"size:255" json:"description"`
+	// Owner 责任人。没有责任人的放行规则是运维债，清理建议会点出来
+	Owner string `gorm:"size:64" json:"owner"`
+	// Lifecycle permanent 长期有效 | temporary 临时，必须有到期时间
+	Lifecycle string     `gorm:"size:16;default:permanent" json:"lifecycle"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+
+	// Origin platform 平台创建 | discovered 从真机读回来的存量规则
+	Origin string `gorm:"size:16;default:platform" json:"origin"`
+	// State pending 待下发 | synced 已生效 | drift 真机上没有 | extra 真机有平台没登记
+	State   string `gorm:"size:16;default:pending" json:"state"`
+	Enabled bool   `gorm:"default:true" json:"enabled"`
+
+	// Hits / LastCheckAt 来自最近一次读取；HasCounter=false 说明这台机器读不到计数，
+	// 界面必须区分「命中 0 次」和「没有计数器」
+	Hits        int64      `gorm:"default:0" json:"hits"`
+	HasCounter  bool       `gorm:"default:false" json:"hasCounter"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastHitAt   *time.Time `json:"lastHitAt"`
+
+	CreatedBy string    `gorm:"size:64" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// FirewallGroup 安全组：一组规则 + 一批成员主机，下发时按组铺到成员上。
+// 用来表达「所有 Web 机都放行 80/443」这类事实，避免一台台重复登记。
+type FirewallGroup struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	Description string `gorm:"size:255" json:"description"`
+	// MemberHostIDs 主机 ID 列表，JSON 数组字符串（与 CronJob.HostIDs 同格式，都用 parseHostIDs 读）
+	MemberHostIDs string    `gorm:"size:512" json:"memberHostIds"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedBy     string    `gorm:"size:64" json:"createdBy"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// FirewallSnapshot 下发前后的真机规则原样快照，用来回滚和查「这条规则是哪次下发加的」。
+//
+// 存的是读命令的原始输出而不是解析结果：解析器以后会改，原始输出不会，
+// 回滚时要能拿到当时真机到底长什么样。
+type FirewallSnapshot struct {
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	HostID  uint   `gorm:"index;not null" json:"hostId"`
+	Backend string `gorm:"size:16" json:"backend"`
+	// Reason before-apply | after-apply | manual
+	Reason    string `gorm:"size:32" json:"reason"`
+	RuleCount int    `json:"ruleCount"`
+	// Raw 读命令的原始输出
+	Raw string `gorm:"type:text" json:"raw"`
+	// Rules 解析后的规则 JSON，回滚时按它生成命令
+	Rules     string    `gorm:"type:text" json:"rules"`
+	ExecJobID uint      `gorm:"index;default:0" json:"execJobId"`
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+
 // AlertSource 告警接入源，外部系统用 Token 推送告警
 type AlertSource struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
