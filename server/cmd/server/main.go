@@ -154,6 +154,12 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 	api.GET("/public/branding", h.Branding)
 	// 告警接入走 Token 鉴权，供外部监控系统直接 POST
 	api.POST("/webhooks/alerts/:token", h.ReceiveAlert)
+	// IM 扫码登录：这几个都必须免鉴权（用户此刻还没有令牌）。
+	// 安全性靠一次性 state / ticket 与「必须已绑定」这两道，见 docs/SECURITY.md 24
+	api.GET("/public/im-logins", h.ListImLoginProviders)
+	api.GET("/auth/im/authorize", h.ImAuthorize)
+	api.GET("/auth/im/callback", h.ImLoginCallback)
+	api.POST("/auth/im/exchange", h.ImLoginExchange)
 
 	auth := api.Group("")
 	auth.Use(middleware.Auth(cfg.JWTSecret, gormDB), middleware.RequireTOTP(gormDB), middleware.Audit(gormDB))

@@ -1452,6 +1452,15 @@ type ImApp struct {
 	// 只停用、不删除 —— 删了操作审计里的历史记录就对不上人了
 	DisableMissing bool `gorm:"default:true" json:"disableMissing"`
 
+	// LoginEnabled 是否允许用这个应用扫码登录平台
+	LoginEnabled bool `gorm:"default:false" json:"loginEnabled"`
+	// RedirectURI 在 IM 开放平台登记的回调地址，要指向平台的
+	// /api/v1/auth/im/callback（域名必须与 IM 后台配的一致，否则厂商直接拒绝授权）
+	RedirectURI string `gorm:"size:255" json:"redirectUri"`
+	// LoginRedirect 登录成功后把浏览器送回哪个前端地址。平台只在它后面追加一次性
+	// ticket，**不把 JWT 放进 URL** —— URL 会进浏览器历史与各级访问日志
+	LoginRedirect string `gorm:"size:255" json:"loginRedirect"`
+
 	// 以下由连通性检查与同步回填
 	AppStatus   string     `gorm:"size:16;default:unknown" json:"status"` // unknown | healthy | error
 	LastError   string     `gorm:"size:500" json:"lastError"`

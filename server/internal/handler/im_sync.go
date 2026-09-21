@@ -471,6 +471,9 @@ type imAppReq struct {
 	TargetCompanyID uint   `json:"targetCompanyId"`
 	DefaultRoleID   uint   `json:"defaultRoleId"`
 	DisableMissing  *bool  `json:"disableMissing"`
+	LoginEnabled    *bool  `json:"loginEnabled"`
+	RedirectURI     string `json:"redirectUri"`
+	LoginRedirect   string `json:"loginRedirect"`
 	Enabled         *bool  `json:"enabled"`
 	Remark          string `json:"remark"`
 }
@@ -483,6 +486,8 @@ func (r *imAppReq) normalize() error {
 	r.AgentID = strings.TrimSpace(r.AgentID)
 	r.RootDeptID = strings.TrimSpace(r.RootDeptID)
 	r.BaseURL = strings.TrimRight(strings.TrimSpace(r.BaseURL), "/")
+	r.RedirectURI = strings.TrimSpace(r.RedirectURI)
+	r.LoginRedirect = strings.TrimSpace(r.LoginRedirect)
 
 	if r.Name == "" {
 		return fmt.Errorf("名称不能为空")
@@ -499,6 +504,27 @@ func (r *imAppReq) normalize() error {
 	}
 	if r.TargetCompanyID == 0 {
 		return fmt.Errorf("请选择同步到哪个公司")
+	}
+	// 开了扫码登录就必须有回调地址，否则一点按钮就是个错
+	if r.LoginEnabled != nil && *r.LoginEnabled {
+		if r.RedirectURI == "" {
+			return fmt.Errorf("开启扫码登录要填回调地址（与 IM 后台登记的一致）")
+		}
+		if !strings.HasPrefix(r.RedirectURI, "http://") &&
+			!strings.HasPrefix(r.RedirectURI, "https://") {
+			return fmt.Errorf("回调地址必须以 http:// 或 https:// 开头")
+		}
+		if !strings.Contains(r.RedirectURI, "/auth/im/callback") {
+			return fmt.Errorf("回调地址要指向平台的 /api/v1/auth/im/callback")
+		}
+		if r.LoginRedirect != "" &&
+			!strings.HasPrefix(r.LoginRedirect, "http://") &&
+			!strings.HasPrefix(r.LoginRedirect, "https://") {
+			return fmt.Errorf("登录成功跳转地址必须以 http:// 或 https:// 开头")
+		}
+		if r.Provider == channelWecom && r.AgentID == "" {
+			return fmt.Errorf("企业微信扫码登录需要填 AgentID")
+		}
 	}
 	// 同步起点各家默认值不同，留空时按厂商习惯兜底
 	if r.RootDeptID == "" {
@@ -559,7 +585,11 @@ func (h *Handler) CreateImApp(c *gin.Context) {
 		AppSecret: req.AppSecret, AgentID: req.AgentID, BaseURL: req.BaseURL,
 		RootDeptID: req.RootDeptID, TargetCompanyID: req.TargetCompanyID,
 		DefaultRoleID: req.DefaultRoleID, AppStatus: "unknown", Remark: req.Remark,
+		RedirectURI: req.RedirectURI, LoginRedirect: req.LoginRedirect,
 		CreatedBy: middleware.CurrentUser(c).ID,
+	}
+	if req.LoginEnabled != nil {
+		app.LoginEnabled = *req.LoginEnabled
 	}
 	disableMissing := true
 	if req.DisableMissing != nil {
@@ -616,7 +646,11 @@ func (h *Handler) UpdateImApp(c *gin.Context) {
 		"name": req.Name, "provider": req.Provider, "corp_id": req.CorpID,
 		"agent_id": req.AgentID, "base_url": req.BaseURL, "root_dept_id": req.RootDeptID,
 		"target_company_id": req.TargetCompanyID, "default_role_id": req.DefaultRoleID,
+		"redirect_uri": req.RedirectURI, "login_redirect": req.LoginRedirect,
 		"remark": req.Remark,
+	}
+	if req.LoginEnabled != nil {
+		updates["login_enabled"] = *req.LoginEnabled
 	}
 	if req.AppSecret != "" {
 		updates["app_secret"] = req.AppSecret // 留空表示不修改

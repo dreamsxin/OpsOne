@@ -1,5 +1,12 @@
 import { defineStore } from 'pinia'
-import { getMyMenus, getProfile, login as loginApi, type MenuNode, type Profile } from '@/api'
+import {
+  getMyMenus,
+  getProfile,
+  imLoginExchange,
+  login as loginApi,
+  type MenuNode,
+  type Profile
+} from '@/api'
 import { TOKEN_KEY } from '@/api/request'
 
 export const useUserStore = defineStore('user', {
@@ -26,6 +33,13 @@ export const useUserStore = defineStore('user', {
       if (res.totpRequired) {
         return res
       }
+      this.token = res.token
+      localStorage.setItem(TOKEN_KEY, res.token)
+      return res
+    },
+    /** IM 扫码登录：用回调带回来的一次性 ticket 换令牌，之后的流程与口令登录一致 */
+    async loginByImTicket(ticket: string) {
+      const res = await imLoginExchange(ticket)
       this.token = res.token
       localStorage.setItem(TOKEN_KEY, res.token)
       return res

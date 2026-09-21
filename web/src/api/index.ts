@@ -2644,6 +2644,9 @@ export interface ImApp {
   targetCompanyId: number
   defaultRoleId: number
   disableMissing: boolean
+  loginEnabled: boolean
+  redirectUri: string
+  loginRedirect: string
   status: 'unknown' | 'healthy' | 'error'
   lastError: string
   lastCheckAt: string | null
@@ -2739,6 +2742,31 @@ export const listImAccounts = (params: Record<string, any>) =>
   request<PageData<ImAccount>>({ url: '/system/im/accounts', params })
 export const unbindImAccount = (id: number) =>
   request<{ note: string }>({ url: `/system/im/accounts/${id}`, method: 'DELETE' })
+
+// ---------- IM 扫码登录（免鉴权） ----------
+
+export interface ImLoginProvider {
+  id: number
+  name: string
+  provider: 'wecom' | 'dingtalk' | 'feishu'
+}
+
+/** 登录页可用的扫码方式，只返回 id/名称/类型，不带任何凭据 */
+export const listImLoginProviders = () =>
+  request<ImLoginProvider[]>({ url: '/public/im-logins' })
+export const getImAuthorizeUrl = (appId: number) =>
+  request<{ authorizeUrl: string; state: string; expiresIn: number }>({
+    url: '/auth/im/authorize',
+    params: { appId }
+  })
+/** 用回调带回的一次性 ticket 换 JWT（JWT 不走 URL） */
+export const imLoginExchange = (ticket: string) =>
+  request<{
+    token: string
+    expiresAt: number
+    user: { id: number; username: string; nickname: string }
+    loginBy: string
+  }>({ url: '/auth/im/exchange', method: 'POST', data: { ticket } })
 
 // ---------- 主机指标 ----------
 

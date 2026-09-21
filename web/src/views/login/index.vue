@@ -3,7 +3,8 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getBranding } from '@/api'
+import { getBranding, getImAuthorizeUrl, listImLoginProviders, type ImLoginProvider } from '@/api'
+import { takeImLoginResult } from '@/utils/imLogin'
 
 const store = useUserStore()
 const router = useRouter()
@@ -19,6 +20,40 @@ const needCode = ref(false)
 const platformName = ref('OpsOne 一体化运维平台')
 const loginNotice = ref('')
 
+// IM 扫码登录
+const imProviders = ref<ImLoginProvider[]>([])
+const imLoading = ref(false)
+const providerLabel: Record<string, string> = {
+  wecom: '企业微信',
+  dingtalk: '钉钉',
+  feishu: '飞书'
+}
+
+async function finishImLogin(ticket: string) {
+  imLoading.value = true
+  try {
+    await store.loginByImTicket(ticket)
+    ElMessage.success('已通过 IM 登录')
+    router.replace((route.query.redirect as string) || '/dashboard/overview')
+  } catch (err: any) {
+    ElMessage.error(err?.message || '扫码登录失败，请重试')
+  } finally {
+    imLoading.value = false
+  }
+}
+
+async function startImLogin(item: ImLoginProvider) {
+  imLoading.value = true
+  try {
+    const res = await getImAuthorizeUrl(item.id)
+    // 整页跳到厂商的扫码页，回调会把浏览器送回来
+    window.location.href = res.authorizeUrl
+  } catch (err: any) {
+    ElMessage.error(err?.message || '发起扫码登录失败')
+    imLoading.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     const branding = await getBranding()
@@ -27,6 +62,19 @@ onMounted(async () => {
     document.title = platformName.value
   } catch {
     // 拿不到品牌信息时用内置默认值，不阻塞登录
+  }
+  try {
+    imProviders.value = await listImLoginProviders()
+  } catch {
+    // 没配 IM 或接口不可用时就只显示口令登录
+  }
+
+  // ticket 已在 main.ts 里于路由守卫之前取下来存好，这里取出即用（取出即清除）
+  const { ticket, error: imError } = takeImLoginResult()
+  if (imError) {
+    ElMessage.error(imError)
+  } else if (ticket) {
+    finishImLogin(ticket)
   }
 })
 
@@ -107,6 +155,26 @@ async function submit() {
           登录
         </el-button>
       </el-form>
+
+      <template v-if="imProviders.length">
+        <el-divider>
+          <span style="color: var(--el-text-color-secondary); font-size: 12px">IM 扫码登录</span>
+        </el-divider>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <el-button
+            v-for="item in imProviders"
+            :key="item.id"
+            size="large"
+            :loading="imLoading"
+            @click="startImLogin(item)"
+          >
+            用{{ providerLabel[item.provider] || item.provider }}扫码登录（{{ item.name }}）
+          </el-button>
+        </div>
+        <div style="color: var(--el-text-color-secondary); font-size: 12px; margin-top: 8px">
+          只有已经完成组织同步、绑定过平台账号的成员才能扫码进入。
+        </div>
+      </template>
     </el-card>
   </div>
 </template>

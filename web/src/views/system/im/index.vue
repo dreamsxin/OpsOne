@@ -74,7 +74,10 @@ const form = reactive({
   defaultRoleId: 0,
   disableMissing: true,
   enabled: true,
-  remark: ''
+  remark: '',
+  loginEnabled: false,
+  redirectUri: '',
+  loginRedirect: ''
 })
 
 const corpIdLabel = computed(() => {
@@ -98,6 +101,9 @@ function openForm(row?: ImApp) {
   form.disableMissing = row?.disableMissing ?? true
   form.enabled = row?.enabled ?? true
   form.remark = row?.remark ?? ''
+  form.loginEnabled = row?.loginEnabled ?? false
+  form.redirectUri = row?.redirectUri ?? ''
+  form.loginRedirect = row?.loginRedirect ?? ''
 }
 
 async function submit() {
@@ -115,7 +121,10 @@ async function submit() {
       defaultRoleId: form.defaultRoleId,
       disableMissing: form.disableMissing,
       enabled: form.enabled,
-      remark: form.remark
+      remark: form.remark,
+      loginEnabled: form.loginEnabled,
+      redirectUri: form.redirectUri,
+      loginRedirect: form.loginRedirect
     }
     if (form.id) {
       await updateImApp(form.id, payload)
@@ -543,6 +552,28 @@ onMounted(async () => {
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>
+        <el-divider>
+          <span style="font-size: 12px; color: var(--el-text-color-secondary)">扫码登录（可选）</span>
+        </el-divider>
+        <el-form-item label="允许扫码登录">
+          <el-switch v-model="form.loginEnabled" />
+          <span class="hint inline">只有已绑定平台账号的成员能扫进来，不会自动建账号</span>
+        </el-form-item>
+        <template v-if="form.loginEnabled">
+          <el-form-item label="回调地址">
+            <el-input
+              v-model="form.redirectUri"
+              placeholder="https://ops.example.com/api/v1/auth/im/callback"
+            />
+            <div class="hint">必须与 IM 后台登记的完全一致，且指向平台的 /api/v1/auth/im/callback。</div>
+          </el-form-item>
+          <el-form-item label="登录后跳转">
+            <el-input v-model="form.loginRedirect" placeholder="https://ops.example.com/" />
+            <div class="hint">
+              平台只在这个地址后面追加一次性 ticket，<strong>不会把令牌放进 URL</strong>。
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="备注">
           <el-input v-model="form.remark" />
         </el-form-item>
