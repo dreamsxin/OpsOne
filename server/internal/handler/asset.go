@@ -179,7 +179,7 @@ func (h *Handler) CreateDBInstance(c *gin.Context) {
 	item := model.DBInstance{
 		Name: req.Name, Type: normalizeDBType(req.Type), Address: req.Address,
 		Port:     defaultDBPort(req.Port, normalizeDBType(req.Type)),
-		Username: req.Username, Secret: req.Secret, DBName: req.DBName,
+		Username: req.Username, Secret: h.sealSecret(req.Secret), DBName: req.DBName,
 		Version: req.Version, Env: defaultEnv(req.Env), DeptID: req.DeptID,
 		Tags: req.Tags, Remark: req.Remark, Status: "unknown",
 		CreatedBy: middleware.CurrentUser(c).ID,
@@ -238,7 +238,7 @@ func (h *Handler) UpdateDBInstance(c *gin.Context) {
 	item.Username, item.DBName, item.Version = req.Username, req.DBName, req.Version
 	item.Env, item.DeptID, item.Tags, item.Remark = defaultEnv(req.Env), req.DeptID, req.Tags, req.Remark
 	if req.Secret != "" {
-		item.Secret = req.Secret
+		item.Secret = h.sealSecret(req.Secret)
 	}
 	if err := h.DB.Save(&item).Error; err != nil {
 		response.Error(c, "更新失败")
@@ -280,8 +280,11 @@ func (h *Handler) CheckDBInstance(c *gin.Context) {
 		note = "已真实连接数据库并取到版本号（账号密码有效）"
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
 		defer cancel()
-		v, err := dbquery.Probe(ctx, dbTarget(item, ""))
-		if err == nil {
+		target, terr := h.dbTarget(item, "")
+		if terr != nil {
+			// 凭据解不开时不要报成「连不上库」，那会让人去查网络与授权
+			detail = terr.Error()
+		} else if v, err := dbquery.Probe(ctx, target); err == nil {
 			status = "online"
 			version = v
 		} else {

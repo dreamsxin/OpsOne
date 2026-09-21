@@ -277,7 +277,8 @@ func (h *Handler) ImportHosts(c *gin.Context) {
 					"proxy_host_id": proxyID,
 				}
 				if secret != "" {
-					updates["secret"] = secret
+					// CSV 里给的是明文，落库前照样要加密（这条 map 写入路径最容易被漏掉）
+					updates["secret"] = h.sealSecret(secret)
 				}
 				h.DB.Model(&model.Host{}).Where("id = ?", exist.ID).Updates(updates)
 			}
@@ -289,7 +290,7 @@ func (h *Handler) ImportHosts(c *gin.Context) {
 			} else {
 				host := model.Host{
 					Name: name, Address: address, Port: port, Username: username,
-					AuthType: authType, Secret: secret, Env: env, Tags: get("tags"),
+					AuthType: authType, Secret: h.sealSecret(secret), Env: env, Tags: get("tags"),
 					Remark: get("remark"), Status: "unknown", ProxyHostID: proxyID,
 					DeptID: user.DeptID, CreatedBy: user.ID,
 				}

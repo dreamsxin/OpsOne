@@ -416,6 +416,10 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/credentials/:id/hosts", middleware.RequirePerm("credential:manage"), h.BindCredentialHosts)
 		auth.POST("/credentials/:id/check", middleware.RequirePerm("credential:check"), h.CheckCredential)
 
+		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
+		auth.GET("/secrets/audit", h.GetSecretAudit)
+		auth.POST("/secrets/migrate", middleware.RequirePerm("credential:manage"), h.MigrateSecrets)
+
 		auth.GET("/hosts/:id/files", middleware.RequirePerm("file:read"), h.ListFiles)
 		auth.GET("/hosts/:id/files/download", middleware.RequirePerm("file:read"), h.DownloadFile)
 		auth.POST("/hosts/:id/files/upload", middleware.RequirePerm("file:write"), h.UploadFile)

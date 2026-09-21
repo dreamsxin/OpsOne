@@ -3750,6 +3750,38 @@ export const checkCredential = (id: number, hostId: number) =>
     credUsername: string
   }>({ url: `/credentials/${id}/check`, method: 'POST', data: { hostId } })
 
+/* ---------------- 密钥加密体检 ---------------- */
+
+export interface SecretAuditRow {
+  label: string
+  table: string
+  column: string
+  note: string
+  total: number
+  sealed: number
+  plain: number
+  /** false 表示这个字段还没纳入加密 */
+  covered: boolean
+  readErr: string
+}
+
+export const getSecretAudit = () =>
+  request<{
+    encryptEnabled: boolean
+    rows: SecretAuditRow[]
+    plainTotal: number
+    note: string
+    limit: string
+  }>({ url: '/secrets/audit' })
+
+export const migrateSecrets = () =>
+  request<{
+    results: { label: string; table: string; column: string; migrated: number; failed: number; firstError: string }[]
+    migrated: number
+    note: string
+  }>({ url: '/secrets/migrate', method: 'POST' })
+
+
 
 
 

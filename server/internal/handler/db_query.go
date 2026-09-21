@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -36,17 +37,41 @@ const (
 	dbQueryStmtMaxLen = 20000
 )
 
-// dbTarget 把资产记录转成连接参数
-func dbTarget(item *model.DBInstance, schema string) dbquery.Target {
+// dbTarget 把资产记录转成连接参数。
+//
+// 口令在库里是密文（配了 OPS_SECRET_KEY 时），这里解开 —— 解不开就把原因带出去，
+// 不拿乱码去拼 DSN（那会表现成「口令错误」，让人去库上查权限）。
+func (h *Handler) dbTarget(item *model.DBInstance, schema string) (dbquery.Target, error) {
 	name := item.DBName
 	if schema != "" && item.Type == dbquery.TypeMySQL {
 		// MySQL 的「库」就是 schema，直接连到目标库上，省掉每条语句写全限定名
 		name = schema
 	}
+	secret, err := h.openSecret("数据库实例凭据", item.Secret)
+	if err != nil {
+		return dbquery.Target{}, err
+	}
 	return dbquery.Target{
 		Type: item.Type, Address: item.Address, Port: item.Port,
-		Username: item.Username, Secret: item.Secret, DBName: name,
+		Username: item.Username, Secret: secret, DBName: name,
+	}, nil
+}
+
+// openDB 解开凭据并建连。
+// 把「凭据解不开」与「连不上库」分成两句不同的错误：前者是平台配置问题（密钥换了），
+// 后者是目标库的问题，混成一句会让人查错方向。
+func (h *Handler) openDB(c *gin.Context, ctx context.Context, item *model.DBInstance, schema string) (*sql.DB, bool) {
+	target, err := h.dbTarget(item, schema)
+	if err != nil {
+		response.Error(c, err.Error())
+		return nil, false
 	}
+	conn, err := dbquery.Open(ctx, target)
+	if err != nil {
+		response.Error(c, "连接数据库失败: "+err.Error())
+		return nil, false
+	}
+	return conn, true
 }
 
 // loadQueryableDB 取实例并确认类型支持查询
@@ -92,9 +117,8 @@ func (h *Handler) ListDBSchemas(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), dbMetaTimeout)
 	defer cancel()
 
-	conn, err := dbquery.Open(ctx, dbTarget(item, ""))
-	if err != nil {
-		response.Error(c, "连接数据库失败: "+err.Error())
+	conn, ok := h.openDB(c, ctx, item, "")
+	if !ok {
 		return
 	}
 	defer conn.Close()
@@ -121,9 +145,8 @@ func (h *Handler) ListDBTables(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), dbMetaTimeout)
 	defer cancel()
 
-	conn, err := dbquery.Open(ctx, dbTarget(item, schema))
-	if err != nil {
-		response.Error(c, "连接数据库失败: "+err.Error())
+	conn, ok := h.openDB(c, ctx, item, schema)
+	if !ok {
 		return
 	}
 	defer conn.Close()
@@ -151,9 +174,8 @@ func (h *Handler) DescribeDBTable(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), dbMetaTimeout)
 	defer cancel()
 
-	conn, err := dbquery.Open(ctx, dbTarget(item, schema))
-	if err != nil {
-		response.Error(c, "连接数据库失败: "+err.Error())
+	conn, ok := h.openDB(c, ctx, item, schema)
+	if !ok {
 		return
 	}
 	defer conn.Close()
@@ -213,7 +235,13 @@ func (h *Handler) RunDBQuery(c *gin.Context) {
 	stmt = dbquery.WithLimit(stmt, limit+1)
 
 	ctx := c.Request.Context()
-	conn, err := dbquery.Open(ctx, dbTarget(item, req.Schema))
+	target, err := h.dbTarget(item, req.Schema)
+	if err != nil {
+		h.recordQueryLog(c, item, req.Schema, stmt, "failed", err.Error(), 0, 0, false)
+		response.Error(c, err.Error())
+		return
+	}
+	conn, err := dbquery.Open(ctx, target)
 	if err != nil {
 		h.recordQueryLog(c, item, req.Schema, stmt, "failed", "连接失败: "+err.Error(), 0, 0, false)
 		response.Error(c, "连接数据库失败: "+err.Error())
@@ -251,7 +279,13 @@ func (h *Handler) ExportDBQuery(c *gin.Context) {
 	stmt = dbquery.WithLimit(stmt, dbExportMaxRows+1)
 
 	ctx := c.Request.Context()
-	conn, err := dbquery.Open(ctx, dbTarget(item, req.Schema))
+	target, err := h.dbTarget(item, req.Schema)
+	if err != nil {
+		h.recordQueryLog(c, item, req.Schema, stmt, "failed", err.Error(), 0, 0, true)
+		response.Error(c, err.Error())
+		return
+	}
+	conn, err := dbquery.Open(ctx, target)
 	if err != nil {
 		h.recordQueryLog(c, item, req.Schema, stmt, "failed", "连接失败: "+err.Error(), 0, 0, true)
 		response.Error(c, "连接数据库失败: "+err.Error())

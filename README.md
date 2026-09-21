@@ -252,7 +252,7 @@ Dockerfile / docker-compose.yml / Makefile
 
 部署前务必阅读 [docs/SECURITY.md](docs/SECURITY.md)。当前有几处明确的取舍需要知晓：
 
-- 主机自带的登录凭据**明文存储**在数据库（`hosts.secret`），数据库文件与备份等同于凭据本体；凭证库里的凭据在配了 `OPS_SECRET_KEY` 时是 AES-GCM 密文，但同时拿到库文件与该密钥的人依然能拿到全部凭据
+- 主机自带凭据（`hosts.secret`）、容器集群 kubeconfig、数据库实例凭据与凭证库都在配了 `OPS_SECRET_KEY` 时以 **AES-GCM 密文**落库；LDAP / IM / 云账号 / Jenkins / 模型上游 / 通知渠道 / 监控接入源的密钥**仍是明文**，「凭证库 → 密钥加密体检」会把这些列出来并标明。同时拿到数据库与 `OPS_SECRET_KEY` 的人依然能拿到全部凭据 —— 加密挡的是只拿到库文件或备份的那类场景
 - SSH 主机指纹默认不校验，存在中间人风险，可用 `OPS_SSH_STRICT_HOST_KEY=true` 开启
 - 命令拦截是 PTY 层面的启发式手段，能挡常见误操作，但拦不住 `vim :!cmd`、base64 解码执行等绕过，不能当作强制访问控制
 - 会话录像包含终端输出全文，可能含配置与令牌，需按敏感数据管理

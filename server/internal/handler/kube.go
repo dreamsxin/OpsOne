@@ -27,7 +27,13 @@ const kubeCallTimeout = 10 * time.Second
 // 每次现场解析 kubeconfig 而不缓存 client：kubeconfig 被改过之后立刻生效，
 // 也免得为了几个只读列表维护一套连接池与失效逻辑。
 func (h *Handler) kubeClient(cluster model.KubeCluster) (*k8s.Client, error) {
-	cfg, err := k8s.ParseKubeconfig(cluster.Kubeconfig, cluster.ContextName)
+	// 库里存的是密文（配了 OPS_SECRET_KEY 时）：解不开就直接报错，
+	// 不拿乱码去解析 kubeconfig（那会报一句莫名的 yaml 错）
+	raw, err := h.openSecret("集群 kubeconfig", cluster.Kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := k8s.ParseKubeconfig(raw, cluster.ContextName)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +119,7 @@ func (h *Handler) CreateKubeCluster(c *gin.Context) {
 	}
 
 	cluster := model.KubeCluster{
-		Name: req.Name, Kubeconfig: req.Kubeconfig,
+		Name: req.Name, Kubeconfig: h.sealSecret(req.Kubeconfig),
 		ContextName: cfg.ContextName, Server: cfg.Server,
 		Status: "unknown", Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
@@ -155,17 +161,26 @@ func (h *Handler) UpdateKubeCluster(c *gin.Context) {
 	if name := strings.TrimSpace(req.Name); name != "" {
 		updates["name"] = name
 	}
-	// kubeconfig 留空表示不改，避免编辑备注时把凭据清掉
-	kubeconfig := cluster.Kubeconfig
+	// kubeconfig 留空表示不改，避免编辑备注时把凭据清掉。
+	// 这里刻意把「库里那份」和「用户新传的」分成两条路：库里是密文，要先解开才能解析；
+	// 新传的是明文，解析完再加密。混成一个变量最容易把明文写回库里。
+	var plainKubeconfig string
 	if strings.TrimSpace(req.Kubeconfig) != "" {
-		kubeconfig = req.Kubeconfig
+		plainKubeconfig = req.Kubeconfig
+	} else {
+		stored, err := h.openSecret("集群 kubeconfig", cluster.Kubeconfig)
+		if err != nil {
+			response.Error(c, err.Error())
+			return
+		}
+		plainKubeconfig = stored
 	}
-	cfg, err := k8s.ParseKubeconfig(kubeconfig, req.ContextName)
+	cfg, err := k8s.ParseKubeconfig(plainKubeconfig, req.ContextName)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	updates["kubeconfig"] = kubeconfig
+	updates["kubeconfig"] = h.sealSecret(plainKubeconfig)
 	updates["context_name"] = cfg.ContextName
 	updates["server"] = cfg.Server
 	if req.Enabled != nil {

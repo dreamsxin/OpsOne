@@ -19,16 +19,20 @@ import {
   checkCredential,
   deleteCredential,
   getCredentialState,
+  getSecretAudit,
   listCredentialHosts,
   listCredentials,
   listHosts,
+  migrateSecrets,
   rotateCredential,
   saveCredential,
   type Credential,
   type CredentialHostRef,
   type CredentialState,
-  type Host
+  type Host,
+  type SecretAuditRow
 } from '@/api'
+
 import PageHeader from '@/components/PageHeader.vue'
 import Pagination from '@/components/Pagination.vue'
 
@@ -325,9 +329,57 @@ watch([keyword, typeFilter], () => {
   page.value = 1
 })
 
+/* ---------------- 密钥加密体检 ---------------- */
+
+/**
+ * 加密是在读写点显式调用的，所以「可能漏一条写路径」。
+ * 体检直接按前缀数每张表还有多少明文行 —— 漏了就能看见，而不是靠人盯代码。
+ */
+const auditRows = ref<SecretAuditRow[]>([])
+const auditNote = ref('')
+const auditLimit = ref('')
+const auditPlainTotal = ref(0)
+const auditLoading = ref(false)
+const migrating = ref(false)
+
+async function loadAudit() {
+  auditLoading.value = true
+  try {
+    const res = await getSecretAudit()
+    auditRows.value = res.rows || []
+    auditNote.value = res.note
+    auditLimit.value = res.limit
+    auditPlainTotal.value = res.plainTotal
+  } catch (err: any) {
+    ElMessage.error(err?.message || '读取加密体检失败')
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+async function doMigrate() {
+  await ElMessageBox.confirm(
+    '把已纳入加密的字段里的明文行重写成密文。值不会变，只是换一种存法；可以反复执行。\n\n' +
+      '注意：重写之后这些行就依赖 OPS_SECRET_KEY 了 —— 换掉那个环境变量会导致它们解不开。',
+    '加密存量数据',
+    { type: 'warning' }
+  )
+  migrating.value = true
+  try {
+    const res = await migrateSecrets()
+    ElMessage.success(res.note)
+    await Promise.all([loadAudit(), loadState(), load()])
+  } catch (err: any) {
+    ElMessage.error(err?.message || '迁移失败')
+  } finally {
+    migrating.value = false
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([load(), loadState(), loadHosts()])
+  await Promise.all([load(), loadState(), loadHosts(), loadAudit()])
 })
+
 </script>
 
 <template>
@@ -459,7 +511,66 @@ onMounted(async () => {
       />
     </el-card>
 
+    <el-card shadow="never" class="audit-card">
+      <div class="audit-head">
+        <div>
+          <div class="audit-title">密钥加密体检</div>
+          <div class="tip">
+            加密是在读写点显式加的，所以可能漏写路径；这张表直接数每列还有多少明文行，漏了就看得见
+          </div>
+        </div>
+        <div>
+          <el-button :loading="auditLoading" @click="loadAudit">重新体检</el-button>
+          <el-button
+            v-perm="'credential:manage'"
+            type="primary"
+            :disabled="auditPlainTotal === 0"
+            :loading="migrating"
+            @click="doMigrate"
+          >
+            加密存量数据{{ auditPlainTotal ? `（${auditPlainTotal} 行）` : '' }}
+          </el-button>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="auditNote"
+        :type="auditPlainTotal > 0 ? 'warning' : 'info'"
+        :closable="false"
+        show-icon
+        :title="auditNote"
+        style="margin-bottom: 8px"
+      />
+      <el-table v-loading="auditLoading" :data="auditRows" border stripe size="small">
+        <el-table-column prop="label" label="字段" min-width="170" />
+        <el-table-column label="库里位置" min-width="200">
+          <template #default="{ row }">
+            <span class="mono">{{ row.table }}.{{ row.column }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="纳入加密" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.covered ? 'success' : 'info'" effect="plain">
+              {{ row.covered ? '已纳入' : '尚未' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="非空行 / 密文 / 明文" min-width="170">
+          <template #default="{ row }">
+            <span v-if="row.readErr" class="muted">读不到（{{ row.readErr }}）</span>
+            <span v-else>
+              {{ row.total }} / {{ row.sealed }} /
+              <b :class="{ warn: row.covered && row.plain > 0 }">{{ row.plain }}</b>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="note" label="这份密钥的分量" min-width="230" show-overflow-tooltip />
+      </el-table>
+      <el-alert v-if="auditLimit" type="info" :closable="false" :title="auditLimit" style="margin-top: 8px" />
+    </el-card>
+
     <el-alert type="info" :closable="false" show-icon class="scope-note">
+
       <template #title>这一页不做的事</template>
       口令借用审批与临时授权、到期自动轮换、SSH CA 签发短期证书（真正做到「凭据不落地」的方案）都没做；
       数据库实例、云账号、Jenkins、模型上游那些密钥仍各自存在自己的模块里，没有统一到这里。
@@ -683,4 +794,20 @@ onMounted(async () => {
 .scope-note {
   margin-top: 12px;
 }
+.audit-card {
+  margin-top: 12px;
+}
+.audit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.audit-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
 </style>
+

@@ -117,7 +117,7 @@ func (h *Handler) CreateHost(c *gin.Context) {
 
 	host := model.Host{
 		Name: req.Name, Address: req.Address, Port: defaultPort(req.Port),
-		Username: req.Username, AuthType: defaultAuth(req.AuthType), Secret: req.Secret,
+		Username: req.Username, AuthType: defaultAuth(req.AuthType), Secret: h.sealSecret(req.Secret),
 		Env: defaultEnv(req.Env), Tags: req.Tags, Remark: req.Remark, Status: "unknown",
 		ProxyHostID: req.ProxyHostID, DeptID: req.DeptID,
 		CredentialID: req.CredentialID,
@@ -170,7 +170,7 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 	host.DeptID = req.DeptID
 
 	if req.Secret != "" {
-		host.Secret = req.Secret
+		host.Secret = h.sealSecret(req.Secret)
 	}
 
 	// 凭据来源切换。注意「secret 留空表示不变」这条老规则在这里会咬人：
@@ -264,12 +264,18 @@ func (h *Handler) buildTarget(host *model.Host, seen map[uint]bool) sshx.Target 
 		Port:          host.Port,
 		Username:      host.Username,
 		AuthType:      host.AuthType,
-		Secret:        host.Secret,
 		StrictHostKey: h.Cfg.SSHStrictHostKey,
 		KnownHostKey:  host.HostKey,
 		OnLearnHostKey: func(authorizedKey string) {
 			h.DB.Model(&model.Host{}).Where("id = ?", hostID).Update("host_key", authorizedKey)
 		},
+	}
+	// 库里存的是密文（配了 OPS_SECRET_KEY 时），解不开就直接抛原因，
+	// 不拿乱码去连主机 —— 那会表现成「认证失败」，把人引向错误的排查方向
+	if secret, err := h.openSecret("主机凭据", host.Secret); err != nil {
+		t.PrepareError = fmt.Sprintf("主机 %s 的凭据不可用: %v", host.Name, err)
+	} else {
+		t.Secret = secret
 	}
 
 	// 引用了凭证库：用户名与密钥一律以凭据为准。
