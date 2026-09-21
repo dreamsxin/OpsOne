@@ -48,7 +48,7 @@ func (h *Handler) CreateCloudAccount(c *gin.Context) {
 
 	item := model.CloudAccount{
 		Name: req.Name, Provider: normalizeProvider(req.Provider),
-		AccessKeyID: req.AccessKeyID, AccessKeySecret: req.AccessKeySecret,
+		AccessKeyID: req.AccessKeyID, AccessKeySecret: h.sealSecret(req.AccessKeySecret),
 		Region: req.Region, AccountID: req.AccountID, DeptID: req.DeptID,
 		Enabled: true, Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
@@ -93,7 +93,7 @@ func (h *Handler) UpdateCloudAccount(c *gin.Context) {
 	item.AccessKeyID, item.Region = req.AccessKeyID, req.Region
 	item.AccountID, item.DeptID, item.Remark = req.AccountID, req.DeptID, req.Remark
 	if req.AccessKeySecret != "" {
-		item.AccessKeySecret = req.AccessKeySecret
+		item.AccessKeySecret = h.sealSecret(req.AccessKeySecret)
 	}
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled

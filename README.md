@@ -184,7 +184,7 @@ Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 - `OPS_RECORD_DIR` — 会话录像目录，默认 `recordings`
 - `OPS_SHUTDOWN_TIMEOUT_SEC` — 优雅退出等待上限，默认 30；批量执行是同步请求，给小了会把作业截断
 - `OPS_SSH_STRICT_HOST_KEY` — 是否校验 SSH 主机指纹，默认 `false`；置 `true` 后首次连接记录指纹（TOFU），之后指纹变化即拒绝
-- `OPS_SECRET_KEY` — 凭证库的字段加密密钥（任意长度口令，内部派生 256 位）。留空表示凭据明文落库，页面上会标出来；**设过之后不要改**，改了现有密文全部解不开（平台会明确报错而不是当成口令错误）
+- `OPS_SECRET_KEY` — 凭据字段的加密密钥（任意长度口令，内部派生 256 位），覆盖凭证库、主机凭据、kubeconfig、数据库口令与各类对外系统密钥（含 SMTP 口令）。留空表示凭据明文落库，页面上会标出来；**设过之后不要改**，改了现有密文全部解不开（平台会明确报错而不是当成口令错误）
 - `OPS_BACKUP_SPEC` / `OPS_BACKUP_DIR` / `OPS_BACKUP_KEEP` — 自动备份的节奏、落盘目录与保留份数，默认 `0 3 * * *` / `backups` / `7`；节奏刻意早于数据留存清理
 - `OPS_CERT_CHECK_SPEC` — 证书巡检的 cron 表达式（标准五段），默认 `0 8 * * *`；置空则不做定时巡检，只能在界面上手动触发
 - `OPS_ALERT_RULE_SPEC` — 告警规则评估的 cron 表达式，默认 `*/5 * * * *`；置空则只能在界面上手动试跑
@@ -252,7 +252,7 @@ Dockerfile / docker-compose.yml / Makefile
 
 部署前务必阅读 [docs/SECURITY.md](docs/SECURITY.md)。当前有几处明确的取舍需要知晓：
 
-- 主机自带凭据（`hosts.secret`）、容器集群 kubeconfig、数据库实例凭据与凭证库都在配了 `OPS_SECRET_KEY` 时以 **AES-GCM 密文**落库；LDAP / IM / 云账号 / Jenkins / 模型上游 / 通知渠道 / 监控接入源的密钥**仍是明文**，「凭证库 → 密钥加密体检」会把这些列出来并标明。同时拿到数据库与 `OPS_SECRET_KEY` 的人依然能拿到全部凭据 —— 加密挡的是只拿到库文件或备份的那类场景
+- 配了 `OPS_SECRET_KEY` 时，**16 列凭据**都以 **AES-GCM 密文**落库：凭证库、主机自带凭据、容器集群 kubeconfig、数据库实例凭据，以及 LDAP 服务账号口令、IM AppSecret、云账号 AK/SK、Jenkins Token、模型上游 Key、通知渠道签名密钥与鉴权头、指标 / 日志 / 链路三个数据源的请求头、SMTP 口令。仍是明文的只剩 TOTP 密钥与告警推送令牌两项（原因写在 SECURITY 第 2 节），「凭证库 → 密钥加密体检」会逐列列出密文 / 明文行数。同时拿到数据库与 `OPS_SECRET_KEY` 的人依然能拿到全部凭据 —— 加密挡的是只拿到库文件或备份的那类场景
 - SSH 主机指纹默认不校验，存在中间人风险，可用 `OPS_SSH_STRICT_HOST_KEY=true` 开启
 - 命令拦截是 PTY 层面的启发式手段，能挡常见误操作，但拦不住 `vim :!cmd`、base64 解码执行等绕过，不能当作强制访问控制
 - 会话录像包含终端输出全文，可能含配置与令牌，需按敏感数据管理

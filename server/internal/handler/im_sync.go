@@ -108,13 +108,25 @@ func (s *syncContext) deptPath(ids []string) string {
 	return strings.Join(parts, " / ")
 }
 
+// imAppSecret 解出 IM 应用密钥。
+//
+// 这个密钥同时用在「拉通讯录」和「扫码登录」两条链路上，所以统一从这里取 ——
+// 解不开就直接报错，否则企业微信那边只会回一句 errcode=40001，看不出是平台侧的问题。
+func (h *Handler) imAppSecret(app *model.ImApp) (string, error) {
+	return h.openSecret("IM 应用密钥", app.AppSecret)
+}
+
 // fetchDirectory 拉通讯录。单独拆出来便于把「取数据」与「算改动」分开测。
 func (h *Handler) fetchDirectory(ctx context.Context, app *model.ImApp) (*syncContext, error) {
 	dir, err := imDirectoryFor(app.Provider, app.BaseURL)
 	if err != nil {
 		return nil, err
 	}
-	token, err := dir.token(ctx, app.CorpID, app.AppSecret)
+	secret, err := h.imAppSecret(app)
+	if err != nil {
+		return nil, err
+	}
+	token, err := dir.token(ctx, app.CorpID, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +594,7 @@ func (h *Handler) CreateImApp(c *gin.Context) {
 
 	app := model.ImApp{
 		Name: req.Name, Provider: req.Provider, CorpID: req.CorpID,
-		AppSecret: req.AppSecret, AgentID: req.AgentID, BaseURL: req.BaseURL,
+		AppSecret: h.sealSecret(req.AppSecret), AgentID: req.AgentID, BaseURL: req.BaseURL,
 		RootDeptID: req.RootDeptID, TargetCompanyID: req.TargetCompanyID,
 		DefaultRoleID: req.DefaultRoleID, AppStatus: "unknown", Remark: req.Remark,
 		RedirectURI: req.RedirectURI, LoginRedirect: req.LoginRedirect,
@@ -653,7 +665,7 @@ func (h *Handler) UpdateImApp(c *gin.Context) {
 		updates["login_enabled"] = *req.LoginEnabled
 	}
 	if req.AppSecret != "" {
-		updates["app_secret"] = req.AppSecret // 留空表示不修改
+		updates["app_secret"] = h.sealSecret(req.AppSecret) // 留空表示不修改
 	}
 	if req.DisableMissing != nil {
 		updates["disable_missing"] = *req.DisableMissing
@@ -716,7 +728,11 @@ func (h *Handler) checkImApp(app *model.ImApp) gin.H {
 	defer cancel()
 
 	started := time.Now()
-	token, err := dir.token(ctx, app.CorpID, app.AppSecret)
+	secret, err := h.imAppSecret(app)
+	if err != nil {
+		return fail(err.Error())
+	}
+	token, err := dir.token(ctx, app.CorpID, secret)
 	if err != nil {
 		return fail("取 access_token 失败: " + err.Error())
 	}

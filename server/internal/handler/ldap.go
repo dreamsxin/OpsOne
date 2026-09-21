@@ -52,20 +52,36 @@ func (h *Handler) toLdapView(item model.LdapServer) ldapServerView {
 	view := ldapServerView{
 		LdapServer:      item,
 		HasBindPassword: item.BindPassword != "",
-		URL:             h.ldapTarget(item).URL(),
+		URL:             ldapDisplayURL(item),
 	}
 	h.DB.Model(&model.LdapAccount{}).Where("server_id = ?", item.ID).Count(&view.BoundCount)
 	return view
 }
 
-// ldapTarget 把库里的配置翻译成 ldapx 的入参
-func (h *Handler) ldapTarget(item model.LdapServer) ldapx.Server {
-	return ldapx.Server{
+// ldapDisplayURL 只拼展示用的地址。
+// 列表页不需要口令，所以不走 ldapTarget —— 否则每次列表都要解密一遍，
+// 而且一台服务器解不开就会让整页列表报错。
+func ldapDisplayURL(item model.LdapServer) string {
+	return ldapx.Server{Host: item.Host, Port: item.Port, Encryption: item.Encryption}.URL()
+}
+
+// ldapTarget 把库里的配置翻译成 ldapx 的入参。
+//
+// 服务账号口令在库里是密文，这里解开；解不开就报错而不是拿空口令去 bind ——
+// 匿名 bind 在多数目录上会「成功但搜不到人」，那比直接失败更难查。
+func (h *Handler) ldapTarget(item model.LdapServer) (ldapx.Server, error) {
+	target := ldapx.Server{
 		Host: item.Host, Port: item.Port, Encryption: item.Encryption, SkipVerify: item.SkipVerify,
-		BindDN: item.BindDN, BindPassword: item.BindPassword, BaseDN: item.BaseDN,
+		BindDN: item.BindDN, BaseDN: item.BaseDN,
 		UserFilter: item.UserFilter, AttrNickname: item.AttrNickname, AttrEmail: item.AttrEmail,
 		TimeoutSec: item.TimeoutSec,
 	}
+	secret, err := h.openSecret("LDAP 服务账号口令", item.BindPassword)
+	if err != nil {
+		return ldapx.Server{}, err
+	}
+	target.BindPassword = secret
+	return target, nil
 }
 
 type ldapServerReq struct {
@@ -166,7 +182,7 @@ func (h *Handler) CreateLdapServer(c *gin.Context) {
 
 	item := model.LdapServer{
 		Name: req.Name, Host: req.Host, Port: req.Port, Encryption: req.Encryption,
-		SkipVerify: req.SkipVerify, BindDN: req.BindDN, BindPassword: req.BindPassword,
+		SkipVerify: req.SkipVerify, BindDN: req.BindDN, BindPassword: h.sealSecret(req.BindPassword),
 		BaseDN: req.BaseDN, UserFilter: req.UserFilter,
 		AttrNickname: req.AttrNickname, AttrEmail: req.AttrEmail, TimeoutSec: req.TimeoutSec,
 		CreatedBy: middleware.CurrentUser(c).ID,
@@ -219,7 +235,7 @@ func (h *Handler) UpdateLdapServer(c *gin.Context) {
 	}
 	// 口令留空表示不改，避免编辑其它字段时把口令清掉
 	if req.BindPassword != "" {
-		updates["bind_password"] = req.BindPassword
+		updates["bind_password"] = h.sealSecret(req.BindPassword)
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -266,7 +282,16 @@ func (h *Handler) CheckLdapServer(c *gin.Context) {
 	}
 
 	now := time.Now()
-	count, err := ldapx.Ping(h.ldapTarget(item))
+	target, err := h.ldapTarget(item)
+	if err != nil {
+		// 解不开就别去连：把「密钥不可用」和「目录拒绝了口令」分开说
+		h.DB.Model(&item).Updates(map[string]any{
+			"last_check_at": &now, "last_status": "failed", "last_message": truncate(err.Error(), 500),
+		})
+		response.BadRequest(c, err.Error())
+		return
+	}
+	count, err := ldapx.Ping(target)
 	status, message := "success", fmt.Sprintf("连接正常，%s 下匹配到 %d 个用户条目", item.BaseDN, count)
 	if err != nil {
 		status, message = "failed", err.Error()
@@ -279,7 +304,7 @@ func (h *Handler) CheckLdapServer(c *gin.Context) {
 		response.BadRequest(c, message)
 		return
 	}
-	response.OK(c, gin.H{"status": status, "userCount": count, "detail": message, "url": h.ldapTarget(item).URL()})
+	response.OK(c, gin.H{"status": status, "userCount": count, "detail": message, "url": target.URL()})
 }
 
 // SearchLdapUsers 在目录里找人，供管理员挑选后绑定到平台账号
@@ -289,7 +314,12 @@ func (h *Handler) SearchLdapUsers(c *gin.Context) {
 		response.NotFound(c, "服务器不存在")
 		return
 	}
-	entries, err := ldapx.Search(h.ldapTarget(item), c.Query("keyword"), ldapSearchMax)
+	target, err := h.ldapTarget(item)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	entries, err := ldapx.Search(target, c.Query("keyword"), ldapSearchMax)
 	if err != nil {
 		response.BadRequest(c, "搜索失败: "+err.Error())
 		return
@@ -383,7 +413,12 @@ func (h *Handler) BindLdapAccount(c *gin.Context) {
 		uid = user.Username
 	}
 	// 确认条目真的存在，并顺手取回显示名与邮箱
-	entry, err := ldapx.Lookup(h.ldapTarget(server), uid)
+	bindTarget, err := h.ldapTarget(server)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	entry, err := ldapx.Lookup(bindTarget, uid)
 	if err != nil {
 		response.BadRequest(c, "查询目录失败: "+err.Error())
 		return
@@ -452,10 +487,16 @@ func (h *Handler) TryLdapLogin(c *gin.Context) {
 		return
 	}
 
-	target := h.ldapTarget(server)
+	target, targetErr := h.ldapTarget(server)
 	steps := []gin.H{}
 	add := func(name string, ok bool, detail string) {
 		steps = append(steps, gin.H{"step": name, "ok": ok, "detail": detail})
+	}
+	if targetErr != nil {
+		add("读取服务账号口令", false, targetErr.Error())
+		response.OK(c, gin.H{"ok": false, "steps": steps,
+			"detail": "库里的服务账号口令解不开（多半是 OPS_SECRET_KEY 变了），先修好这个再试"})
+		return
 	}
 
 	entry, err := ldapx.Lookup(target, req.Username)
@@ -542,7 +583,13 @@ func (h *Handler) ldapAuthenticate(user *model.User, password string) ldapLoginR
 			return ldapLoginResult{Handled: true, Server: server,
 				Reason: "账号由目录服务器托管，但该服务器当前不允许登录，请联系管理员"}
 		}
-		if err := ldapx.Authenticate(h.ldapTarget(server), binding.LdapDN, password); err != nil {
+		target, err := h.ldapTarget(server)
+		if err != nil {
+			// 绑定了目录但口令解不开：同样不能回落到本地口令，那是要堵的后门
+			return ldapLoginResult{Handled: true, Server: server, Binding: &binding,
+				Reason: "目录服务器的服务账号口令不可用，请联系管理员"}
+		}
+		if err := ldapx.Authenticate(target, binding.LdapDN, password); err != nil {
 			return ldapLoginResult{Handled: true, Server: server, Binding: &binding,
 				Reason: "用户名或密码错误"}
 		}
@@ -554,7 +601,12 @@ func (h *Handler) ldapAuthenticate(user *model.User, password string) ldapLoginR
 	h.DB.Where("enabled = ? AND login_enabled = ? AND auto_bind = ?", true, true, true).
 		Order("id asc").Find(&servers)
 	for _, server := range servers {
-		entry, err := ldapx.Lookup(h.ldapTarget(server), user.Username)
+		target, err := h.ldapTarget(server)
+		if err != nil {
+			log.Printf("[ldap] 服务账号口令不可用(%s): %v", server.Name, err)
+			continue
+		}
+		entry, err := ldapx.Lookup(target, user.Username)
 		if err != nil {
 			log.Printf("[ldap] 自动绑定查询失败(%s): %v", server.Name, err)
 			continue
@@ -562,7 +614,7 @@ func (h *Handler) ldapAuthenticate(user *model.User, password string) ldapLoginR
 		if entry == nil {
 			continue
 		}
-		if err := ldapx.Authenticate(h.ldapTarget(server), entry.DN, password); err != nil {
+		if err := ldapx.Authenticate(target, entry.DN, password); err != nil {
 			// 目录里有这个人但口令不对：不要偷偷回落到本地口令，否则「域口令改了
 			// 之后旧的本地口令还能用」，等于两套口令并存
 			return ldapLoginResult{Handled: true, Server: server, Reason: "用户名或密码错误"}

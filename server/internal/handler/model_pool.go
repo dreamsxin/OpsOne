@@ -170,7 +170,7 @@ func (h *Handler) CreateModelUpstream(c *gin.Context) {
 
 	upstream := model.ModelUpstream{
 		Name: req.Name, Alias: req.Alias, Provider: req.Provider, BaseURL: req.BaseURL,
-		APIKey: req.APIKey, Model: req.Model, Weight: req.Weight, TimeoutSec: req.TimeoutSec,
+		APIKey: h.sealSecret(req.APIKey), Model: req.Model, Weight: req.Weight, TimeoutSec: req.TimeoutSec,
 		ModelStatus: "unknown", Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
@@ -226,7 +226,7 @@ func (h *Handler) UpdateModelUpstream(c *gin.Context) {
 		"timeout_sec": req.TimeoutSec, "remark": req.Remark,
 	}
 	if req.APIKey != "" {
-		updates["api_key"] = req.APIKey // 留空表示不修改
+		updates["api_key"] = h.sealSecret(req.APIKey) // 留空表示不修改
 	}
 	if req.InputPrice != nil {
 		updates["input_price"] = *req.InputPrice
@@ -266,6 +266,20 @@ func (h *Handler) CheckModelUpstream(c *gin.Context) {
 	response.OK(c, h.checkModelUpstream(&upstream, middleware.CurrentUser(c)))
 }
 
+// openUpstream 返回一份「Key 已解密」的上游副本。
+//
+// 刻意返回副本而不是原地改：原对象常常还要拿去写状态回库（last_error / model_status），
+// 原地把密文换成明文，一不小心就会被 Save 写回去，等于自己把加密撤了。
+func (h *Handler) openUpstream(upstream *model.ModelUpstream) (*model.ModelUpstream, error) {
+	copied := *upstream
+	key, err := h.openSecret("模型上游 Key", copied.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	copied.APIKey = key
+	return &copied, nil
+}
+
 // checkModelUpstream 探活：先拉模型列表，再打一次最小的真实调用。
 //
 // 为什么非要真调一次：/models 在不少实现上是不校验密钥的（llama.cpp server 就是，
@@ -279,6 +293,12 @@ func (h *Handler) checkModelUpstream(upstream *model.ModelUpstream, operator *mo
 			"model_status": "error", "last_error": truncate(detail, 480), "last_check_at": &now,
 		})
 		return gin.H{"status": "error", "detail": detail}
+	}
+
+	// Key 在库里是密文，这里解一次，后面两步都用解开的副本
+	upstream, err := h.openUpstream(upstream)
+	if err != nil {
+		return fail(err.Error())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), modelCheckTimeout)
@@ -623,7 +643,13 @@ func (h *Handler) dispatchChat(ctx context.Context, req *chatRequest, caller str
 		if i >= modelMaxAttempts {
 			break
 		}
-		result, callErr := callUpstream(ctx, &upstream, req)
+		// Key 解不开就当这一次调用失败，照常落一条失败流水并试下一个上游 ——
+		// 静默跳过会让「池子里明明有上游却谁都没被调用」变成一个查不出来的现象
+		var result *callResult
+		opened, callErr := h.openUpstream(&upstream)
+		if callErr == nil {
+			result, callErr = callUpstream(ctx, opened, req)
+		}
 
 		record := model.ModelCall{
 			UpstreamID: upstream.ID, UpstreamName: upstream.Name, Alias: upstream.Alias,

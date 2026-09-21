@@ -103,6 +103,23 @@ func routeMatches(route model.NotifyRoute, alert model.Alert, labels map[string]
 	return true
 }
 
+// openChannel 返回一份「签名密钥与鉴权头已解密」的渠道副本。
+//
+// 副本而不是原地改：这个结构体后面还会被当成展示对象用，原地换成明文
+// 就有可能顺着某条路径被写回库里。
+func (h *Handler) openChannel(channel model.NotifyChannel) (model.NotifyChannel, error) {
+	secret, err := h.openSecret("通知渠道签名密钥", channel.Secret)
+	if err != nil {
+		return channel, err
+	}
+	header, err := h.openSecret("通知渠道鉴权头", channel.HeaderValue)
+	if err != nil {
+		return channel, err
+	}
+	channel.Secret, channel.HeaderValue = secret, header
+	return channel, nil
+}
+
 // sendToChannel 实际外发并落投递流水
 func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, channel model.NotifyChannel) {
 	record := model.NotifyRecord{
@@ -118,6 +135,18 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 		_ = h.DB.Create(&record).Error
 		return
 	}
+
+	// 密钥解不开就落一条失败流水：这条链路是后台异步跑的，没人在等返回值，
+	// 只有投递记录能让人看见「告警没发出去，原因是密钥不可用」
+	opened, err := h.openChannel(channel)
+	if err != nil {
+		record.Status = "failed"
+		record.ErrorMsg = truncate(err.Error(), 240)
+		record.CostMs = time.Since(start).Milliseconds()
+		_ = h.DB.Create(&record).Error
+		return
+	}
+	channel = opened
 
 	if channel.Type == "email" {
 		if err := h.sendMail(channel, alertMailVars(alert)); err != nil {
@@ -279,9 +308,9 @@ func (h *Handler) CreateNotifyChannel(c *gin.Context) {
 
 	channel := model.NotifyChannel{
 		Name: req.Name, Type: channelType, URL: req.URL,
-		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
+		HeaderKey: req.HeaderKey, HeaderValue: h.sealSecret(req.HeaderValue),
 		Recipients: req.Recipients, TemplateCode: req.TemplateCode,
-		Secret: req.Secret, MentionList: req.MentionList,
+		Secret: h.sealSecret(req.Secret), MentionList: req.MentionList,
 		Remark: req.Remark, Enabled: true,
 	}
 	if req.MentionAll != nil {
@@ -320,10 +349,10 @@ func (h *Handler) UpdateNotifyChannel(c *gin.Context) {
 	channel.Recipients, channel.TemplateCode = req.Recipients, req.TemplateCode
 	channel.MentionList = req.MentionList
 	if req.HeaderValue != "" {
-		channel.HeaderValue = req.HeaderValue // 留空表示不修改
+		channel.HeaderValue = h.sealSecret(req.HeaderValue) // 留空表示不修改
 	}
 	if req.Secret != "" {
-		channel.Secret = req.Secret // 同上：签名密钥留空表示沿用旧值
+		channel.Secret = h.sealSecret(req.Secret) // 同上：签名密钥留空表示沿用旧值
 	}
 	if req.MentionAll != nil {
 		channel.MentionAll = *req.MentionAll
@@ -369,6 +398,12 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 		response.OK(c, gin.H{"ok": true, "detail": "站内渠道无需外发"})
 		return
 	}
+	opened, err := h.openChannel(channel)
+	if err != nil {
+		response.OK(c, gin.H{"ok": false, "detail": err.Error()})
+		return
+	}
+	channel = opened
 
 	if channel.Type == "email" {
 		start := time.Now()

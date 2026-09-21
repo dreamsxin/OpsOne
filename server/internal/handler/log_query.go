@@ -270,7 +270,7 @@ func (h *Handler) CreateLogSource(c *gin.Context) {
 
 	source := model.LogSource{
 		Name: req.Name, Type: "loki", BaseURL: req.BaseURL, Tenant: req.Tenant,
-		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
+		HeaderKey: req.HeaderKey, HeaderValue: h.sealSecret(req.HeaderValue),
 		TimeoutSec: req.TimeoutSec, Status: "unknown", Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
@@ -319,7 +319,7 @@ func (h *Handler) UpdateLogSource(c *gin.Context) {
 		"header_key": req.HeaderKey, "timeout_sec": req.TimeoutSec, "remark": req.Remark,
 	}
 	if req.HeaderValue != "" {
-		updates["header_value"] = req.HeaderValue // 留空表示不修改
+		updates["header_value"] = h.sealSecret(req.HeaderValue) // 留空表示不修改
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -374,7 +374,18 @@ func (h *Handler) checkLogSource(source *model.LogSource) gin.H {
 	query.Set("start", strconv.FormatInt(now.Add(-time.Hour).UnixNano(), 10))
 	query.Set("end", strconv.FormatInt(now.UnixNano(), 10))
 
-	if err := lokiRequest(*source, "/loki/api/v1/labels", query, &labels); err != nil {
+	// 新建后立刻探活传进来的是刚落库的密文，这里再解一次（对明文是原样返回）
+	opened, err := h.openSecret("日志源请求头", source.HeaderValue)
+	if err != nil {
+		h.DB.Model(&model.LogSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+			"status": "error", "last_error": truncate(err.Error(), 480), "last_check_at": &now,
+		})
+		return gin.H{"status": "error", "detail": err.Error()}
+	}
+	probe := *source
+	probe.HeaderValue = opened
+
+	if err := lokiRequest(probe, "/loki/api/v1/labels", query, &labels); err != nil {
 		h.DB.Model(&model.LogSource{}).Where("id = ?", source.ID).Updates(map[string]any{
 			"status": "error", "last_error": truncate(err.Error(), 480), "last_check_at": &now,
 		})
@@ -407,6 +418,13 @@ func (h *Handler) requireLogSource(c *gin.Context, raw string) (*model.LogSource
 		response.BadRequest(c, "数据源已停用")
 		return nil, false
 	}
+	// 鉴权头在库里是密文，统一在这个漏斗里解开
+	header, err := h.openSecret("日志源请求头", source.HeaderValue)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return nil, false
+	}
+	source.HeaderValue = header
 	return &source, true
 }
 

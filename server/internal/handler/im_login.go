@@ -205,6 +205,10 @@ func imAuthorizeURL(app *model.ImApp, state string) (string, error) {
 // 必须再调一次 getbyunionid 换过来（见下面的实现）。
 func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code string) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(app.BaseURL), "/")
+	secret, err := h.imAppSecret(app)
+	if err != nil {
+		return "", err
+	}
 	switch app.Provider {
 	case channelWecom:
 		if base == "" {
@@ -214,7 +218,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 		if err != nil {
 			return "", err
 		}
-		token, err := dir.token(ctx, app.CorpID, app.AppSecret)
+		token, err := dir.token(ctx, app.CorpID, secret)
 		if err != nil {
 			return "", err
 		}
@@ -246,7 +250,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 		if err != nil {
 			return "", err
 		}
-		appToken, err := dir.token(ctx, app.CorpID, app.AppSecret)
+		appToken, err := dir.token(ctx, app.CorpID, secret)
 		if err != nil {
 			return "", err
 		}
@@ -285,7 +289,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 			Message string `json:"message"`
 		}
 		body := map[string]any{
-			"clientId": app.CorpID, "clientSecret": app.AppSecret,
+			"clientId": app.CorpID, "clientSecret": secret,
 			"code": code, "grantType": "authorization_code",
 		}
 		if err := imPostJSON(ctx, loginBase+"/v1.0/oauth2/userAccessToken", "",
@@ -325,7 +329,11 @@ func (h *Handler) dingtalkUserIDByUnionID(ctx context.Context, app *model.ImApp,
 	if err != nil {
 		return "", err
 	}
-	token, err := dir.token(ctx, app.CorpID, app.AppSecret)
+	secret, err := h.imAppSecret(app)
+	if err != nil {
+		return "", err
+	}
+	token, err := dir.token(ctx, app.CorpID, secret)
 	if err != nil {
 		return "", err
 	}

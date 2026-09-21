@@ -36,7 +36,8 @@ type User struct {
 	Status       int        `gorm:"default:1" json:"status"` // 1 启用 0 禁用
 	LastLoginAt  *time.Time `json:"lastLoginAt"`
 
-	// 双因子口令（TOTP）。Secret 明文存库，与主机凭据同等对待，接口不返回。
+	// 双因子口令（TOTP）。Secret 仍是明文存库（唯一还没纳入加密的凭据类字段，
+	// 理由见 handler/secret_audit.go 的 pendingSecretFields），接口不返回。
 	// 绑定流程：setup 写入 Secret（Enabled=false）→ confirm 校验通过后置 Enabled。
 	TOTPSecret      string     `gorm:"size:64" json:"-"`
 	TOTPEnabled     bool       `gorm:"default:false" json:"totpEnabled"`
@@ -314,7 +315,7 @@ type Host struct {
 	Port     int    `gorm:"default:22" json:"port"`
 	Username string `gorm:"size:64;not null" json:"username"`
 	AuthType string `gorm:"size:16;default:password" json:"authType"` // password | key
-	// Secret 登录密码或私钥，当前为明文存储（已知风险，见 docs/SECURITY.md），不出接口。
+	// Secret 登录密码或私钥。配了 OPS_SECRET_KEY 时加密落库（enc:v1: 前缀），不出接口。
 	// CredentialID != 0 时这里应为空：凭据统一由凭证库保管，本地不再留一份
 	Secret string `gorm:"type:text" json:"-"`
 	// CredentialID 引用凭证库里的共享凭据，0 表示用上面这份自带凭据。
@@ -810,7 +811,7 @@ type NotifyChannel struct {
 	Type        string `gorm:"size:16;default:webhook" json:"type"` // webhook | email | silent
 	URL         string `gorm:"size:512" json:"url"`
 	HeaderKey   string `gorm:"size:64" json:"headerKey"` // 可选的鉴权头名
-	HeaderValue string `gorm:"size:255" json:"-"`        // 鉴权头值，不出接口
+	HeaderValue string `gorm:"size:255" json:"-"`        // 鉴权头值，加密落库，不出接口
 	// Recipients / TemplateCode 仅 email 类型使用
 	Recipients   string `gorm:"size:512" json:"recipients"`  // 逗号分隔收件人
 	TemplateCode string `gorm:"size:64" json:"templateCode"` // 邮件模板编码，空则用内置格式
@@ -949,7 +950,7 @@ type Tag struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// DBInstance 数据库资产。凭据与主机一致为明文存储（见 docs/SECURITY.md）。
+// DBInstance 数据库资产。凭据与主机一致：配了 OPS_SECRET_KEY 时加密落库（见 docs/SECURITY.md）。
 type DBInstance struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`
 	Name     string `gorm:"size:64;not null" json:"name"`
@@ -1004,7 +1005,7 @@ type CloudAccount struct {
 	Name            string    `gorm:"size:64;not null" json:"name"`
 	Provider        string    `gorm:"size:16;default:aliyun" json:"provider"` // aliyun | tencent | huawei | aws | other
 	AccessKeyID     string    `gorm:"size:128" json:"accessKeyId"`
-	AccessKeySecret string    `gorm:"type:text" json:"-"` // 明文存储，与主机凭据同等对待
+	AccessKeySecret string    `gorm:"type:text" json:"-"` // 配了密钥时加密落库，不出接口
 	Region          string    `gorm:"size:64" json:"region"`
 	AccountID       string    `gorm:"size:64" json:"accountId"` // 云上主账号 ID，便于对账
 	DeptID          uint      `gorm:"index;default:0" json:"deptId"`
@@ -1092,7 +1093,7 @@ type BuildServer struct {
 	Name      string    `gorm:"size:64;not null" json:"name"`
 	URL       string    `gorm:"size:255;not null" json:"url"` // 如 https://jenkins.example.com
 	Username  string    `gorm:"size:64" json:"username"`
-	Token     string    `gorm:"size:255" json:"-"` // 明文存储，不出接口
+	Token     string    `gorm:"size:255" json:"-"` // 配了密钥时加密落库，不出接口
 	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
@@ -1574,7 +1575,7 @@ type ModelUpstream struct {
 	Provider string `gorm:"size:32;default:openai" json:"provider"`
 	// BaseURL OpenAI 兼容根地址，含 /v1，例如 https://api.deepseek.com/v1
 	BaseURL string `gorm:"size:255;not null" json:"baseUrl"`
-	// APIKey 上游密钥，明文存库（与主机凭据同等对待，见 docs/SECURITY.md），不出接口
+	// APIKey 上游密钥，配了 OPS_SECRET_KEY 时加密落库（见 docs/SECURITY.md），不出接口
 	APIKey string `gorm:"size:255" json:"-"`
 	// Model 上游真实模型名，例如 deepseek-chat
 	Model string `gorm:"size:128;not null" json:"model"`
@@ -1707,7 +1708,7 @@ type ImApp struct {
 	Provider string `gorm:"size:16;index;not null" json:"provider"`
 	// CorpID 企业微信 corpid / 钉钉 corpId / 飞书 app_id
 	CorpID string `gorm:"size:128;not null" json:"corpId"`
-	// AppSecret 应用密钥，明文存库（与主机凭据同等对待），不出接口
+	// AppSecret 应用密钥，配了 OPS_SECRET_KEY 时加密落库，不出接口
 	AppSecret string `gorm:"size:255" json:"-"`
 	// AgentID 企业微信自建应用的 agentid，其他家留空
 	AgentID string `gorm:"size:64" json:"agentId"`
@@ -1799,7 +1800,7 @@ type ImSyncRun struct {
 // LdapServer 一台 LDAP / AD 目录服务器。
 //
 // 平台只读目录：用它校验口令、查人，不写回、也不做组织同步（那条路是「IM 组织同步」）。
-// BindPassword 明文存库，与主机凭据同等对待，接口一律不返回。
+// BindPassword 配了 OPS_SECRET_KEY 时加密落库，接口一律不返回。
 type LdapServer struct {
 	ID         uint   `gorm:"primaryKey" json:"id"`
 	Name       string `gorm:"size:64;not null" json:"name"`

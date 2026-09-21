@@ -206,7 +206,10 @@ func (h *Handler) sendMail(channel model.NotifyChannel, vars map[string]string) 
 	}
 	port := h.configInt(CfgSMTPPort, 465)
 	username := h.configString(CfgSMTPUser, "")
-	password := h.configString(CfgSMTPPass, "")
+	password, err := h.configSecret(CfgSMTPPass)
+	if err != nil {
+		return err
+	}
 	from := h.configString(CfgSMTPFrom, username)
 	if from == "" {
 		return fmt.Errorf("发件人地址未配置")

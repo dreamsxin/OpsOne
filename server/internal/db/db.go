@@ -442,7 +442,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.host", Value: "", Type: "string", Label: "SMTP 服务器", Remark: "留空表示不启用邮件通知", Builtin: true},
 		{Group: "smtp", Key: "smtp.port", Value: "465", Type: "int", Label: "SMTP 端口", Remark: "465 走 TLS，587/25 走明文或 STARTTLS", Builtin: true},
 		{Group: "smtp", Key: "smtp.username", Value: "", Type: "string", Label: "SMTP 账号", Builtin: true},
-		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "明文存储，与主机凭据同等对待", Builtin: true},
+		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "配了 OPS_SECRET_KEY 时加密落库；配置接口不回传取值，留空表示不修改", Builtin: true},
 		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},

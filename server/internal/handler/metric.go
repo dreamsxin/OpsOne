@@ -306,7 +306,7 @@ func (h *Handler) CreateMetricSource(c *gin.Context) {
 
 	source := model.MetricSource{
 		Name: req.Name, Type: "prometheus", BaseURL: req.BaseURL,
-		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
+		HeaderKey: req.HeaderKey, HeaderValue: h.sealSecret(req.HeaderValue),
 		TimeoutSec: req.TimeoutSec, Status: "unknown", Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
@@ -357,7 +357,7 @@ func (h *Handler) UpdateMetricSource(c *gin.Context) {
 		"timeout_sec": req.TimeoutSec, "remark": req.Remark,
 	}
 	if req.HeaderValue != "" {
-		updates["header_value"] = req.HeaderValue // 留空表示不修改
+		updates["header_value"] = h.sealSecret(req.HeaderValue) // 留空表示不修改
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -420,10 +420,20 @@ func (h *Handler) checkMetricSource(source *model.MetricSource) gin.H {
 		return gin.H{"status": "error", "detail": detail}
 	}
 
+	// 建完立刻探活这条路径传进来的是刚落库的密文，这里再解一次。
+	// cryptox.Open 对没有前缀的值原样返回，所以从 requireMetricSource 过来的
+	// （已经解过的）值再经过一次也不会坏。
+	opened, err := h.openSecret("指标源请求头", source.HeaderValue)
+	if err != nil {
+		return fail(err.Error())
+	}
+	probe := *source
+	probe.HeaderValue = opened
+
 	var build struct {
 		Version string `json:"version"`
 	}
-	if _, err := promRequest(*source, "/api/v1/status/buildinfo", nil, &build); err != nil {
+	if _, err := promRequest(probe, "/api/v1/status/buildinfo", nil, &build); err != nil {
 		return fail(err.Error())
 	}
 
@@ -435,7 +445,7 @@ func (h *Handler) checkMetricSource(source *model.MetricSource) gin.H {
 		} `json:"headStats"`
 		TotalSeries int64 `json:"totalSeries"`
 	}
-	_, statsErr := promRequest(*source, "/api/v1/status/tsdb", nil, &stats)
+	_, statsErr := promRequest(probe, "/api/v1/status/tsdb", nil, &stats)
 	seriesCount := stats.HeadStats.NumSeries
 	if seriesCount == 0 {
 		seriesCount = stats.TotalSeries
@@ -458,7 +468,10 @@ func (h *Handler) checkMetricSource(source *model.MetricSource) gin.H {
 	}
 }
 
-// requireMetricSource 取数据源，顺带挡掉停用的
+// requireMetricSource 取数据源，顺带挡掉停用的。
+//
+// 鉴权头在库里是密文，这里就地解开：所有查询都从这个漏斗拿 source，
+// 解密放在这里才不会漏掉某个查询接口。
 func (h *Handler) requireMetricSource(c *gin.Context, raw string) (*model.MetricSource, bool) {
 	id, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || id <= 0 {
@@ -474,6 +487,12 @@ func (h *Handler) requireMetricSource(c *gin.Context, raw string) (*model.Metric
 		response.BadRequest(c, "数据源已停用")
 		return nil, false
 	}
+	header, err := h.openSecret("指标源请求头", source.HeaderValue)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return nil, false
+	}
+	source.HeaderValue = header
 	return &source, true
 }
 

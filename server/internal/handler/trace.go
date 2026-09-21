@@ -435,7 +435,7 @@ func (h *Handler) CreateTraceSource(c *gin.Context) {
 
 	source := model.TraceSource{
 		Name: req.Name, Type: "jaeger", BaseURL: req.BaseURL,
-		HeaderKey: req.HeaderKey, HeaderValue: req.HeaderValue,
+		HeaderKey: req.HeaderKey, HeaderValue: h.sealSecret(req.HeaderValue),
 		TimeoutSec: req.TimeoutSec, Status: "unknown", Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
@@ -484,7 +484,7 @@ func (h *Handler) UpdateTraceSource(c *gin.Context) {
 		"timeout_sec": req.TimeoutSec, "remark": req.Remark,
 	}
 	if req.HeaderValue != "" {
-		updates["header_value"] = req.HeaderValue
+		updates["header_value"] = h.sealSecret(req.HeaderValue) // 留空表示不修改
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -532,7 +532,17 @@ func (h *Handler) CheckTraceSource(c *gin.Context) {
 func (h *Handler) checkTraceSource(source *model.TraceSource) gin.H {
 	now := time.Now()
 	services := []string{}
-	if err := jaegerRequest(*source, "/api/services", nil, &services); err != nil {
+	// 新建后立刻探活传进来的是刚落库的密文，这里再解一次（对明文是原样返回）
+	opened, err := h.openSecret("链路源请求头", source.HeaderValue)
+	if err != nil {
+		h.DB.Model(&model.TraceSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+			"status": "error", "last_error": truncate(err.Error(), 480), "last_check_at": &now,
+		})
+		return gin.H{"status": "error", "detail": err.Error()}
+	}
+	probe := *source
+	probe.HeaderValue = opened
+	if err := jaegerRequest(probe, "/api/services", nil, &services); err != nil {
 		h.DB.Model(&model.TraceSource{}).Where("id = ?", source.ID).Updates(map[string]any{
 			"status": "error", "last_error": truncate(err.Error(), 480), "last_check_at": &now,
 		})
@@ -565,6 +575,13 @@ func (h *Handler) requireTraceSource(c *gin.Context, raw string) (*model.TraceSo
 		response.BadRequest(c, "数据源已停用")
 		return nil, false
 	}
+	// 鉴权头在库里是密文，统一在这个漏斗里解开
+	header, err := h.openSecret("链路源请求头", source.HeaderValue)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return nil, false
+	}
+	source.HeaderValue = header
 	return &source, true
 }
 

@@ -373,6 +373,10 @@ export interface SysConfig {
   builtin: boolean
   updatedBy: string
   updatedAt: string
+  // secret 这一项的值是密钥（如 SMTP 口令）：接口不回传取值，
+  // hasValue 只说明配过没有，提交空串表示不修改
+  secret?: boolean
+  hasValue?: boolean
 }
 
 export interface Branding {

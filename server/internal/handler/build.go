@@ -54,7 +54,7 @@ func (h *Handler) CreateBuildServer(c *gin.Context) {
 
 	item := model.BuildServer{
 		Name: req.Name, URL: strings.TrimRight(req.URL, "/"), Username: req.Username,
-		Token: req.Token, DeptID: req.DeptID, Enabled: true, Remark: req.Remark,
+		Token: h.sealSecret(req.Token), DeptID: req.DeptID, Enabled: true, Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
 	if req.Enabled != nil {
@@ -100,7 +100,7 @@ func (h *Handler) UpdateBuildServer(c *gin.Context) {
 	item.Name, item.URL = req.Name, strings.TrimRight(req.URL, "/")
 	item.Username, item.DeptID, item.Remark = req.Username, req.DeptID, req.Remark
 	if req.Token != "" {
-		item.Token = req.Token
+		item.Token = h.sealSecret(req.Token)
 	}
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled
@@ -185,7 +185,13 @@ func (h *Handler) jenkinsRequest(server *model.BuildServer, method, path string,
 		return nil, nil, err
 	}
 	if server.Username != "" {
-		req.SetBasicAuth(server.Username, server.Token)
+		// Token 在库里是密文，这里解开再放进 Basic Auth。
+		// 解不开就别发请求：Jenkins 会回 401，读起来像是「Token 被吊销了」，方向就错了。
+		token, err := h.openSecret("Jenkins Token", server.Token)
+		if err != nil {
+			return nil, nil, err
+		}
+		req.SetBasicAuth(server.Username, token)
 	}
 
 	client := &http.Client{Timeout: jenkinsTimeout}

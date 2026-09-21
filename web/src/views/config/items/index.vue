@@ -42,6 +42,8 @@ function markDirty(row: SysConfig) {
 async function saveDirty() {
   const items = rows.value
     .filter((row) => dirty.value.has(row.key))
+    // 密钥项（如 SMTP 口令）接口不回传取值，留空只意味着「没改」
+    .filter((row) => !(row.secret && !row.value))
     .map((row) => ({ key: row.key, value: row.value }))
   if (!items.length) {
     ElMessage.info('没有需要保存的修改')
@@ -119,7 +121,9 @@ onMounted(load)
             <el-input
               v-else
               v-model="row.value"
-              :type="row.type === 'text' ? 'textarea' : 'text'"
+              :type="row.secret ? 'password' : row.type === 'text' ? 'textarea' : 'text'"
+              :show-password="row.secret"
+              :placeholder="row.secret ? (row.hasValue ? '已配置，留空表示不修改' : '未配置') : ''"
               :rows="2"
               size="small"
               @input="markDirty(row)"

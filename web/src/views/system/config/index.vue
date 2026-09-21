@@ -37,8 +37,9 @@ async function load() {
 async function save() {
   saving.value = true
   try {
+    // 密钥项留空表示不修改：这里就不提交，省得「保存 N 项」里混着没动的口令
     const items = configs.value
-      .filter((c) => c.builtin)
+      .filter((c) => c.builtin && !(c.secret && !c.value))
       .map((c) => ({ key: c.key, value: c.value }))
     const res = await updateConfigs(items)
     ElMessage.success(`已保存 ${res.updated} 项，平台名称与登录提示刷新后生效`)
@@ -79,10 +80,19 @@ onMounted(load)
               :rows="3"
               style="max-width: 560px"
             />
+            <el-input
+              v-else-if="item.secret"
+              v-model="item.value"
+              type="password"
+              show-password
+              style="max-width: 360px"
+              :placeholder="item.hasValue ? '已配置，留空表示不修改' : '未配置'"
+            />
             <el-input v-else v-model="item.value" style="max-width: 360px" />
             <div style="color: #9ca3af; font-size: 12px; margin-top: 2px">
               <code>{{ item.key }}</code>
               <span v-if="item.remark"> · {{ item.remark }}</span>
+              <span v-if="item.secret"> · 加密落库，接口不回传取值</span>
             </div>
           </el-form-item>
         </el-form>
