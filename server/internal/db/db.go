@@ -53,6 +53,7 @@ func Migrate(g *gorm.DB) error {
 		&model.ModelUpstream{}, &model.ModelCall{}, &model.AgentConfig{}, &model.AgentRun{},
 		&model.ImApp{}, &model.ImAccount{}, &model.ImSyncRun{},
 		&model.LdapServer{}, &model.LdapAccount{},
+		&model.ApiToken{},
 	); err != nil {
 		return err
 	}
@@ -254,6 +255,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 830, ParentID: 815, Title: "执行组织同步", Type: "button", AuthCode: "im:sync", Sort: 2},
 		{ID: 831, ParentID: 800, Name: "LdapAuth", Title: "LDAP 账号接入", Path: "/system/ldap", Component: "/system/ldap/index", Icon: "Connection", Sort: 14},
 		{ID: 832, ParentID: 831, Title: "维护目录与绑定", Type: "button", AuthCode: "ldap:manage", Sort: 1},
+		{ID: 833, ParentID: 800, Name: "ApiToken", Title: "API 令牌", Path: "/system/api-token", Component: "/system/api-token/index", Icon: "Key", Sort: 15},
+		{ID: 834, ParentID: 833, Title: "维护令牌", Type: "button", AuthCode: "token:manage", Sort: 1},
 		{ID: 816, ParentID: 800, Name: "SysConfig", Title: "系统配置", Path: "/system/config", Component: "/system/config/index", Icon: "Tools", Sort: 12},
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},

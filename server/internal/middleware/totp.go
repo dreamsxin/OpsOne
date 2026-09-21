@@ -27,6 +27,13 @@ func RequireTOTP(g *gorm.DB) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// API 令牌不是人，没有「输入验证码」这一步。强制双因子只约束人工登录；
+		// 令牌的约束在别处：只读默认、权限取交集、可撤销、来源 IP 白名单。
+		// 代价是「给自己发个令牌」可以绕开这条策略，所以发令牌本身要管好权限。
+		if CurrentAPIToken(c) != nil {
+			c.Next()
+			return
+		}
 
 		var cfg model.SysConfig
 		if err := g.Where("`key` = ?", totpModeKey).First(&cfg).Error; err != nil {

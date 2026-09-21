@@ -31,6 +31,11 @@ func Audit(g *gorm.DB) gin.HandlerFunc {
 			entry.UserID = user.ID
 			entry.Username = user.Username
 		}
+		// 令牌调用要能区分出来：归属人仍记在 UserID 上，另外标出是哪个令牌
+		if token := CurrentAPIToken(c); token != nil {
+			entry.TokenID = token.ID
+			entry.TokenName = token.Name
+		}
 		// 审计写入失败不应影响主流程
 		_ = g.Create(&entry).Error
 	}

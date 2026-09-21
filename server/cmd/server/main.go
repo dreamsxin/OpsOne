@@ -702,6 +702,16 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/system/ldap/accounts", middleware.RequirePerm("ldap:manage"), h.BindLdapAccount)
 		auth.DELETE("/system/ldap/accounts/:id", middleware.RequirePerm("ldap:manage"), h.UnbindLdapAccount)
 
+		// API 令牌（服务账号）
+		auth.GET("/me/whoami", h.WhoAmI)
+		auth.GET("/system/api-tokens", h.ListApiTokens)
+		auth.GET("/system/api-tokens/scopes", h.ListApiTokenScopes)
+		auth.POST("/system/api-tokens", middleware.RequirePerm("token:manage"), h.CreateApiToken)
+		auth.PUT("/system/api-tokens/:id", middleware.RequirePerm("token:manage"), h.UpdateApiToken)
+		auth.POST("/system/api-tokens/:id/rotate", middleware.RequirePerm("token:manage"), h.RotateApiToken)
+		auth.POST("/system/api-tokens/:id/revoke", middleware.RequirePerm("token:manage"), h.RevokeApiToken)
+		auth.DELETE("/system/api-tokens/:id", middleware.RequirePerm("token:manage"), h.DeleteApiToken)
+
 		auth.GET("/monitor/health", h.PlatformHealth)
 
 		auth.GET("/monitor/probes", h.ListProbes)

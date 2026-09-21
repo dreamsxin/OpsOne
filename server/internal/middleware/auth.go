@@ -41,16 +41,32 @@ func IssueToken(secret []byte, u *model.User, ttl time.Duration) (string, time.T
 }
 
 // Auth 校验令牌并把用户与权限集合写入上下文。
-// WebSocket 无法自定义请求头，因此额外允许 access_token 查询参数。
+//
+// 两种凭据：
+//   - 人工登录的 JWT；WebSocket 无法自定义请求头，因此额外允许 access_token 查询参数。
+//   - API 令牌（opst_ 前缀，见 apitoken.go）；**只认请求头**，不认查询参数。
 func Auth(secret []byte, g *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		raw := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
-		raw = strings.TrimSpace(raw)
+		header := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		if strings.HasPrefix(header, ApiTokenPrefix) {
+			if !authByAPIToken(c, g, header) {
+				return
+			}
+			c.Next()
+			return
+		}
+
+		raw := header
 		if raw == "" {
 			raw = c.Query("access_token")
 		}
 		if raw == "" {
 			response.Unauthorized(c, "缺少访问令牌")
+			return
+		}
+		// 别让 API 令牌从查询参数里混进来：那条路是给 WebSocket 的
+		if strings.HasPrefix(raw, ApiTokenPrefix) {
+			response.Unauthorized(c, "API 令牌只能放在 Authorization 请求头里")
 			return
 		}
 

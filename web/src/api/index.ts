@@ -3067,6 +3067,59 @@ export const bindLdapAccount = (data: {
 export const unbindLdapAccount = (id: number) =>
   request<{ detail: string }>({ url: `/system/ldap/accounts/${id}`, method: 'DELETE' })
 
+// ---------- API 令牌（服务账号） ----------
+
+export interface ApiToken {
+  id: number
+  name: string
+  /** 明文前 12 位，仅用于辨认，不足以还原令牌 */
+  prefix: string
+  ownerUserId: number
+  ownerName: string
+  scopes: string
+  scopeList: string[]
+  readOnly: boolean
+  allowIps: string
+  expiresAt: string | null
+  enabled: boolean
+  lastUsedAt: string | null
+  lastUsedIp: string
+  useCount: number
+  revokedAt: string | null
+  revokedBy: string
+  remark: string
+  createdBy: string
+  createdAt: string
+  status: 'active' | 'disabled' | 'revoked' | 'expired'
+}
+
+export interface ApiTokenCreated {
+  token: ApiToken
+  /** 明文只在创建与轮换时返回一次 */
+  plain: string
+  detail: string
+  usage?: string
+  effectiveScopes?: { granted: string[]; ignored: string[] }
+}
+
+export const listApiTokens = (params?: Record<string, any>) =>
+  request<PageData<ApiToken>>({ url: '/system/api-tokens', params })
+export const listApiTokenScopes = () =>
+  request<{ list: { code: string; title: string }[]; total: number }>({
+    url: '/system/api-tokens/scopes'
+  })
+export const createApiToken = (data: Record<string, any>) =>
+  request<ApiTokenCreated>({ url: '/system/api-tokens', method: 'POST', data })
+export const updateApiToken = (id: number, data: Record<string, any>) =>
+  request<ApiToken>({ url: `/system/api-tokens/${id}`, method: 'PUT', data })
+export const rotateApiToken = (id: number) =>
+  request<ApiTokenCreated>({ url: `/system/api-tokens/${id}/rotate`, method: 'POST' })
+export const revokeApiToken = (id: number) =>
+  request<ApiToken>({ url: `/system/api-tokens/${id}/revoke`, method: 'POST' })
+export const deleteApiToken = (id: number) =>
+  request({ url: `/system/api-tokens/${id}`, method: 'DELETE' })
+
+
 
 // ---------- IM 扫码登录（免鉴权） ----------
 

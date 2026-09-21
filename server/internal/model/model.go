@@ -489,9 +489,13 @@ type ExecResult struct {
 
 // AuditLog 操作审计
 type AuditLog struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index" json:"userId"`
-	Username  string    `gorm:"size:64" json:"username"`
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	UserID   uint   `gorm:"index" json:"userId"`
+	Username string `gorm:"size:64" json:"username"`
+	// TokenID / TokenName 非零表示这次调用来自 API 令牌而不是人工登录。
+	// 令牌归属人仍记在 UserID 上，所以「谁的令牌干了什么」两头都查得到。
+	TokenID   uint      `gorm:"index;default:0" json:"tokenId"`
+	TokenName string    `gorm:"size:64" json:"tokenName"`
 	Method    string    `gorm:"size:8" json:"method"`
 	Path      string    `gorm:"size:255" json:"path"`
 	Action    string    `gorm:"size:64" json:"action"`
@@ -499,6 +503,44 @@ type AuditLog struct {
 	IP        string    `gorm:"size:64" json:"ip"`
 	CostMs    int64     `json:"costMs"`
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// ApiToken 服务账号令牌：给 CI、脚本、外部系统调平台接口用。
+//
+// 设计取舍（详见 handler/api_token.go 与 docs/SECURITY.md 第 30 节）：
+//   - 明文只在创建/轮换时返回一次，库里只存 SHA-256 哈希，平台自己也查不回来；
+//   - 令牌权限 = 显式授予的权限码 ∩ 归属人当下的权限，归属人被降权/停用，令牌同时失效；
+//   - 默认只读（只放 GET/HEAD），要写必须显式关掉只读并授权限码；
+//   - 不能用于 Web 终端等 WebSocket 链路：那条路必须是人，会话审计才有意义。
+type ApiToken struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Prefix 令牌前 12 位（含 opst_ 前缀），用于界面展示与快速定位，不足以还原令牌
+	Prefix string `gorm:"size:24;index" json:"prefix"`
+	// TokenHash SHA-256(明文)，只用于比对
+	TokenHash string `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	// OwnerUserID 归属人。令牌以这个人的身份访问，数据范围也按他算。
+	OwnerUserID uint   `gorm:"index;not null" json:"ownerUserId"`
+	OwnerName   string `gorm:"size:64" json:"ownerName"`
+	// Scopes 显式授予的权限码，JSON 数组；只读令牌可以为空
+	Scopes string `gorm:"type:text" json:"scopes"`
+	// ReadOnly 只允许 GET/HEAD
+	ReadOnly bool `gorm:"default:true" json:"readOnly"`
+	// AllowIPs 允许的来源，逗号分隔，支持 CIDR；空表示不限制
+	AllowIPs  string     `gorm:"size:255" json:"allowIps"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	Enabled   bool       `gorm:"default:true" json:"enabled"`
+
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+	LastUsedIP string     `gorm:"size:64" json:"lastUsedIp"`
+	UseCount   int64      `gorm:"default:0" json:"useCount"`
+
+	RevokedAt *time.Time `json:"revokedAt"`
+	RevokedBy string     `gorm:"size:64" json:"revokedBy"`
+	Remark    string     `gorm:"size:255" json:"remark"`
+	CreatedBy string     `gorm:"size:64" json:"createdBy"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // AlertSource 告警接入源，外部系统用 Token 推送告警
