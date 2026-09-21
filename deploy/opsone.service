@@ -1,0 +1,40 @@
+[Unit]
+Description=OpsOne 一体化运维平台
+Documentation=https://github.com/dreamsxin/OpsOne
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opsone
+Group=opsone
+WorkingDirectory=/var/lib/opsone
+EnvironmentFile=/etc/opsone/opsone.env
+ExecStart=/usr/local/bin/ops serve
+Restart=always
+RestartSec=5s
+# systemd 默认「10 秒内启动 5 次就放弃」，那样一次崩溃循环会让平台永久下线。
+# 这里关掉这个限制：平台是值班要用的东西，宁可一直重试。
+# 注意：真起不来（比如 prod 安全检查不通过）会一直刷日志，看 journalctl 定位。
+StartLimitIntervalSec=0
+
+# 优雅退出：SIGTERM 进去，平台会先停调度、断开终端与隧道，再等在跑的请求收尾。
+# TimeoutStopSec 要大于 OPS_SHUTDOWN_TIMEOUT_SEC，否则 systemd 会在平台收尾完成前 SIGKILL。
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# 日志交给 journald（平台自身不写日志文件、不做轮转）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opsone
+
+# 基本加固：只允许写自己的数据目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/opsone
+# 隧道要监听 30000-30099，非特权端口，不需要 CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

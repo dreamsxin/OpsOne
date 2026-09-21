@@ -111,6 +111,17 @@ func (r *forwardRegistry) count() int {
 	return len(r.items)
 }
 
+// snapshot 拷一份当前隧道列表：停机时要边遍历边关，不能持着锁调 closeForward
+func (r *forwardRegistry) snapshot() []*forwardTunnel {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*forwardTunnel, 0, len(r.items))
+	for _, t := range r.items {
+		out = append(out, t)
+	}
+	return out
+}
+
 func (r *forwardRegistry) portUsed(port int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -1,0 +1,28 @@
+# 单机部署：一个容器 + 一个数据卷。平台自身不依赖 Redis / MQ / 外部数据库。
+#
+#   cp deploy/opsone.env.example .env   # 改掉里面的密钥与口令
+#   docker compose up -d
+#
+# 注意：OPS_ENV=prod 下密钥、口令、CORS 这些没改好，容器会直接启动失败并在日志里写明原因。
+
+services:
+  opsone:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: opsone:latest
+    container_name: opsone
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+      # 集群服务转发用的隧道端口区间，不用这个功能可以删掉
+      - "30000-30099:30000-30099"
+    volumes:
+      - opsone-data:/app/data
+    # 优雅退出要给足时间：批量执行是同步请求，正在跑的作业需要收尾
+    stop_grace_period: 40s
+
+volumes:
+  opsone-data:

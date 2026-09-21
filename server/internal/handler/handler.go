@@ -31,6 +31,9 @@ type Handler struct {
 	// forwards 运行中的集群转发隧道，只存在于进程内，重启即消失
 	forwards *forwardRegistry
 
+	// terminals 进程内活跃的 Web 终端连接，停机时要主动通知并关闭
+	terminals *terminalRegistry
+
 	// imLogins 扫码登录的 state 与一次性 ticket，同样只在进程内
 	imLogins *imLoginStore
 }
@@ -41,6 +44,7 @@ func New(g *gorm.DB, cfg *config.Config) *Handler {
 		fixedRunAt:   map[string]time.Time{},
 		fixedRunInfo: map[string]string{},
 		forwards:     newForwardRegistry(),
+		terminals:    newTerminalRegistry(),
 		imLogins:     newImLoginStore(),
 	}
 }

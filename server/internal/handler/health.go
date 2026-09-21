@@ -153,6 +153,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_ONCALL_SPEC 为空，未确认的告警不会自动叫人"))
 	items = append(items, h.fixedTaskItem("exposure", "暴露面扫描", h.Cfg.ExposureSpec,
 		"OPS_EXPOSURE_SPEC 为空，端口暴露面只能手动扫描"))
+	items = append(items, h.fixedTaskItem("backup", "自动备份", h.Cfg.BackupSpec,
+		"OPS_BACKUP_SPEC 为空，只能手动执行 `ops backup`；而数据留存清理是真删且不可逆"))
 	return items
 }
 

@@ -6,15 +6,22 @@ web/.vite/
 # 本地数据库与日志
 server/ops.db
 server/*.db
+*.db
+*.db-wal
+*.db-shm
 *.log
 
-# 会话录像
+# 会话录像与备份
 server/recordings/
-
+server/backups/
+backups/
 
 # 编译产物
 server/server
 server/server.exe
+server/ops
+server/ops.exe
+dist/
 
 # 编辑器
 .idea/

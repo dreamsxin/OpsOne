@@ -74,6 +74,13 @@ func (w *safeConn) Alert(text string) {
 	_, _ = w.Write([]byte("\r\n\x1b[31m[平台] " + text + "\x1b[0m\r\n"))
 }
 
+// Close 关掉底层连接：停机时用它打断 ReadMessage，让会话走正常收尾路径
+func (w *safeConn) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.conn.Close()
+}
+
 // Terminal 打开目标主机的交互式 SSH 会话，全程录像并审计命令
 func (h *Handler) Terminal(c *gin.Context) {
 	hostPtr, ok := h.loadHostForAction(c, model.ActionTerminal)
@@ -110,6 +117,9 @@ func (h *Handler) Terminal(c *gin.Context) {
 	defer conn.Close()
 
 	out := &safeConn{conn: conn}
+	// 登记到进程内的活跃终端表：停机时要靠它主动通知并断开
+	h.terminals.add(session.ID, out)
+	defer h.terminals.remove(session.ID)
 	if recorder, rErr := bastion.NewRecorder(h.Cfg.RecordDir, session.ID, cols, rows); rErr != nil {
 		log.Printf("[terminal] 录像初始化失败: %v", rErr)
 		session.ErrorMsg = "录像未启用: " + rErr.Error()

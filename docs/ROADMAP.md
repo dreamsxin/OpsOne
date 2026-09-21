@@ -130,7 +130,23 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 公告中心 `/message/announcement` — 已发布公告时间线
 
 
+## 部署与运维（不是菜单，但决定能不能真的上线）
+
+- [x] 交付物 — `Dockerfile`（多阶段，前端+后端一个镜像）、`docker-compose.yml`、`deploy/opsone.service`、`deploy/nginx.conf.example`、`deploy/opsone.env.example`、`Makefile`（`make dist` 打出二进制 + 前端 + 部署样例的 tar.gz）、[docs/DEPLOY.md](DEPLOY.md)
+- [x] 后端托管前端 — `OPS_WEB_DIR` 非空即直接发 `web/dist` 并做 SPA 回落（`/api/` 前缀不回落），单进程交付、不强制配 nginx
+- [x] 生产模式 fail-fast — `OPS_ENV=prod` 下默认 JWT 密钥 / 默认 admin 口令 / 空或含 localhost 的 CORS / 打开的 DEBUG / 过短密钥一律拒绝启动；非法的数字与布尔配置不再静默回退默认值
+- [x] 可信代理 — `OPS_TRUSTED_PROXIES`，默认谁都不信（忽略 `X-Forwarded-For`），避免审计里的来源 IP 被伪造
+- [x] 探活分离 — `/healthz` 只看进程，`/readyz` 真查数据库与用户表并用 503 表达未就绪
+- [x] 优雅退出 — SIGTERM → 停调度 → 通知并断开 Web 终端 → 关闭转发隧道并落库 → 等在跑的请求收尾 → 兜底收尾会话状态 → 关库；上限 `OPS_SHUTDOWN_TIMEOUT_SEC`
+- [x] 备份与恢复 — `ops backup` / `ops restore` 子命令（SQLite `VACUUM INTO` + 录像 tar.gz、保留份数、`--env-file`），默认每天 03:00 自动备份且早于数据留存清理；备份前校验「这确实是 OpsOne 的库」，避免产出空快照
+- [x] 版本号 — `ops version` 与 `/healthz`、`/readyz` 都带构建版本（`make` 用 `git describe` 注入）
+- [ ] 多实例 / 高可用 — 定时任务没有选主、隧道与扫码 ticket 是进程内状态、SQLite 是本地文件，**当前只支持单实例**
+- [ ] 平台自身指标 — 不产出 Prometheus 指标、没有 pprof；自监控只有「平台健康」页，需要外部监控轮询 `/readyz`
+- [ ] 结构化日志与轮转 — 只往 stdout/stderr 写，交给 journald / docker log driver
+- [ ] 版本化迁移 — 表结构仍是 `AutoMigrate`（只加不减、无版本号、无回滚），所以升级流程强制「先备份」
+
 ## 建议实现顺序
+
 
 1. **服务转发 `/kubernetes/forward`** —— port-forward，需要 SPDY / WebSocket 升级，是容器平台最后一块
 2. **指标 / 日志 / 链路查询** —— 需要先有 Prometheus、Loki、Jaeger 可连，否则只能做空壳

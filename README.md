@@ -137,18 +137,34 @@ pnpm dev
 
 Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 
+## 部署
+
+生产部署看 **[docs/DEPLOY.md](docs/DEPLOY.md)**（二进制 + systemd / Docker Compose、反代与 TLS、备份恢复、升级、排障）。要点：
+
+- `make dist` 打出一个包：静态二进制 + 前端产物 + 部署样例。配上 `OPS_WEB_DIR` 后**后端直接托管前端**，单进程就能交付，不需要另配 nginx
+- `OPS_ENV=prod` 下**不安全的配置会让进程拒绝启动**（默认 JWT 密钥、默认 admin 口令、空/含 localhost 的 CORS 白名单、开着的 DEBUG），而不是打一行 warn 就放行
+- 探活分两个：`/healthz` 只看进程，`/readyz` 真查数据库（负载均衡与容器探针该用后者）
+- SIGTERM 会走**优雅退出**：停调度 → 通知并断开 Web 终端 → 关闭转发隧道并落库 → 等在跑的请求收尾 → 收尾会话状态
+- 自带**备份与恢复**：`ops backup` / `ops restore`（SQLite `VACUUM INTO` 快照 + 录像 tar.gz），默认每天 03:00 自动备份并早于数据留存清理
+- 交付物：`Dockerfile`、`docker-compose.yml`、`deploy/opsone.service`、`deploy/nginx.conf.example`、`deploy/opsone.env.example`、`Makefile`
+
 ## 配置项
 
 全部通过环境变量注入：
 
+- `OPS_ENV` — 运行模式 `dev`（默认）或 `prod`；prod 下安全底线不达标直接拒绝启动，见 docs/DEPLOY.md 第 5 节
 - `OPS_ADDR` — 监听地址，默认 `:8080`
-- `OPS_DSN` — SQLite 文件路径，默认 `ops.db`；换 MySQL/PostgreSQL 只需改 `server/internal/db/db.go` 里的 driver
-- `OPS_JWT_SECRET` — 令牌签名密钥，**生产必填**，未设置时使用开发默认值并打印告警
+- `OPS_DSN` — SQLite 文件路径，默认 `ops.db`；换 MySQL/PostgreSQL 需要改 `server/internal/db/db.go` 的 driver 并处理方言差异（**不是改个配置就行**）
+- `OPS_WEB_DIR` — 前端构建产物目录，配了就由后端托管前端并做 SPA 回落；留空则只有 API
+- `OPS_JWT_SECRET` — 令牌签名密钥，**生产必填**（≥32 字节）；dev 下未设置会用开发默认值并告警
 - `OPS_TOKEN_TTL_HOUR` — 令牌有效期，默认 12
 - `OPS_ALLOW_ORIGINS` — CORS 与 WebSocket Origin 白名单，逗号分隔，默认 `http://localhost:5173`
+- `OPS_TRUSTED_PROXIES` — 可信反代的 IP/CIDR，逗号分隔。**默认为空即谁都不信**，`X-Forwarded-For` 一律忽略（否则审计里的来源 IP 可被伪造）；部署在 nginx 后要填 nginx 地址
 - `OPS_ADMIN_PASSWORD` — 内置管理员初始口令，默认 `Admin@123456`
 - `OPS_RECORD_DIR` — 会话录像目录，默认 `recordings`
+- `OPS_SHUTDOWN_TIMEOUT_SEC` — 优雅退出等待上限，默认 30；批量执行是同步请求，给小了会把作业截断
 - `OPS_SSH_STRICT_HOST_KEY` — 是否校验 SSH 主机指纹，默认 `false`；置 `true` 后首次连接记录指纹（TOFU），之后指纹变化即拒绝
+- `OPS_BACKUP_SPEC` / `OPS_BACKUP_DIR` / `OPS_BACKUP_KEEP` — 自动备份的节奏、落盘目录与保留份数，默认 `0 3 * * *` / `backups` / `7`；节奏刻意早于数据留存清理
 - `OPS_CERT_CHECK_SPEC` — 证书巡检的 cron 表达式（标准五段），默认 `0 8 * * *`；置空则不做定时巡检，只能在界面上手动触发
 - `OPS_ALERT_RULE_SPEC` — 告警规则评估的 cron 表达式，默认 `*/5 * * * *`；置空则只能在界面上手动试跑
 - `OPS_PROBE_SPEC` — 拨测执行的 cron 表达式，默认 `*/5 * * * *`；置空则只能手动拨测。所有拨测共用这一个节奏
@@ -168,7 +184,9 @@ Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 - `OPS_FORWARD_CONN_MAX` — 单条隧道的并发连接上限，默认 `32`；每条连接都要向 API Server 单开一条 WebSocket
 
 
-- `OPS_DEBUG` — `true` 时输出 SQL 日志并启用 gin 调试模式，默认 `true`
+- `OPS_DEBUG` — `true` 时输出 SQL 日志并启用 gin 调试模式；`dev` 默认开、`prod` 默认关（prod 下显式打开会被拒绝启动）
+
+数字与布尔类型的变量写错（例如 `OPS_TOKEN_TTL_HOUR=twelve`）会直接报错退出，不会静默回退默认值。
 
 运行期参数（平台名称、登录提示、批量执行并发、上传上限、录像保留天数、双因子策略）在「系统管理 → 系统配置」里改，改完即生效，不需要重启。
 
@@ -193,8 +211,14 @@ web/
   src/stores/          用户与权限状态
   src/views/           业务页面
 docs/
+  DEPLOY.md            部署与运维手册（交付、备份恢复、升级、排障）
   ROADMAP.md           模块清单与实现状态
   SECURITY.md          安全设计与已知风险
+deploy/
+  opsone.service       systemd unit
+  opsone.env.example   配置样例
+  nginx.conf.example   反代样例（WebSocket 与超时都写清楚了）
+Dockerfile / docker-compose.yml / Makefile
 ```
 
 ## 菜单与权限

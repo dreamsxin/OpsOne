@@ -1,24 +1,58 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"ops-platform/server/internal/backup"
 	"ops-platform/server/internal/config"
 	"ops-platform/server/internal/db"
 	"ops-platform/server/internal/handler"
 	"ops-platform/server/internal/middleware"
+	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
 	"ops-platform/server/internal/scheduler"
 )
 
+// version 构建版本，由 -ldflags "-X main.version=..." 注入；没注入就是 dev
+var version = "dev"
+
 func main() {
-	cfg := config.Load()
+	// 子命令：备份与恢复要能不起服务单独跑（定时任务、故障恢复都需要）
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		switch os.Args[1] {
+		case "version":
+			fmt.Printf("opsone %s\n", version)
+			return
+		case "backup":
+			runBackupCmd(os.Args[2:])
+			return
+		case "restore":
+			runRestoreCmd(os.Args[2:])
+			return
+		case "serve":
+			// 显式写 serve 与不带子命令等价
+		default:
+			log.Fatalf("未知子命令 %q，可用: serve / backup / restore / version", os.Args[1])
+		}
+	}
+
+	cfg := mustLoadConfig()
+	log.Printf("opsone %s 启动中，运行模式 %s", version, cfg.Env)
 
 	gormDB, err := db.Open(cfg.DSN, cfg.Debug)
 	if err != nil {
@@ -34,6 +68,8 @@ func main() {
 	h := handler.New(gormDB, cfg)
 	// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
 	h.ResetForwards()
+	// 同理：上一轮没来得及收尾的会话不该一直显示「进行中」
+	h.FinishShutdown("平台重启，会话已随进程结束")
 
 	sched := scheduler.New(gormDB, h.ExecuteCronJob)
 	h.Sched = sched
@@ -110,10 +146,17 @@ func main() {
 	} else {
 		log.Println("[exposure] 定时扫描未启用（OPS_EXPOSURE_SPEC 为空），只能手动扫描")
 	}
+	if cfg.BackupSpec != "" {
+		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
+			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
+		}
+		log.Printf("[backup] 自动备份已启用: %s → %s（保留 %d 份）", cfg.BackupSpec, cfg.BackupDir, cfg.BackupKeep)
+	} else {
+		log.Println("[backup] 自动备份未启用（OPS_BACKUP_SPEC 为空），只能手动执行 `ops backup`")
+	}
 	if err := sched.Start(); err != nil {
 		log.Fatalf("定时任务加载失败: %v", err)
 	}
-	defer sched.Stop()
 
 	// 启动时按配置清理过期录像
 	h.CleanupRecordings()
@@ -121,15 +164,183 @@ func main() {
 	engine := buildRouter(h, cfg, gormDB)
 
 	srv := &http.Server{
-
 		Addr:              cfg.Addr,
 		Handler:           engine,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("运维平台后端已启动: %s", cfg.Addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("服务启动失败: %v", err)
+
+	// 监听退出信号：SIGTERM 是 systemd / docker stop 的默认信号
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("运维平台后端已启动: %s", cfg.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("服务启动失败: %v", err)
+		}
+	}()
+
+	sig := <-stop
+	log.Printf("收到信号 %v，开始优雅退出（最长等 %d 秒）", sig, cfg.ShutdownTimeoutSec)
+
+	// 顺序是有讲究的：先停调度（别在收尾过程中又起新任务），
+	// 再断开 WebSocket 这类劫持连接（Shutdown 不管它们，不断开就只能等超时），
+	// 最后等在跑的普通请求（批量执行是同步请求）结束。
+	sched.Stop()
+	h.Shutdown("平台正在停机，连接已断开")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutSec)*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("[shutdown] HTTP 服务未能在超时内停完: %v", err)
 	}
+	h.FinishShutdown("平台停机，会话已结束")
+	if sqlDB, err := gormDB.DB(); err == nil {
+		if err := sqlDB.Close(); err != nil {
+			log.Printf("[shutdown] 关闭数据库失败: %v", err)
+		}
+	}
+	log.Println("已退出")
+}
+
+// mustLoadConfig 读配置并做安全校验，prod 模式下不合格就别启动
+func mustLoadConfig() *config.Config {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("%v", err)
+	}
+	return cfg
+}
+
+// runBackupCmd `ops backup [--env-file 配置] [--out DIR] [--keep N]`
+func runBackupCmd(args []string) {
+	fs := flag.NewFlagSet("backup", flag.ExitOnError)
+	envFile := fs.String("env-file", "", "读取配置文件（如 /etc/opsone/opsone.env）。sudo 会清掉环境变量，定时任务里一般都要带上")
+	dsn := fs.String("dsn", "", "数据库文件路径，覆盖 OPS_DSN")
+	recordDir := fs.String("record-dir", "", "录像目录，覆盖 OPS_RECORD_DIR")
+	out := fs.String("out", "", "备份目录，默认取 OPS_BACKUP_DIR")
+	keep := fs.Int("keep", 0, "保留份数，默认取 OPS_BACKUP_KEEP")
+	_ = fs.Parse(args)
+
+	if err := loadEnvFile(*envFile); err != nil {
+		log.Fatalf("%v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if *dsn != "" {
+		cfg.DSN = *dsn
+	}
+	if *recordDir != "" {
+		cfg.RecordDir = *recordDir
+	}
+	dir := cfg.BackupDir
+	if *out != "" {
+		dir = *out
+	}
+	n := cfg.BackupKeep
+	if *keep > 0 {
+		n = *keep
+	}
+
+	// 关键一道闸：库文件不存在就别往下走。
+	// db.Open 会顺手建一个空库，那样会「备份成功」出一个空文件，
+	// 等到真出事才发现备份是空的 —— 这种失败必须当场报出来。
+	if _, statErr := os.Stat(cfg.DSN); statErr != nil {
+		log.Fatalf("数据库文件 %s 不存在或不可读（%v）。\n"+
+			"如果是通过 sudo/cron 跑的，环境变量很可能没带进来，请加 --env-file /etc/opsone/opsone.env 或 --dsn 指定路径", cfg.DSN, statErr)
+	}
+
+	// 备份只读源库，不跑迁移、不做初始化，免得在恢复现场改动数据
+	gormDB, err := db.Open(cfg.DSN, false)
+	if err != nil {
+		log.Fatalf("数据库连接失败: %v", err)
+	}
+	if err := backup.SanityCheck(gormDB); err != nil {
+		log.Fatalf("拒绝备份 %s: %v\n"+
+			"多半是配置没读到（sudo / cron 会清掉环境变量），请加 --env-file /etc/opsone/opsone.env 或 --dsn 指定真实库路径", cfg.DSN, err)
+	}
+	res, err := backup.Run(gormDB, cfg.RecordDir, dir, n, time.Time{})
+	if err != nil {
+		log.Fatalf("备份失败: %v", err)
+	}
+	fmt.Printf("备份完成: %s\n", res.Summary())
+	fmt.Printf("数据库快照: %s\n", res.DBPath)
+	if res.RecordingsPath != "" {
+		fmt.Printf("录像归档: %s\n", res.RecordingsPath)
+	}
+}
+
+// runRestoreCmd `ops restore --db 快照 [--recordings 归档] [--env-file 配置]`
+func runRestoreCmd(args []string) {
+	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	snapshot := fs.String("db", "", "数据库快照文件（必填）")
+	recordings := fs.String("recordings", "", "录像归档 tar.gz（可选）")
+	envFile := fs.String("env-file", "", "读取配置文件（如 /etc/opsone/opsone.env）")
+	dsn := fs.String("dsn", "", "恢复到哪个数据库文件，覆盖 OPS_DSN")
+	recordDir := fs.String("record-dir", "", "录像恢复到哪个目录，覆盖 OPS_RECORD_DIR")
+	_ = fs.Parse(args)
+	if *snapshot == "" {
+		log.Fatalf("用法: ops restore --db backups/opsone-20260921-030000.db [--recordings ...tar.gz] [--env-file /etc/opsone/opsone.env]")
+	}
+
+	if err := loadEnvFile(*envFile); err != nil {
+		log.Fatalf("%v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if *dsn != "" {
+		cfg.DSN = *dsn
+	}
+	if *recordDir != "" {
+		cfg.RecordDir = *recordDir
+	}
+	moved, err := backup.Restore(*snapshot, cfg.DSN, *recordings, cfg.RecordDir)
+	if err != nil {
+		log.Fatalf("恢复失败: %v", err)
+	}
+	fmt.Printf("已把 %s 恢复到 %s\n", *snapshot, cfg.DSN)
+	if moved != "" {
+		fmt.Printf("原数据库已改名保留: %s\n", moved)
+	}
+	fmt.Println("注意：恢复必须在平台停机状态下做；现在可以启动服务了")
+}
+
+// loadEnvFile 读 KEY=VALUE 形式的配置文件（就是 systemd EnvironmentFile 那种）。
+// 已经存在于环境里的变量不覆盖，这样命令行临时指定的仍然生效。
+func loadEnvFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读配置文件失败: %w", err)
+	}
+	for i, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			return fmt.Errorf("配置文件第 %d 行不是 KEY=VALUE: %s", i+1, line)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.Engine {
@@ -137,6 +348,11 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	// 默认谁都不信：来源 IP 取 TCP 对端地址，X-Forwarded-For 被忽略。
+	// gin 的默认行为是信任所有代理，那样任何人都能伪造审计里的来源 IP。
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("OPS_TRUSTED_PROXIES 配置无效: %v", err)
+	}
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowOrigins,
@@ -146,7 +362,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		MaxAge:           12 * time.Hour,
 	}))
 
-	r.GET("/healthz", func(c *gin.Context) { response.OK(c, gin.H{"status": "ok"}) })
+	// 存活探针：进程还在就返回 200，不查任何依赖
+	r.GET("/healthz", func(c *gin.Context) {
+		response.OK(c, gin.H{"status": "ok", "version": version})
+	})
+	// 就绪探针：真查一次数据库。这里刻意用原生 HTTP 状态码（503）而不是统一响应体，
+	// 负载均衡与 k8s 探针看的是状态码。
+	r.GET("/readyz", func(c *gin.Context) { readyz(c, gormDB) })
 
 	api := r.Group("/api/v1")
 	api.POST("/auth/login", h.Login)
@@ -547,5 +769,70 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/system/retention/run", middleware.RequirePerm("retention:run"), h.RunRetentionCleanup)
 	}
 
+	serveWeb(r, cfg)
 	return r
+}
+
+// serveWeb 托管前端构建产物。配了 OPS_WEB_DIR 就单进程交付（不用再配 nginx），
+// 没配则保持原样：只有 API，前端另行托管。
+func serveWeb(r *gin.Engine, cfg *config.Config) {
+	if cfg.WebDir == "" {
+		return
+	}
+	index := filepath.Join(cfg.WebDir, "index.html")
+	if _, err := os.Stat(index); err != nil {
+		log.Fatalf("OPS_WEB_DIR=%s 里没有 index.html，请指向 web/dist 目录", cfg.WebDir)
+	}
+	if st, err := os.Stat(filepath.Join(cfg.WebDir, "assets")); err == nil && st.IsDir() {
+		r.Static("/assets", filepath.Join(cfg.WebDir, "assets"))
+	}
+	for _, name := range []string{"favicon.ico", "favicon.svg", "robots.txt"} {
+		p := filepath.Join(cfg.WebDir, name)
+		if _, err := os.Stat(p); err == nil {
+			r.StaticFile("/"+name, p)
+		}
+	}
+	// SPA 回落：前端是 history 路由，刷新 /monitor/alerts 这类地址也要拿到 index.html。
+	// /api 前缀不回落，否则拼错的接口会收到一坨 HTML 而不是 JSON 404。
+	r.NoRoute(func(c *gin.Context) {
+		p := c.Request.URL.Path
+		if strings.HasPrefix(p, "/api/") {
+			response.NotFound(c, "接口不存在")
+			return
+		}
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			response.NotFound(c, "路径不存在")
+			return
+		}
+		c.File(index)
+	})
+	log.Printf("前端静态文件由后端托管: %s", cfg.WebDir)
+}
+
+// readyz 就绪探针：连得上库、且能查到最基础的表才算就绪。
+// 光 Ping 不够 —— SQLite 的 Ping 不碰表，迁移没跑完也会返回成功。
+func readyz(c *gin.Context, gormDB *gorm.DB) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	fail := func(reason string) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "unready", "reason": reason, "version": version,
+		})
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		fail("数据库句柄不可用: " + err.Error())
+		return
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
+		fail("数据库 ping 失败: " + err.Error())
+		return
+	}
+	var n int64
+	if err := gormDB.WithContext(ctx).Model(&model.User{}).Count(&n).Error; err != nil {
+		fail("用户表不可读（迁移未完成？）: " + err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "users": n, "version": version})
 }

@@ -1,0 +1,12 @@
+.git
+.gitignore
+web/node_modules
+web/dist
+server/ops
+server/ops.db
+server/ops.db-*
+server/recordings
+server/backups
+docs/screenshots
+*.md
+LICENSE
