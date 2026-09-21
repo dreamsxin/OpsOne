@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
@@ -298,11 +299,33 @@ function onResize() {
   chart?.resize()
 }
 
+const route = useRoute()
+
+// 告警详情的「在 Prometheus 中查看指标」带 ?q=PromQL 跳进来。
+// 页签工作台会缓存本页，第二次跳进来不会重新 onMounted，所以深链要在
+// activate 时也认一次；appliedExpr 用来避免首屏挂载 + activate 查两遍。
+let appliedExpr = ''
+function applyDeepLink() {
+  const q = String(route.query.q ?? '')
+  if (!q || q === appliedExpr) return
+  appliedExpr = q
+  query.expr = q
+  run()
+}
+
 onMounted(async () => {
   await loadSources()
   await loadSaved()
   window.addEventListener('resize', onResize)
+  applyDeepLink()
 })
+// 缓存页切走时 DOM 在离屏容器里，resize 会把 echarts 缩成 0×0，切回来是空白图
+onActivated(() => {
+  window.addEventListener('resize', onResize)
+  chart?.resize()
+  applyDeepLink()
+})
+onDeactivated(() => window.removeEventListener('resize', onResize))
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   disposeChart()

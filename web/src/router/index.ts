@@ -69,6 +69,20 @@ function resolveComponent(component: string) {
   return viewLoaders[component]
 }
 
+/**
+ * 给每个路由的组件注入独立名字：keep-alive 的 include 按组件名匹配，
+ * 而业务页面文件清一色叫 index.vue（推断名都是 "index"），同名会导致
+ * 缓存与页签对不上。这里在加载后浅拷贝一份并改名为路由名，
+ * 同一个组件被多个菜单复用（如占位页）时也能各自缓存、各自释放。
+ */
+function namedLoader(loader: () => Promise<unknown>, name: string) {
+  return async () => {
+    const mod = (await loader()) as { default?: Record<string, unknown> }
+    const comp = mod.default || mod
+    return Object.assign({}, comp, { name })
+  }
+}
+
 
 /** 把后端菜单树拍平成路由，挂到布局容器下 */
 function toRoutes(menus: MenuNode[]): RouteRecordRaw[] {
@@ -82,7 +96,7 @@ function toRoutes(menus: MenuNode[]): RouteRecordRaw[] {
         routes.push({
           path: menu.path,
           name: menu.name || menu.path,
-          component: loader as never,
+          component: namedLoader(loader, menu.name || menu.path) as never,
           meta: { title: menu.title, icon: menu.icon, hidden: menu.hidden }
         })
       }

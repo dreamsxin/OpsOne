@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
@@ -18,6 +19,11 @@ import {
   type HostImportResult,
   type Tag
 } from '@/api'
+import PageHeader from '@/components/PageHeader.vue'
+import Pagination from '@/components/Pagination.vue'
+
+
+const route = useRoute()
 
 const importVisible = ref(false)
 const importFile = ref<File | null>(null)
@@ -75,7 +81,134 @@ async function doExport() {
 const loading = ref(false)
 const rows = ref<Host[]>([])
 const total = ref(0)
-const query = reactive({ page: 1, pageSize: 20, keyword: '', env: '', status: '' })
+const query = reactive({
+  page: 1,
+  pageSize: 20,
+  keyword: '',
+  env: '',
+  status: ''
+})
+
+/**
+ * 深链参数（仪表盘「离线主机」卡片带 status=offline，命令面板带 keyword=主机名）。
+ * 本页会被页签工作台缓存，带着新参数再跳进来不会重新挂载，所以 activate 时也认一次；
+ * appliedQuery 用来避免首屏挂载 + activate 查两遍。
+ */
+let appliedQuery = ''
+function applyRouteQuery(): boolean {
+  const kw = String(route.query.keyword ?? '')
+  const env = String(route.query.env ?? '')
+  const status = String(route.query.status ?? '')
+  const stamp = `${kw}|${env}|${status}`
+  if (!kw && !env && !status) return false
+  if (stamp === appliedQuery) return false
+  appliedQuery = stamp
+  query.keyword = kw
+  query.env = env
+  query.status = status
+  query.page = 1
+  return true
+}
+
+/** 多选与批量操作：参考站 /assets/hosts 的工具栏中 60% 都是批量动作，
+ *  没选中时隐藏、选中后才出现，避免给单主机场景加噪声 */
+const selection = ref<Host[]>([])
+function onSelectionChange(list: Host[]) {
+  selection.value = list
+}
+async function batchDelete() {
+  const prodCount = selection.value.filter((h) => h.env === 'prod').length
+  const warn = prodCount ? `其中包含 ${prodCount} 台生产主机，` : ''
+  await ElMessageBox.confirm(
+    `${warn}确认删除选中的 ${selection.value.length} 台主机？删除后关联的会话与执行记录仍在，但无法再登陆。`,
+    '危险操作',
+    { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+  )
+  let ok = 0
+  const failed: string[] = []
+  for (const h of selection.value) {
+    try {
+      await deleteHost(h.id)
+      ok++
+    } catch (e: any) {
+      failed.push(`${h.name}: ${e?.message || e}`)
+    }
+  }
+  if (failed.length) ElMessage.warning(`成功 ${ok}，失败 ${failed.length}：${failed[0]}`)
+  else ElMessage.success(`已删除 ${ok} 台`)
+  selection.value = []
+  load()
+  loadAllHosts()
+}
+async function batchCheck() {
+  const targets = [...selection.value]
+  if (!targets.length) return
+  let ok = 0
+  let fail = 0
+  for (const h of targets) {
+    try {
+      const res = await checkHost(h.id)
+      if (res.status === 'online') ok++
+      else fail++
+    } catch {
+      fail++
+    }
+  }
+  ElMessage.success(`探测完成：在线 ${ok}，异常 ${fail}`)
+  load()
+}
+const batchEnvVisible = ref(false)
+const batchEnvValue = ref<'dev' | 'test' | 'prod'>('dev')
+async function batchChangeEnv() {
+  const targets = [...selection.value]
+  let ok = 0
+  const failed: string[] = []
+  for (const h of targets) {
+    try {
+      // 保留 secret：后端 PUT 对空 secret 的语义是「不改」
+      await updateHost(h.id, { ...h, env: batchEnvValue.value, secret: '' })
+      ok++
+    } catch (e: any) {
+      failed.push(`${h.name}: ${e?.message || e}`)
+    }
+  }
+  if (failed.length) ElMessage.warning(`成功 ${ok}，失败 ${failed.length}：${failed[0]}`)
+  else ElMessage.success(`已将 ${ok} 台主机环境改为 ${batchEnvValue.value}`)
+  batchEnvVisible.value = false
+  selection.value = []
+  load()
+}
+const batchTagVisible = ref(false)
+const batchTagValue = ref('')
+async function batchAppendTag() {
+  const tag = batchTagValue.value.trim()
+  if (!tag) {
+    ElMessage.warning('请输入标签')
+    return
+  }
+  let ok = 0
+  const failed: string[] = []
+  for (const h of selection.value) {
+    const cur = (h.tags || '').split(',').map((x) => x.trim()).filter(Boolean)
+    if (cur.includes(tag)) {
+      ok++
+      continue
+    }
+    const next = [...cur, tag].join(',')
+    try {
+      await updateHost(h.id, { ...h, tags: next, secret: '' })
+      ok++
+    } catch (e: any) {
+      failed.push(`${h.name}: ${e?.message || e}`)
+    }
+  }
+  if (failed.length) ElMessage.warning(`成功 ${ok}，失败 ${failed.length}：${failed[0]}`)
+  else ElMessage.success(`已为 ${ok} 台主机追加标签「${tag}」`)
+  batchTagVisible.value = false
+  batchTagValue.value = ''
+  selection.value = []
+  load()
+}
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -233,10 +366,16 @@ async function check(row: Host) {
 }
 
 onMounted(() => {
+  applyRouteQuery()
   load()
   loadAllHosts()
   getDepartmentTree().then((data) => (deptTree.value = data))
   listTags().then((data) => (tagDict.value = data))
+})
+
+// 缓存页被带着新参数再次打开时重新应用筛选
+onActivated(() => {
+  if (applyRouteQuery()) load()
 })
 
 
@@ -245,6 +384,26 @@ onMounted(() => {
 
 <template>
   <div class="page">
+    <PageHeader
+      title="主机管理"
+      subtitle="支持环境 / 状态 / 标签筛选；探测会回填系统信息，跳板机链路直接标在列表上"
+    >
+      <template #actions>
+        <el-button @click="doExport">
+          <el-icon style="margin-right: 4px"><Download /></el-icon>
+          导出 CSV
+        </el-button>
+        <el-button v-perm="'host:create'" @click="openImport">
+          <el-icon style="margin-right: 4px"><Upload /></el-icon>
+          批量导入
+        </el-button>
+        <el-button v-perm="'host:create'" type="primary" @click="openCreate">
+          <el-icon style="margin-right: 4px"><Plus /></el-icon>
+          新增主机
+        </el-button>
+      </template>
+    </PageHeader>
+
     <el-card>
       <div class="page-toolbar">
         <el-input
@@ -266,14 +425,31 @@ onMounted(() => {
         </el-select>
         <el-button type="primary" @click="((query.page = 1), load())">查询</el-button>
         <el-button @click="resetQuery">重置</el-button>
-        <div class="grow"></div>
-        <el-button @click="doExport">导出 CSV</el-button>
-        <el-button v-perm="'host:create'" @click="openImport">批量导入</el-button>
-        <el-button v-perm="'host:create'" type="primary" @click="openCreate">新增主机</el-button>
+        <el-button :loading="loading" @click="load">
+          <el-icon v-if="!loading" style="margin-right: 4px"><Refresh /></el-icon>
+          刷新
+        </el-button>
       </div>
 
-      <el-table v-loading="loading" :data="rows" border stripe>
-        <el-table-column prop="name" label="名称" min-width="130" />
+      <div v-if="selection.length" class="bulk-bar">
+        <span class="bulk-hint">已选 {{ selection.length }} 项</span>
+        <el-button v-perm="'host:check'" size="small" @click="batchCheck">批量探测</el-button>
+        <el-button v-perm="'host:update'" size="small" @click="batchEnvVisible = true">改环境</el-button>
+        <el-button v-perm="'host:update'" size="small" @click="batchTagVisible = true">加标签</el-button>
+        <el-button v-perm="'host:delete'" size="small" type="danger" plain @click="batchDelete">批量删除</el-button>
+        <div class="grow"></div>
+        <el-button link size="small" @click="selection = []">清空选择</el-button>
+      </div>
+
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        stripe
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="42" />
+        <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
         <el-table-column label="连接" min-width="170">
           <template #default="{ row }">{{ row.username }}@{{ row.address }}:{{ row.port }}</template>
         </el-table-column>
@@ -317,15 +493,11 @@ onMounted(() => {
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, sizes, prev, pager, next"
-        :total="total"
+      <Pagination
         v-model:current-page="query.page"
         v-model:page-size="query.pageSize"
-        :page-sizes="[10, 20, 50, 100]"
-        @current-change="load"
-        @size-change="load"
+        :total="total"
+        @change="load"
       />
     </el-card>
 
@@ -465,5 +637,73 @@ onMounted(() => {
         <el-button @click="importVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchEnvVisible" title="批量修改环境" width="420px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="环境变更会同步影响下发闸门（生产主机需二次确认），请谨慎操作"
+        style="margin-bottom: 12px"
+      />
+      <el-form label-width="80px">
+        <el-form-item label="目标环境">
+          <el-radio-group v-model="batchEnvValue">
+            <el-radio value="dev">开发</el-radio>
+            <el-radio value="test">测试</el-radio>
+            <el-radio value="prod">生产</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="影响主机">
+          <span>{{ selection.length }} 台</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchEnvVisible = false">取消</el-button>
+        <el-button type="primary" @click="batchChangeEnv">确认修改</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchTagVisible" title="批量追加标签" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="标签">
+          <el-input v-model="batchTagValue" placeholder="已有同名标签不会重复追加" />
+        </el-form-item>
+        <el-form-item label="影响主机">
+          <span>{{ selection.length }} 台</span>
+        </el-form-item>
+        <el-form-item v-if="tagDict.length" label="快选">
+          <el-tag
+            v-for="t in tagDict.slice(0, 12)"
+            :key="t.id"
+            size="small"
+            style="margin-right: 4px; cursor: pointer"
+            @click="batchTagValue = t.name"
+          >
+            {{ t.name }}
+          </el-tag>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchTagVisible = false">取消</el-button>
+        <el-button type="primary" @click="batchAppendTag">确认追加</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--el-color-primary-light-9);
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: 4px;
+}
+.bulk-bar .grow {
+  flex: 1;
+}
+</style>

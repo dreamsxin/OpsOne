@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   checkLogSource,
@@ -254,7 +255,23 @@ async function removeSource(row: LogSource) {
   loadSources()
 }
 
-onMounted(loadSources)
+// 告警详情等处的「在 Loki 中查看日志」带 ?q=LogQL 跳进来：等默认数据源就绪后直接执行。
+// 页签工作台缓存本页，第二次跳进来不会重新 onMounted，所以 activate 时也认一次；
+// appliedExpr 防止首屏挂载 + activate 查两遍。
+const route = useRoute()
+let appliedExpr = ''
+function applyDeepLink() {
+  const q = String(route.query.q ?? '')
+  if (!q || q === appliedExpr) return
+  appliedExpr = q
+  query.expr = q
+  run()
+}
+onMounted(async () => {
+  await loadSources()
+  applyDeepLink()
+})
+onActivated(applyDeepLink)
 </script>
 
 <template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   createScript,
@@ -17,12 +18,15 @@ import {
   type Script,
   type ScriptParam
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const rows = ref<Script[]>([])
 const total = ref(0)
 const categories = ref<string[]>([])
 const hosts = ref<Host[]>([])
+const route = useRoute()
 const query = reactive({ page: 1, pageSize: 20, category: '', precheckStatus: '', keyword: '' })
 
 const dialogVisible = ref(false)
@@ -252,10 +256,26 @@ async function remove(row: Script) {
   load()
 }
 
+// 命令面板搜到脚本后带 ?keyword=脚本名 跳进来。本页会被页签工作台缓存，
+// 再次带着新关键字进来不会重新挂载，所以 activate 时也认一次
+let appliedKeyword = ''
+function applyRouteQuery(): boolean {
+  const kw = String(route.query.keyword ?? '')
+  if (!kw || kw === appliedKeyword) return false
+  appliedKeyword = kw
+  query.keyword = kw
+  query.page = 1
+  return true
+}
+
 onMounted(async () => {
+  applyRouteQuery()
   const data = await listHosts({ page: 1, pageSize: 200 })
   hosts.value = data.list || []
   load()
+})
+onActivated(() => {
+  if (applyRouteQuery()) load()
 })
 </script>
 
@@ -336,13 +356,11 @@ onMounted(async () => {
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="total"
+      <Pagination
         v-model:current-page="query.page"
-        :page-size="query.pageSize"
-        @current-change="load"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        @change="load"
       />
     </el-card>
 

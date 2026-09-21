@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   addEventNote,
@@ -18,6 +18,13 @@ import {
   type OpsEvent,
   type User
 } from '@/api'
+import { useUserStore } from '@/stores/user'
+import PageHeader from '@/components/PageHeader.vue'
+import FilterChips, { type ChipItem } from '@/components/FilterChips.vue'
+import Pagination from '@/components/Pagination.vue'
+
+
+const store = useUserStore()
 
 const loading = ref(false)
 const rows = ref<OpsEvent[]>([])
@@ -76,9 +83,42 @@ async function load() {
   }
 }
 
-function filterBy(status: string) {
-  query.status = status
+/** 快筛 chips：状态 + 责任维度。「未指派 / 今日」后端暂不支持独立筛选，只做计数展示 */
+const chips = computed<ChipItem[]>(() => {
+  const s = stats.value
+  return [
+    { key: 'info', label: `当前 ${total.value} 条 · 本页 ${rows.value.length}`, static: true },
+    { key: 'status:open', label: '待处理', count: s?.open ?? 0, hint: '需要认领', tone: 'danger' },
+    { key: 'status:processing', label: '处理中', count: s?.processing ?? 0, hint: '已认领', tone: 'warning' },
+    { key: 'status:resolved', label: '已解决', count: s?.resolved ?? 0, hint: '仅回溯', tone: 'success' },
+    { key: 'mine', label: '我负责', count: s?.mine ?? 0, hint: '指派给我的' },
+    { key: 'unassigned', label: '未指派', count: s?.unassigned ?? 0, hint: '待处理+处理中', static: true },
+    { key: 'today', label: '今日新增', count: s?.today ?? 0, static: true }
+  ]
+})
+
+const activeChipKey = computed<string | null>(() => {
+  if (query.status) return `status:${query.status}`
+  if (query.assignee && query.assignee === store.profile?.username) return 'mine'
+  return null
+})
+
+function onChipSelect(key: string) {
+  if (key === 'info' || key === 'unassigned' || key === 'today') return
+  const wasActive = activeChipKey.value === key
+  query.status = ''
   query.assignee = ''
+  if (!wasActive && key === 'mine') query.assignee = store.profile?.username || ''
+  else if (!wasActive && key.startsWith('status:')) query.status = key.split(':')[1]
+  query.page = 1
+  load()
+}
+
+function resetFilters() {
+  query.status = ''
+  query.severity = ''
+  query.assignee = ''
+  query.keyword = ''
   query.page = 1
   load()
 }
@@ -188,47 +228,16 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <el-row :gutter="12">
-      <el-col :span="6">
-        <el-card class="stat-card" shadow="hover" style="cursor: pointer" @click="filterBy('open')">
-          <div class="value" style="color: #dc2626">{{ stats?.open ?? 0 }}</div>
-          <div class="label">待处理</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card" shadow="hover" style="cursor: pointer" @click="filterBy('processing')">
-          <div class="value" style="color: #d97706">{{ stats?.processing ?? 0 }}</div>
-          <div class="label">处理中</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card
-          class="stat-card"
-          shadow="hover"
-          style="cursor: pointer"
-          @click="((query.assignee = ''), (query.status = ''), (query.page = 1), load())"
-        >
-          <div class="value">{{ stats?.unassigned ?? 0 }}</div>
-          <div class="label">未指派（待处理+处理中）</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card" shadow="hover">
-          <div class="value" style="color: #16a34a">{{ stats?.resolved ?? 0 }}</div>
-          <div class="label">已解决 / 今日新增 {{ stats?.today ?? 0 }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <PageHeader title="事件" subtitle="告警是机器发现的现象，事件是人要跟进的事：可指派负责人、留处置记录">
+      <template #actions>
+        <el-button v-perm="'event:manage'" type="primary" @click="openCreate">从告警建单</el-button>
+      </template>
+    </PageHeader>
 
-    <el-card style="margin-top: 12px">
-      <el-alert
-        type="info"
-        :closable="false"
-        style="margin-bottom: 12px"
-        title="告警是机器发现的现象，事件是人要跟进的事：由人从一条或多条告警升格而来，可指派负责人、留处置记录。平台不自动建单，免得把告警噪音原样搬成工单噪音。也可以在「聚合策略 → 归桶预览」里把一整个桶建成一个事件。"
-      />
+    <el-card>
+      <FilterChips :items="chips" :model-value="activeChipKey" @select="onChipSelect" />
 
-      <div class="page-toolbar">
+      <div class="page-toolbar" style="margin-top: 12px">
         <el-input
           v-model="query.keyword"
           placeholder="标题 / 摘要"
@@ -246,8 +255,7 @@ onMounted(async () => {
           <el-option v-for="u in users" :key="u.id" :label="u.username" :value="u.username" />
         </el-select>
         <el-button type="primary" @click="((query.page = 1), load())">查询</el-button>
-        <div class="grow"></div>
-        <el-button v-perm="'event:manage'" type="primary" @click="openCreate">从告警建单</el-button>
+        <el-button @click="resetFilters">重置</el-button>
       </div>
 
       <el-table v-loading="loading" :data="rows" border stripe empty-text="还没有事件，可从告警或聚合桶建单">
@@ -290,13 +298,11 @@ onMounted(async () => {
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="total"
+      <Pagination
         v-model:current-page="query.page"
-        :page-size="query.pageSize"
-        @current-change="load"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        @change="load"
       />
     </el-card>
 

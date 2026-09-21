@@ -15,6 +15,8 @@ import {
   type KubeResourceItem,
   type KubeResourceKind
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const clusters = ref<KubeCluster[]>([])
 const kinds = ref<KubeResourceKind[]>([])
@@ -346,15 +348,11 @@ onMounted(async () => {
                 </template>
               </el-table-column>
             </el-table>
-            <el-pagination
-              style="margin-top: 12px; justify-content: flex-end"
-              layout="total, sizes, prev, pager, next"
-              :total="logTotal"
-              :page-sizes="[20, 50, 100]"
+            <Pagination
               v-model:current-page="logQuery.page"
               v-model:page-size="logQuery.pageSize"
-              @current-change="loadLogs"
-              @size-change="searchLogs"
+              :total="logTotal"
+              @change="loadLogs"
             />
           </el-tab-pane>
         </el-tabs>

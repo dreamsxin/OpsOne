@@ -1,7 +1,36 @@
 :root {
+  /* 品牌与主题变量：整站的强调色与间距统一从这里出，业务页面别再散着写死值 */
   --ops-bg: #f5f7fa;
+  --ops-surface: #ffffff;
   --ops-sidebar-bg: #1f2937;
   --ops-sidebar-active: #2563eb;
+  --ops-primary: #2563eb;
+  --ops-text-primary: #111827;
+  --ops-text-secondary: #6b7280;
+  --ops-text-muted: #9ca3af;
+  --ops-border: #e5e7eb;
+  --ops-card-radius: 8px;
+  --ops-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --ops-space-xs: 4px;
+  --ops-space-sm: 8px;
+  --ops-space-md: 12px;
+  --ops-space-lg: 16px;
+  --ops-space-xl: 24px;
+  /* 统一的过渡时长：交互反馈全用这两个值，避免每处各写一个数 */
+  --ops-transition-fast: 0.15s ease;
+  --ops-transition: 0.25s ease;
+}
+
+/* 暗色主题：Element Plus 自带 dark 变量，这里只覆盖平台自己的那几个 */
+html.dark {
+  --ops-bg: #14181f;
+  --ops-surface: #1d232c;
+  --ops-sidebar-bg: #11151b;
+  --ops-text-primary: #e5e7eb;
+  --ops-text-secondary: #9ca3af;
+  --ops-text-muted: #6b7280;
+  --ops-border: #2b323c;
+  --ops-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 html,
@@ -14,25 +43,30 @@ body,
 
 body {
   background: var(--ops-bg);
+  color: var(--ops-text-primary);
   font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  transition: background-color var(--ops-transition), color var(--ops-transition);
 }
+
 
 .page {
-  padding: 16px;
+  padding: var(--ops-space-lg);
 }
 
+/* 页面工具栏：筛选控件 + 按钮统一放在这里，右侧动作靠 grow 撑开 */
 .page-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--ops-space-sm);
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: var(--ops-space-md);
 }
 
 .page-toolbar .grow {
   flex: 1;
 }
 
+/* 卡片式统计块：三行结构（数值 / 名称 / 副标题），副标题用于给出上下文而不是空喊数字 */
 .stat-card {
   .value {
     font-size: 26px;
@@ -41,9 +75,34 @@ body {
   }
 
   .label {
-    color: #6b7280;
+    color: var(--ops-text-secondary);
     font-size: 13px;
   }
+
+  .sub {
+    margin-top: 2px;
+    color: var(--ops-text-muted);
+    font-size: 12px;
+    line-height: 1.4;
+    min-height: 16px;
+  }
+}
+
+/* 全局卡片圆角与阴影：Element Plus 默认 4px 太紧，8px 更接近参考站的观感 */
+.el-card {
+  border-radius: var(--ops-card-radius);
+}
+
+/* 表格工具栏与批量选择提示条的通用样式 */
+.bulk-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
 }
 
 .terminal-box {
@@ -54,7 +113,24 @@ body {
   border-radius: 6px;
 }
 
+/* 顶栏的命令面板入口：看起来像搜索框，实际是按钮（点开是 Ctrl+K 面板） */
+.cmd-entry {
+  color: var(--el-text-color-secondary);
+  font-weight: normal;
+}
+
+.cmd-kbd {
+  margin-left: 8px;
+  padding: 1px 5px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 3px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .output-pre {
+
   margin: 0;
   padding: 8px;
   background: #0f172a;

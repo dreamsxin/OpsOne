@@ -10,6 +10,8 @@ import {
   type ExecPrecheckResult,
   type Host
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const hosts = ref<Host[]>([])
 const jobs = ref<ExecJob[]>([])
@@ -193,13 +195,11 @@ onMounted(() => {
               </template>
             </el-table-column>
           </el-table>
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="jobTotal"
+          <Pagination
             v-model:current-page="jobQuery.page"
-            :page-size="jobQuery.pageSize"
-            @current-change="loadJobs"
+            v-model:page-size="jobQuery.pageSize"
+            :total="jobTotal"
+            @change="loadJobs"
           />
         </el-card>
       </el-col>

@@ -11,6 +11,8 @@ import {
   type CommandRule,
   type ExecGuardLog
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const rows = ref<CommandRule[]>([])
@@ -223,13 +225,11 @@ onMounted(() => {
         <el-table-column prop="username" label="操作人" width="100" />
         <el-table-column prop="clientIp" label="来源 IP" width="130" />
       </el-table>
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="guardTotal"
+      <Pagination
         v-model:current-page="guardQuery.page"
-        :page-size="guardQuery.pageSize"
-        @current-change="loadGuardLogs"
+        v-model:page-size="guardQuery.pageSize"
+        :total="guardTotal"
+        @change="loadGuardLogs"
       />
     </el-card>
 

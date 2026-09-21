@@ -166,12 +166,21 @@ func normalizeSeverity(s string) string {
 	}
 }
 
-// ListAlerts 告警列表
+// ListAlerts 告警列表。
+//
+// 时间范围按 last_seen_at 过滤：告警是按指纹去重累加的，同一条可能持续几小时，
+// 「这段时间有哪些告警」问的是这段时间里还在响的，所以看最近一次出现时间。
+// status 额外支持 unresolved（firing + acked），用来和概览里的「严重/警告」口径对齐——
+// 那两个数字统计的就是未恢复的，点进来必须是同一个集合。
 func (h *Handler) ListAlerts(c *gin.Context) {
 	page, size := pageParams(c)
 	q := h.DB.Model(&model.Alert{})
 
-	if status := c.Query("status"); status != "" {
+	switch status := c.Query("status"); status {
+	case "":
+	case "unresolved":
+		q = q.Where("status <> ?", "resolved")
+	default:
 		q = q.Where("status = ?", status)
 	}
 	if severity := c.Query("severity"); severity != "" {
@@ -180,6 +189,15 @@ func (h *Handler) ListAlerts(c *gin.Context) {
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
 		like := "%" + kw + "%"
 		q = q.Where("title LIKE ? OR summary LIKE ? OR labels LIKE ?", like, like, like)
+	}
+	if sourceID := c.Query("sourceId"); sourceID != "" && sourceID != "0" {
+		q = q.Where("source_id = ?", sourceID)
+	}
+	if start, ok := parseLocalTime(c.Query("startTime")); ok {
+		q = q.Where("last_seen_at >= ?", start)
+	}
+	if end, ok := parseLocalTime(c.Query("endTime")); ok {
+		q = q.Where("last_seen_at <= ?", end)
 	}
 
 	var total int64
@@ -193,6 +211,21 @@ func (h *Handler) ListAlerts(c *gin.Context) {
 		return
 	}
 	response.OKPage(c, list, total, page, size)
+}
+
+// parseLocalTime 解析前端 el-date-picker 的 value-format（本地时区的 YYYY-MM-DD HH:mm:ss），
+// 也接受只给到日期的写法。解析不了就当没传，不报错——筛选条件不该让列表打不开。
+func parseLocalTime(v string) (time.Time, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // AlertStats 告警概览，供列表页顶部展示

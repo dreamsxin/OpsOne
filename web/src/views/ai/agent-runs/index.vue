@@ -9,6 +9,8 @@ import {
   type AgentDataSource,
   type AgentRun
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const rows = ref<AgentRun[]>([])
@@ -163,13 +165,11 @@ onMounted(async () => {
         </el-table-column>
       </el-table>
 
-      <el-pagination
+      <Pagination
         v-model:current-page="query.page"
-        class="page-pager"
-        layout="total, prev, pager, next"
+        v-model:page-size="query.pageSize"
         :total="total"
-        :page-size="query.pageSize"
-        @current-change="load"
+        @change="load"
       />
     </el-card>
 

@@ -216,18 +216,42 @@ async function removeEdge(edgeId: number) {
 
 let dragging: { id: number; offsetX: number; offsetY: number } | null = null
 
+/** 画布视窗：空表示 1:1 原始坐标，「适配窗口」会算出一个 viewBox 把全图缩进来 */
+const viewBox = ref('')
+const canvasWrap = ref<HTMLElement>()
+
+/**
+ * 屏幕坐标 → 画布坐标。
+ *
+ * 设了 viewBox 之后 SVG 内部坐标和屏幕像素不再 1:1，拖动必须换算，
+ * 否则缩放状态下节点会跟着鼠标"飘"。preserveAspectRatio 用的是 xMinYMin meet，
+ * 所以只有统一缩放、没有居中偏移。
+ */
+function toCanvasPoint(event: MouseEvent, el: Element) {
+  const box = el.getBoundingClientRect()
+  const px = event.clientX - box.left
+  const py = event.clientY - box.top
+  if (!viewBox.value) return { x: px, y: py }
+  const [vx, vy, vw, vh] = viewBox.value.split(' ').map(Number)
+  const scale = Math.min(box.width / vw, box.height / vh) || 1
+  return { x: vx + px / scale, y: vy + py / scale }
+}
+
 function onNodeMouseDown(node: TopologyNode, event: MouseEvent) {
   if (linking.value) return
-  dragging = { id: node.id, offsetX: event.offsetX, offsetY: event.offsetY }
+  const svg = (event.currentTarget as SVGElement).ownerSVGElement
+  if (!svg) return
+  const point = toCanvasPoint(event, svg)
+  dragging = { id: node.id, offsetX: point.x - node.x, offsetY: point.y - node.y }
 }
 
 function onCanvasMouseMove(event: MouseEvent) {
   if (!dragging || !detail.value) return
-  const box = (event.currentTarget as SVGElement).getBoundingClientRect()
   const node = nodeById.value[dragging.id]
   if (!node) return
-  node.x = Math.max(0, Math.round(event.clientX - box.left - dragging.offsetX))
-  node.y = Math.max(0, Math.round(event.clientY - box.top - dragging.offsetY))
+  const point = toCanvasPoint(event, event.currentTarget as SVGElement)
+  node.x = Math.max(0, Math.round(point.x - dragging.offsetX))
+  node.y = Math.max(0, Math.round(point.y - dragging.offsetY))
   layoutDirty.value = true
 }
 
@@ -235,7 +259,146 @@ function onCanvasMouseUp() {
   dragging = null
 }
 
+/**
+ * 自动布局：按依赖关系分层（Kahn 拓扑排序），被依赖的排左边、依赖方排右边，同层竖着排开。
+ *
+ * 成环的节点排不出层号，统一丢到最后一层——图仍然能看，且与「依赖成环」提示对得上。
+ * 只改内存坐标，要落库仍然得点「保存布局」。
+ */
+function autoLayout() {
+  if (!nodes.value.length) return
+  const indeg: Record<number, number> = {}
+  const next: Record<number, number[]> = {}
+  nodes.value.forEach((n) => {
+    indeg[n.id] = 0
+    next[n.id] = []
+  })
+  edges.value.forEach((e) => {
+    if (indeg[e.toNodeId] === undefined || next[e.fromNodeId] === undefined) return
+    indeg[e.toNodeId] += 1
+    next[e.fromNodeId].push(e.toNodeId)
+  })
+
+  const layer: Record<number, number> = {}
+  let queue = nodes.value.filter((n) => indeg[n.id] === 0).map((n) => n.id)
+  queue.forEach((id) => (layer[id] = 0))
+  let guard = 0
+  while (queue.length && guard++ < 1000) {
+    const nextQueue: number[] = []
+    for (const id of queue) {
+      for (const to of next[id]) {
+        indeg[to] -= 1
+        layer[to] = Math.max(layer[to] ?? 0, (layer[id] ?? 0) + 1)
+        if (indeg[to] === 0) nextQueue.push(to)
+      }
+    }
+    queue = nextQueue
+  }
+
+  const maxLayer = Math.max(0, ...Object.values(layer))
+  const buckets: Record<number, TopologyNode[]> = {}
+  for (const node of nodes.value) {
+    const idx = layer[node.id] ?? maxLayer + 1 // 成环的放最后一层
+    buckets[idx] = buckets[idx] || []
+    buckets[idx].push(node)
+  }
+  Object.keys(buckets).forEach((key) => {
+    const col = Number(key)
+    buckets[col].forEach((node, row) => {
+      node.x = 40 + col * (NODE_W + 90)
+      node.y = 30 + row * (NODE_H + 34)
+    })
+  })
+  layoutDirty.value = true
+  ElMessage.success('已按依赖关系重排，确认效果后点「保存布局」')
+}
+
+/** 适配窗口：按节点包围盒算 viewBox，节点多到画布外时一眼能看全 */
+function fitView() {
+  if (!nodes.value.length) return
+  const xs = nodes.value.map((n) => n.x)
+  const ys = nodes.value.map((n) => n.y)
+  const minX = Math.min(...xs) - 24
+  const minY = Math.min(...ys) - 24
+  const maxX = Math.max(...xs) + NODE_W + 24
+  const maxY = Math.max(...ys) + NODE_H + 24
+  viewBox.value = `${minX} ${minY} ${Math.max(200, maxX - minX)} ${Math.max(160, maxY - minY)}`
+}
+
+function resetView() {
+  viewBox.value = ''
+}
+
+/** 全屏：把画布容器整块全屏，便于在大屏上看 */
+async function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    await document.exitFullscreen()
+    return
+  }
+  await canvasWrap.value?.requestFullscreen?.()
+}
+
+// ---------- 一键校验 ----------
+
+type CheckItem = { level: 'error' | 'warning' | 'info'; text: string }
+
+const checkVisible = ref(false)
+const checkItems = ref<CheckItem[]>([])
+
+/**
+ * 校验只看平台已有的事实，不猜：成环、孤立节点、没绑资源、绑定资源当前异常、
+ * 自环与重复连线。发现不了的问题不假装发现。
+ */
+function runCheck() {
+  const items: CheckItem[] = []
+  if (detail.value?.cycle?.length) {
+    items.push({ level: 'error', text: `依赖成环：${detail.value.cycle.join(' → ')}` })
+  }
+
+  const linked = new Set<number>()
+  const pairs = new Set<string>()
+  for (const edge of edges.value) {
+    linked.add(edge.fromNodeId)
+    linked.add(edge.toNodeId)
+    if (edge.fromNodeId === edge.toNodeId) {
+      const name = nodeById.value[edge.fromNodeId]?.name || edge.fromNodeId
+      items.push({ level: 'error', text: `自环连线：${name} 指向自己` })
+    }
+    const key = `${edge.fromNodeId}->${edge.toNodeId}`
+    if (pairs.has(key)) {
+      const from = nodeById.value[edge.fromNodeId]?.name || edge.fromNodeId
+      const to = nodeById.value[edge.toNodeId]?.name || edge.toNodeId
+      items.push({ level: 'warning', text: `重复连线：${from} → ${to}` })
+    }
+    pairs.add(key)
+  }
+
+  for (const node of nodes.value) {
+    if (!linked.has(node.id)) {
+      items.push({ level: 'warning', text: `孤立节点：${node.name}（没有任何连线）` })
+    }
+    if (node.kind !== 'external' && !node.refName) {
+      items.push({
+        level: 'warning',
+        text: `${node.name} 没有绑定平台资源，健康度会一直是「未知」`
+      })
+    }
+    if (node.health === 'error') {
+      items.push({ level: 'error', text: `${node.name} 当前异常：${node.detail || '见资源详情'}` })
+    } else if (node.health === 'warning') {
+      items.push({ level: 'warning', text: `${node.name} 需关注：${node.detail || '见资源详情'}` })
+    }
+  }
+
+  if (!items.length) {
+    items.push({ level: 'info', text: '没发现问题：连线无环、节点都有连线与绑定、资源状态正常' })
+  }
+  checkItems.value = items
+  checkVisible.value = true
+}
+
 async function saveLayout() {
+
   const res = await saveTopologyLayout(
     currentId.value,
     nodes.value.map((n) => ({ id: n.id, x: n.x, y: n.y }))
@@ -300,13 +463,25 @@ onMounted(async () => {
         </el-button>
         <el-button
           v-perm="'topology:manage'"
+          :disabled="!currentId || nodes.length < 2"
+          @click="autoLayout"
+        >
+          自动布局
+        </el-button>
+        <el-button
+          v-perm="'topology:manage'"
           :disabled="!layoutDirty"
           type="success"
           @click="saveLayout"
         >
           保存布局
         </el-button>
+        <el-button :disabled="!currentId || !nodes.length" @click="fitView">适配窗口</el-button>
+        <el-button :disabled="!viewBox" @click="resetView">还原视图</el-button>
+        <el-button :disabled="!currentId" @click="toggleFullscreen">全屏</el-button>
+        <el-button :disabled="!currentId || !nodes.length" @click="runCheck">校验</el-button>
         <el-button :disabled="!currentId" @click="loadDetail">刷新状态</el-button>
+
       </div>
 
       <el-alert type="info" :closable="false" style="margin-bottom: 12px">
@@ -332,13 +507,16 @@ onMounted(async () => {
       </div>
 
       <el-empty v-if="!currentId" description="还没有拓扑，先新建一个" />
-      <div v-else v-loading="loading" class="canvas-wrap">
+      <div v-else ref="canvasWrap" v-loading="loading" class="canvas-wrap">
         <svg
           class="canvas"
+          :viewBox="viewBox || undefined"
+          preserveAspectRatio="xMinYMin meet"
           @mousemove="onCanvasMouseMove"
           @mouseup="onCanvasMouseUp"
           @mouseleave="onCanvasMouseUp"
         >
+
           <defs>
             <marker
               id="topo-arrow"
@@ -475,7 +653,29 @@ onMounted(async () => {
       </el-table>
     </el-card>
 
+    <el-dialog v-model="checkVisible" title="拓扑校验" width="560px">
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+        <template #title>
+          校验只看平台已有的事实：连线成环、孤立节点、没绑资源、绑定资源当前异常、自环与重复连线。
+          它不做可达性探测，也不判断"这条依赖对不对"——那要靠人。
+        </template>
+      </el-alert>
+      <div v-for="(item, idx) in checkItems" :key="idx" class="check-line">
+        <el-tag
+          size="small"
+          :type="item.level === 'error' ? 'danger' : item.level === 'warning' ? 'warning' : 'success'"
+        >
+          {{ item.level === 'error' ? '异常' : item.level === 'warning' ? '关注' : '正常' }}
+        </el-tag>
+        <span>{{ item.text }}</span>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="checkVisible = false">知道了</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="topoDialog.visible" title="新建拓扑" width="420px">
+
       <el-form label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="topoDialog.name" placeholder="例如 订单主链路" />
@@ -547,6 +747,22 @@ onMounted(async () => {
   height: 420px;
   display: block;
 }
+/* 全屏时画布铺满，别还留着 420px 的高度 */
+.canvas-wrap:fullscreen {
+  background-color: var(--el-bg-color);
+}
+.canvas-wrap:fullscreen .canvas {
+  height: 100vh;
+}
+.check-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .node {
   cursor: move;
 }

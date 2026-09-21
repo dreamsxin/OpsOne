@@ -8,6 +8,7 @@ import {
   type Profile
 } from '@/api'
 import { TOKEN_KEY } from '@/api/request'
+import { useTabsStore } from '@/stores/tabs'
 
 export const useUserStore = defineStore('user', {
   state: () => ({
@@ -60,6 +61,8 @@ export const useUserStore = defineStore('user', {
       this.permissions = []
       this.routesReady = false
       localStorage.removeItem(TOKEN_KEY)
+      // 页签是登录态的工作现场，退出时一并清掉，避免下个账号看到上个账号的页签
+      useTabsStore().logout()
     }
   }
 })

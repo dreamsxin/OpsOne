@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { listPublishedAnnouncements, type Announcement } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const rows = ref<Announcement[]>([])
@@ -46,14 +48,15 @@ onMounted(load)
         </el-timeline-item>
       </el-timeline>
 
-      <el-pagination
+      <!-- 公告是时间线阅读场景，页大小固定 10，保留原来的精简 layout：
+           否则「改每页条数」会让 v-if（total > pageSize）把整个分页条藏掉 -->
+      <Pagination
         v-if="total > query.pageSize"
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="total"
         v-model:current-page="query.page"
-        :page-size="query.pageSize"
-        @current-change="load"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        @change="load"
       />
     </el-card>
   </div>

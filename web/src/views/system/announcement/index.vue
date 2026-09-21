@@ -10,6 +10,8 @@ import {
   updateAnnouncement,
   type Announcement
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const rows = ref<Announcement[]>([])
@@ -145,13 +147,11 @@ onMounted(load)
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="total"
+      <Pagination
         v-model:current-page="query.page"
-        :page-size="query.pageSize"
-        @current-change="load"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        @change="load"
       />
     </el-card>
 

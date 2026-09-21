@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   checkTraceSource,
@@ -265,7 +266,22 @@ async function removeSource(row: TraceSource) {
   loadSources()
 }
 
-onMounted(loadSources)
+// 告警详情的「在 Jaeger 中查看 Trace」带 ?traceId=xxx 跳进来：数据源就绪后直接打开详情。
+// 本页会被页签工作台缓存，再次跳进来不重新挂载，所以 activate 时也认一次。
+const route = useRoute()
+let appliedTraceId = ''
+function applyDeepLink() {
+  const id = String(route.query.traceId ?? '')
+  if (!id || id === appliedTraceId) return
+  appliedTraceId = id
+  traceIdInput.value = id
+  openTrace(id)
+}
+onMounted(async () => {
+  await loadSources()
+  applyDeepLink()
+})
+onActivated(applyDeepLink)
 </script>
 
 <template>

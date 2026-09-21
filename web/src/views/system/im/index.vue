@@ -20,6 +20,8 @@ import {
   type ImSyncRun,
   type Role
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const tab = ref('apps')
 const loading = reactive({ list: false, submit: false, check: false, sync: false, sub: false })
@@ -418,13 +420,11 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          <el-pagination
+          <Pagination
             v-model:current-page="accountQuery.page"
-            class="page-pager"
-            layout="total, prev, pager, next"
+            v-model:page-size="accountQuery.pageSize"
             :total="accountTotal"
-            :page-size="accountQuery.pageSize"
-            @current-change="loadAccounts"
+            @change="loadAccounts"
           />
         </el-tab-pane>
 
@@ -485,13 +485,11 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          <el-pagination
+          <Pagination
             v-model:current-page="runQuery.page"
-            class="page-pager"
-            layout="total, prev, pager, next"
+            v-model:page-size="runQuery.pageSize"
             :total="runTotal"
-            :page-size="runQuery.pageSize"
-            @current-change="loadRuns"
+            @change="loadRuns"
           />
         </el-tab-pane>
       </el-tabs>

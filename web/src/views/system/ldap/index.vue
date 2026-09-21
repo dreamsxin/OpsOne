@@ -19,6 +19,8 @@ import {
   type LdapTryStep,
   type User
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const loading = ref(false)
 const servers = ref<LdapServer[]>([])
@@ -346,13 +348,11 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="accountTotal"
+      <Pagination
         v-model:current-page="accountQuery.page"
-        :page-size="accountQuery.pageSize"
-        @current-change="loadAccounts"
+        v-model:page-size="accountQuery.pageSize"
+        :total="accountTotal"
+        @change="loadAccounts"
       />
     </el-card>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { getAlertSituation, type AlertSituation } from '@/api'
 
@@ -142,6 +142,15 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   load()
 })
+
+// 页签工作台用 keep-alive 缓存页面：切走时组件不卸载，DOM 被挪进离屏容器。
+// 此时 resize 事件仍会打进来，echarts 从 clientWidth 拿到 0 就把画布缩成 0×0，
+// 切回来是空白图。所以监听跟着 activate/deactivate 走，回来时补一次 resize。
+onActivated(() => {
+  window.addEventListener('resize', handleResize)
+  handleResize()
+})
+onDeactivated(() => window.removeEventListener('resize', handleResize))
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)

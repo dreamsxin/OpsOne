@@ -8,6 +8,8 @@ import {
   type ExecJob,
   type TerminalSession
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const tab = ref('audit')
 
@@ -113,13 +115,11 @@ onMounted(loadAudit)
             <el-table-column prop="costMs" label="耗时(ms)" width="100" />
             <el-table-column prop="createdAt" label="时间" min-width="180" />
           </el-table>
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="auditTotal"
+          <Pagination
             v-model:current-page="auditQuery.page"
-            :page-size="auditQuery.pageSize"
-            @current-change="loadAudit"
+            v-model:page-size="auditQuery.pageSize"
+            :total="auditTotal"
+            @change="loadAudit"
           />
         </el-tab-pane>
 
@@ -147,13 +147,11 @@ onMounted(loadAudit)
             </el-table-column>
             <el-table-column prop="startedAt" label="开始时间" min-width="180" />
           </el-table>
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="sessionTotal"
+          <Pagination
             v-model:current-page="sessionQuery.page"
-            :page-size="sessionQuery.pageSize"
-            @current-change="loadSessions"
+            v-model:page-size="sessionQuery.pageSize"
+            :total="sessionTotal"
+            @change="loadSessions"
           />
         </el-tab-pane>
 
@@ -178,13 +176,11 @@ onMounted(loadAudit)
             </el-table-column>
             <el-table-column prop="startedAt" label="开始时间" min-width="180" />
           </el-table>
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="jobTotal"
+          <Pagination
             v-model:current-page="jobQuery.page"
-            :page-size="jobQuery.pageSize"
-            @current-change="loadJobs"
+            v-model:page-size="jobQuery.pageSize"
+            :total="jobTotal"
+            @change="loadJobs"
           />
         </el-tab-pane>
       </el-tabs>

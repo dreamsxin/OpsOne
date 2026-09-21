@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -14,6 +14,9 @@ import {
   type TerminalSession
 } from '@/api'
 import { TOKEN_KEY } from '@/api/request'
+import FilterChips, { type ChipItem } from '@/components/FilterChips.vue'
+import Pagination from '@/components/Pagination.vue'
+
 
 const tab = ref('sessions')
 
@@ -98,6 +101,45 @@ async function load() {
 function searchSessions() {
   query.page = 1
   load()
+}
+
+/** 会话快筛：状态与风险是排查时最常用的两个维度，点击即筛 */
+const sessionChips = computed<ChipItem[]>(() => [
+  { key: 'info', label: `当前 ${total.value} 条 · 本页 ${rows.value.length}`, static: true },
+  { key: 'status:active', label: '进行中', hint: '连接尚未关闭' },
+  { key: 'status:closed', label: '已结束' },
+  { key: 'risk:blocked', label: '有被拦命令', hint: '命中拦截规则', tone: 'danger' },
+  { key: 'risk:risky', label: '有风险命令', hint: '高风险或拦截', tone: 'warning' }
+])
+
+const sessionChipKey = ref<string | null>(null)
+
+function onSessionChipSelect(key: string) {
+  if (key === 'info') return
+  const [field, value] = key.split(':')
+  const wasActive = sessionChipKey.value === key
+  sessionChipKey.value = wasActive ? null : key
+  query.status = !wasActive && field === 'status' ? value : ''
+  query.risk = !wasActive && field === 'risk' ? value : ''
+  searchSessions()
+}
+
+/** 高级筛选（登录账号 / 日期范围）生效时给按钮打点 */
+const advancedActive = computed(
+  () => [query.loginUser, query.start, query.end].filter((v) => !!v).length
+)
+const showAdvanced = ref(false)
+
+function resetSessionFilters() {
+  query.keyword = ''
+  query.username = ''
+  query.loginUser = ''
+  query.status = ''
+  query.risk = ''
+  query.start = ''
+  query.end = ''
+  sessionChipKey.value = null
+  searchSessions()
 }
 
 // ---------- 跨会话命令检索 ----------
@@ -358,6 +400,9 @@ function closePlayer() {
 }
 
 onMounted(load)
+// 页签工作台缓存本页：切走时组件不卸载，回放的递归 setTimeout 会在后台继续跑帧，
+// 切回来进度条已经跑飞。暂停会把 playedOffset 存好，用户回来自己点继续。
+onDeactivated(pause)
 onBeforeUnmount(disposeTerm)
 </script>
 
@@ -366,6 +411,13 @@ onBeforeUnmount(disposeTerm)
     <el-card>
       <el-tabs v-model="tab" @tab-change="onTabChange">
         <el-tab-pane label="会话" name="sessions">
+          <FilterChips
+            :items="sessionChips"
+            :model-value="sessionChipKey"
+            style="margin-bottom: 12px"
+            @select="onSessionChipSelect"
+          />
+
           <div class="page-toolbar">
             <el-input
               v-model="query.keyword"
@@ -375,31 +427,45 @@ onBeforeUnmount(disposeTerm)
               @keyup.enter="searchSessions"
             />
             <el-input v-model="query.username" placeholder="操作人" style="width: 130px" clearable />
-            <el-input v-model="query.loginUser" placeholder="登录账号" style="width: 130px" clearable />
             <el-select v-model="query.status" placeholder="状态" clearable style="width: 120px">
               <el-option label="进行中" value="active" />
               <el-option label="已结束" value="closed" />
               <el-option label="异常" value="error" />
             </el-select>
-            <el-select v-model="query.risk" placeholder="风险" clearable style="width: 140px">
-              <el-option label="有被拦命令" value="blocked" />
-              <el-option label="有风险命令" value="risky" />
-            </el-select>
-            <el-date-picker
-              v-model="query.start"
-              type="date"
-              placeholder="开始日期"
-              value-format="YYYY-MM-DD"
-              style="width: 140px"
-            />
-            <el-date-picker
-              v-model="query.end"
-              type="date"
-              placeholder="截止日期"
-              value-format="YYYY-MM-DD"
-              style="width: 140px"
-            />
             <el-button type="primary" @click="searchSessions">查询</el-button>
+            <el-button @click="resetSessionFilters">重置</el-button>
+            <el-button link type="primary" @click="showAdvanced = !showAdvanced">
+              高级筛选
+              <el-badge v-if="advancedActive" :value="advancedActive" style="margin-left: 4px" />
+              <el-icon style="margin-left: 4px">
+                <ArrowUp v-if="showAdvanced" />
+                <ArrowDown v-else />
+              </el-icon>
+            </el-button>
+
+            <el-collapse-transition>
+              <div v-show="showAdvanced" class="advanced-inline">
+                <el-input v-model="query.loginUser" placeholder="登录账号" style="width: 130px" clearable />
+                <el-select v-model="query.risk" placeholder="风险" clearable style="width: 140px">
+                  <el-option label="有被拦命令" value="blocked" />
+                  <el-option label="有风险命令" value="risky" />
+                </el-select>
+                <el-date-picker
+                  v-model="query.start"
+                  type="date"
+                  placeholder="开始日期"
+                  value-format="YYYY-MM-DD"
+                  style="width: 140px"
+                />
+                <el-date-picker
+                  v-model="query.end"
+                  type="date"
+                  placeholder="截止日期"
+                  value-format="YYYY-MM-DD"
+                  style="width: 140px"
+                />
+              </div>
+            </el-collapse-transition>
           </div>
 
           <el-table v-loading="loading" :data="rows" border stripe>
@@ -443,13 +509,11 @@ onBeforeUnmount(disposeTerm)
             </el-table-column>
           </el-table>
 
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="total"
+          <Pagination
             v-model:current-page="query.page"
-            :page-size="query.pageSize"
-            @current-change="load"
+            v-model:page-size="query.pageSize"
+            :total="total"
+            @change="load"
           />
         </el-tab-pane>
 
@@ -534,15 +598,11 @@ onBeforeUnmount(disposeTerm)
             </el-table-column>
           </el-table>
 
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, sizes, prev, pager, next"
-            :total="hitTotal"
-            :page-sizes="[20, 50, 100]"
+          <Pagination
             v-model:current-page="cmdQuery.page"
             v-model:page-size="cmdQuery.pageSize"
-            @current-change="searchCommands"
-            @size-change="runCommandSearch"
+            :total="hitTotal"
+            @change="searchCommands"
           />
         </el-tab-pane>
       </el-tabs>
@@ -645,13 +705,11 @@ onBeforeUnmount(disposeTerm)
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination
-        style="margin-top: 8px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="cmdDetail.total"
+      <Pagination
         v-model:current-page="cmdDetail.page"
-        :page-size="cmdDetail.pageSize"
-        @current-change="loadDetailCommands"
+        v-model:page-size="cmdDetail.pageSize"
+        :total="cmdDetail.total"
+        @change="loadDetailCommands"
       />
     </el-drawer>
   </div>
@@ -662,5 +720,16 @@ onBeforeUnmount(disposeTerm)
   margin: 4px 0 8px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+.advanced-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  margin-top: 8px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 6px;
+  width: 100%;
 }
 </style>

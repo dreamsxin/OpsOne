@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import {
@@ -131,6 +131,14 @@ onMounted(async () => {
   }
   load()
 })
+
+// 缓存页切走后 DOM 在离屏容器里，此时 resize 会把 echarts 缩成 0×0、切回来空白，
+// 所以监听跟着 activate/deactivate 走，回来补一次 resize
+onActivated(() => {
+  window.addEventListener('resize', handleResize)
+  handleResize()
+})
+onDeactivated(() => window.removeEventListener('resize', handleResize))
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)

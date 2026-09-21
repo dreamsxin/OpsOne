@@ -15,6 +15,8 @@ import {
   type ModelPoolStat,
   type ModelUpstream
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const tab = ref('upstreams')
 
@@ -419,13 +421,11 @@ onMounted(loadUpstreams)
             </el-table-column>
           </el-table>
 
-          <el-pagination
+          <Pagination
             v-model:current-page="callQuery.page"
-            class="page-pager"
-            layout="total, prev, pager, next"
+            v-model:page-size="callQuery.pageSize"
             :total="callTotal"
-            :page-size="callQuery.pageSize"
-            @current-change="loadCalls"
+            @change="loadCalls"
           />
         </el-tab-pane>
       </el-tabs>

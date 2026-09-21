@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   closeKubeForward,
@@ -13,6 +13,8 @@ import {
   type KubeForward,
   type KubeForwardLimits
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const clusters = ref<KubeCluster[]>([])
 const rows = ref<KubeForward[]>([])
@@ -189,14 +191,30 @@ function remain(row: KubeForward) {
   return `${Math.floor(min / 60)} 小时 ${min % 60} 分`
 }
 
+// 5 秒一次的列表轮询。页签工作台用 keep-alive 缓存页面，切走时组件不会卸载，
+// 只靠 onBeforeUnmount 清定时器会让轮询在后台一直跑（每开过一次就多一份）。
+function startPolling() {
+  stopPolling()
+  timer = window.setInterval(load, 5000)
+}
+function stopPolling() {
+  if (timer !== null) {
+    window.clearInterval(timer)
+    timer = null
+  }
+}
+
 onMounted(async () => {
   clusters.value = await listKubeClusters()
   await load()
-  timer = window.setInterval(load, 5000)
+  startPolling()
 })
-onBeforeUnmount(() => {
-  if (timer !== null) window.clearInterval(timer)
+onActivated(() => {
+  load()
+  startPolling()
 })
+onDeactivated(stopPolling)
+onBeforeUnmount(stopPolling)
 
 watch(() => form.targetKind, loadTargets)
 watch(() => form.namespace, loadTargets)
@@ -285,13 +303,11 @@ watch(() => form.namespace, loadTargets)
         </el-table-column>
       </el-table>
 
-      <el-pagination
+      <Pagination
         v-model:current-page="query.page"
-        class="page-pager"
-        layout="total, prev, pager, next"
+        v-model:page-size="query.pageSize"
         :total="total"
-        :page-size="query.pageSize"
-        @current-change="load"
+        @change="load"
       />
     </el-card>
 

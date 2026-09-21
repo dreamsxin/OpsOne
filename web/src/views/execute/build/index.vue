@@ -18,6 +18,8 @@ import {
   type BuildRecord,
   type BuildServer
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const tab = ref('jobs')
 
@@ -316,13 +318,11 @@ onMounted(() => {
             </el-table-column>
           </el-table>
 
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="jobTotal"
+          <Pagination
             v-model:current-page="jobQuery.page"
-            :page-size="jobQuery.pageSize"
-            @current-change="loadJobs"
+            v-model:page-size="jobQuery.pageSize"
+            :total="jobTotal"
+            @change="loadJobs"
           />
         </el-tab-pane>
 
@@ -408,13 +408,11 @@ onMounted(() => {
             </el-table-column>
           </el-table>
 
-          <el-pagination
-            style="margin-top: 12px; justify-content: flex-end"
-            layout="total, prev, pager, next"
-            :total="recordTotal"
+          <Pagination
             v-model:current-page="recordQuery.page"
-            :page-size="recordQuery.pageSize"
-            @current-change="loadRecords"
+            v-model:page-size="recordQuery.pageSize"
+            :total="recordTotal"
+            @change="loadRecords"
           />
         </el-tab-pane>
       </el-tabs>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   deleteFile,
@@ -14,6 +14,11 @@ import {
   type FileEntry,
   type Host
 } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
+
+// 堡垒机终端页会把本组件嵌进抽屉并传 hostId：此时隐藏主机选择，路径从根开始
+const props = defineProps<{ hostId?: number }>()
 
 const hosts = ref<Host[]>([])
 const selectedId = ref<number | null>(null)
@@ -163,7 +168,20 @@ const actionLabel: Record<string, string> = {
   rename: '重命名'
 }
 
-onMounted(loadHosts)
+// 独立页面才需要主机下拉（嵌入终端抽屉时下拉不渲染），别多拉一次列表
+onMounted(() => {
+  if (!props.hostId) loadHosts()
+})
+
+watch(
+  () => props.hostId,
+  (id) => {
+    if (!id) return
+    selectedId.value = id
+    load('/')
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -171,6 +189,7 @@ onMounted(loadHosts)
     <el-card>
       <div class="page-toolbar">
         <el-select
+          v-if="!hostId"
           v-model="selectedId"
           placeholder="选择主机"
           filterable
@@ -261,13 +280,11 @@ onMounted(loadHosts)
         </el-table-column>
         <el-table-column prop="createdAt" label="时间" min-width="180" />
       </el-table>
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="auditTotal"
+      <Pagination
         v-model:current-page="auditQuery.page"
-        :page-size="auditQuery.pageSize"
-        @current-change="openAudits"
+        v-model:page-size="auditQuery.pageSize"
+        :total="auditTotal"
+        @change="openAudits"
       />
     </el-drawer>
   </div>

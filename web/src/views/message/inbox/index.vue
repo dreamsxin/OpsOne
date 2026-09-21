@@ -3,6 +3,8 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { listMessages, readAllMessages, readMessage, type Message } from '@/api'
+import Pagination from '@/components/Pagination.vue'
+
 
 const router = useRouter()
 const loading = ref(false)
@@ -110,13 +112,11 @@ onMounted(load)
         <el-table-column prop="createdAt" label="时间" min-width="180" />
       </el-table>
 
-      <el-pagination
-        style="margin-top: 12px; justify-content: flex-end"
-        layout="total, prev, pager, next"
-        :total="total"
+      <Pagination
         v-model:current-page="query.page"
-        :page-size="query.pageSize"
-        @current-change="load"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        @change="load"
       />
     </el-card>
 

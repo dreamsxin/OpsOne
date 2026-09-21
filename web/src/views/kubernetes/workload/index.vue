@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   getKubePodLogs,
@@ -208,6 +208,12 @@ watch(() => [logView.container, logView.previous, logView.timestamps, logView.ta
   if (logView.visible) loadLogs()
 })
 
+// keep-alive 缓存页面时切走不会卸载，日志自动刷新必须在 deactivate 时停掉，
+// 否则切到别的页签后还在后台每 5 秒拉一次日志
+onDeactivated(() => window.clearInterval(autoTimer))
+onActivated(() => {
+  if (logView.visible && logView.autoRefresh) toggleAutoRefresh(true)
+})
 onUnmounted(() => window.clearInterval(autoTimer))
 
 
