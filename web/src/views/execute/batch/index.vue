@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listExecJobs, listHosts, runExecJob, type ExecJob, type Host } from '@/api'
+import {
+  listExecJobs,
+  listHosts,
+  precheckExec,
+  runExecJob,
+  type ExecJob,
+  type ExecPrecheckResult,
+  type Host
+} from '@/api'
 
 const hosts = ref<Host[]>([])
 const jobs = ref<ExecJob[]>([])
@@ -9,6 +17,7 @@ const jobTotal = ref(0)
 const running = ref(false)
 const current = ref<ExecJob | null>(null)
 const detailVisible = ref(false)
+const precheck = ref<ExecPrecheckResult | null>(null)
 
 const form = reactive({ name: '', command: '', hostIds: [] as number[], timeout: 60 })
 const jobQuery = reactive({ page: 1, pageSize: 10 })
@@ -24,20 +33,51 @@ async function loadJobs() {
   jobTotal.value = data.total
 }
 
-async function submit() {
+function validate() {
   if (!form.command.trim()) {
     ElMessage.warning('请输入要执行的命令')
-    return
+    return false
   }
   if (!form.hostIds.length) {
     ElMessage.warning('请选择至少一台主机')
+    return false
+  }
+  return true
+}
+
+async function doPrecheck() {
+  if (!validate()) return null
+  const result = await precheckExec({ command: form.command, hostIds: form.hostIds })
+  precheck.value = result
+  return result
+}
+
+async function manualPrecheck() {
+  const result = await doPrecheck()
+  if (!result) return
+  if (result.ruleBlocked) {
+    ElMessage.error(result.reason)
+  } else if (result.needConfirm) {
+    ElMessage.warning(`可以下发，但目标含 ${result.prodHosts.length} 台生产主机，执行时需确认`)
+  } else if (result.status === 'warn') {
+    ElMessage.warning('命中提醒级命令规则，可以下发')
+  } else {
+    ElMessage.success('预检通过')
+  }
+}
+
+async function submit() {
+  // 先问后端：拦不拦、要不要确认。判定以后端为准（前端只加载了前 200 台主机，
+  // 自己数生产主机会漏；而且直接调接口也能绕过前端弹窗）
+  const result = await doPrecheck()
+  if (!result) return
+  if (result.ruleBlocked) {
+    ElMessage.error(result.reason)
     return
   }
-
-  const prodHosts = hosts.value.filter((h) => form.hostIds.includes(h.id) && h.env === 'prod')
-  if (prodHosts.length) {
+  if (result.needConfirm) {
     await ElMessageBox.confirm(
-      `本次下发包含 ${prodHosts.length} 台生产主机，确认继续？`,
+      `本次下发包含 ${result.prodHosts.length} 台生产主机（${result.prodHosts.join('、')}），确认继续？`,
       '生产环境确认',
       { type: 'warning' }
     )
@@ -45,7 +85,7 @@ async function submit() {
 
   running.value = true
   try {
-    current.value = await runExecJob({ ...form })
+    current.value = await runExecJob({ ...form, confirmProd: result.needConfirm })
     detailVisible.value = true
     ElMessage.success(`执行完成：成功 ${current.value.successNum}，失败 ${current.value.failedNum}`)
     loadJobs()
@@ -53,6 +93,7 @@ async function submit() {
     running.value = false
   }
 }
+
 
 function openDetail(job: ExecJob) {
   current.value = job
@@ -99,7 +140,36 @@ onMounted(() => {
             <el-button v-perm="'exec:run'" type="primary" :loading="running" @click="submit">
               执行
             </el-button>
+            <el-button v-perm="'exec:run'" @click="manualPrecheck">预检</el-button>
+
+            <el-alert
+              v-if="precheck"
+              style="margin-top: 12px"
+              :type="precheck.ruleBlocked ? 'error' : precheck.status === 'warn' || precheck.needConfirm ? 'warning' : 'success'"
+              :closable="false"
+              show-icon
+            >
+              <div>
+                {{
+                  precheck.ruleBlocked
+                    ? precheck.reason
+                    : precheck.needConfirm
+                      ? `目标含 ${precheck.prodHosts.length} 台生产主机：${precheck.prodHosts.join('、')}`
+                      : precheck.status === 'warn'
+                        ? '命中提醒级命令规则，可以下发'
+                        : '预检通过：未命中命令规则，目标里没有生产主机'
+                }}
+              </div>
+              <div v-for="hit in precheck.hits" :key="hit.ruleId" class="hit-line">
+                第 {{ hit.line }} 行命中
+                <el-tag size="small" :type="hit.action === 'block' ? 'danger' : 'warning'">
+                  {{ hit.action === 'block' ? '拦截' : '提醒' }}
+                </el-tag>
+                {{ hit.description || hit.pattern }}
+              </div>
+            </el-alert>
           </el-form>
+
         </el-card>
       </el-col>
 
@@ -158,3 +228,11 @@ onMounted(() => {
     </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.hit-line {
+  margin-top: 4px;
+  font-size: 12px;
+}
+</style>
+

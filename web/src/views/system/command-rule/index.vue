@@ -5,13 +5,27 @@ import {
   createCommandRule,
   deleteCommandRule,
   listCommandRules,
+  listExecGuardLogs,
   testCommandRule,
   updateCommandRule,
-  type CommandRule
+  type CommandRule,
+  type ExecGuardLog
 } from '@/api'
 
 const loading = ref(false)
 const rows = ref<CommandRule[]>([])
+
+const guardLogs = ref<ExecGuardLog[]>([])
+const guardTotal = ref(0)
+const guardSummary = ref<Record<string, number>>({})
+const guardQuery = reactive({ page: 1, pageSize: 10, status: '', keyword: '' })
+
+const sourceLabel: Record<string, string> = {
+  manual: '批量执行',
+  script: '脚本下发',
+  cron: '定时任务'
+}
+
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -99,18 +113,31 @@ async function runTest() {
   }
 }
 
-onMounted(load)
+async function loadGuardLogs() {
+  const data = await listExecGuardLogs(guardQuery)
+  guardLogs.value = data.list || []
+  guardTotal.value = data.total
+  guardSummary.value = data.summary || {}
+}
+
+onMounted(() => {
+  load()
+  loadGuardLogs()
+})
 </script>
+
 
 <template>
   <div class="page">
     <el-card>
       <el-alert type="warning" :closable="false" style="margin-bottom: 12px">
         <template #title>
-          规则在 PTY 输入流上匹配，能记录并阻断常见误操作，但拦不住 vim 的 :!cmd、base64
-          解码执行等绕过方式，不能当作强制访问控制使用。修改后对新建会话立即生效。
+          规则同时作用于三处：Web 终端（在 PTY 输入流上实时拦截）、脚本库（保存与下发前静态预检）、
+          批量执行与定时任务（下发前逐行匹配，命中拦截级规则一律不下发）。但它拦不住 vim 的 :!cmd、
+          base64 解码执行等绕过方式，不能当作强制访问控制使用。修改后立即生效。
         </template>
       </el-alert>
+
 
       <div class="page-toolbar">
         <el-input v-model="testCommand" placeholder="试跑一条命令看是否命中规则" style="width: 300px" />
@@ -145,6 +172,68 @@ onMounted(load)
       </el-table>
     </el-card>
 
+    <el-card style="margin-top: 12px">
+      <template #header>
+        <div class="guard-head">
+          <span>下发拦截流水</span>
+          <el-tag size="small" type="danger">已拦截 {{ guardSummary.blocked || 0 }}</el-tag>
+          <el-tag size="small" type="warning">命中提醒 {{ guardSummary.warn || 0 }}</el-tag>
+          <span class="guard-note">
+            被拦下的下发不会产生执行记录，这里是唯一线索；命中提醒级规则的下发也会记一条
+          </span>
+        </div>
+      </template>
+
+      <div class="page-toolbar">
+        <el-select v-model="guardQuery.status" placeholder="全部结果" clearable style="width: 140px" @change="loadGuardLogs">
+          <el-option label="已拦截" value="blocked" />
+          <el-option label="命中提醒" value="warn" />
+        </el-select>
+        <el-input
+          v-model="guardQuery.keyword"
+          placeholder="按命令 / 操作人 / 主机名搜索"
+          clearable
+          style="width: 240px"
+          @keyup.enter="loadGuardLogs"
+          @clear="loadGuardLogs"
+        />
+        <el-button @click="loadGuardLogs">查询</el-button>
+      </div>
+
+      <el-table :data="guardLogs" border stripe size="small">
+        <el-table-column prop="createdAt" label="时间" width="170" />
+        <el-table-column label="结果" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'blocked' ? 'danger' : 'warning'">
+              {{ row.status === 'blocked' ? '已拦截' : '命中提醒' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="100">
+          <template #default="{ row }">{{ sourceLabel[row.source] || row.source }}</template>
+        </el-table-column>
+        <el-table-column prop="command" label="命令" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="reason" label="原因" min-width="200" show-overflow-tooltip />
+        <el-table-column label="目标" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.hostCount }} 台<span v-if="row.prodCount">（生产 {{ row.prodCount }}）</span>
+            <span class="guard-note">{{ row.hostNames }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="username" label="操作人" width="100" />
+        <el-table-column prop="clientIp" label="来源 IP" width="130" />
+      </el-table>
+      <el-pagination
+        style="margin-top: 12px; justify-content: flex-end"
+        layout="total, prev, pager, next"
+        :total="guardTotal"
+        v-model:current-page="guardQuery.page"
+        :page-size="guardQuery.pageSize"
+        @current-change="loadGuardLogs"
+      />
+    </el-card>
+
+
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑规则' : '新增规则'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="正则" prop="pattern">
@@ -170,3 +259,18 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.guard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guard-note {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: normal;
+}
+</style>
+

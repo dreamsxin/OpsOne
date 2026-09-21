@@ -21,7 +21,7 @@ func Open(dsn string, debug bool) (*gorm.DB, error) {
 }
 
 func Migrate(g *gorm.DB) error {
-	return g.AutoMigrate(
+	if err := g.AutoMigrate(
 		&model.Company{}, &model.Department{},
 		&model.User{}, &model.Role{}, &model.Menu{},
 		&model.Host{}, &model.ExecJob{}, &model.ExecResult{}, &model.AuditLog{},
@@ -40,6 +40,7 @@ func Migrate(g *gorm.DB) error {
 		&model.AggregationPolicy{},
 		&model.AlertSilence{},
 		&model.DBQueryLog{},
+		&model.ExecGuardLog{},
 		&model.Event{}, &model.EventLog{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
@@ -51,7 +52,44 @@ func Migrate(g *gorm.DB) error {
 		&model.MetricSource{}, &model.SavedMetricQuery{}, &model.LogSource{}, &model.TraceSource{},
 		&model.ModelUpstream{}, &model.ModelCall{}, &model.AgentConfig{}, &model.AgentRun{},
 		&model.ImApp{}, &model.ImAccount{}, &model.ImSyncRun{},
-	)
+	); err != nil {
+		return err
+	}
+	return backfillCronProdConfirmed(g)
+}
+
+// cfgCronBackfill 记录「存量定时任务的生产确认已回填过」，避免每次启动都回填
+const cfgCronBackfill = "migration.cron_prod_confirmed_backfilled"
+
+// backfillCronProdConfirmed 升级兼容：下发闸门上线前建的定时任务没有「生产确认」这个概念。
+//
+// 如果直接按未确认处理，存量任务会在下一次触发时被闸门拦掉 —— 而定时任务通常在
+// 凌晨触发，没人看着，等于悄悄停掉了一批运维作业。所以这里把存量任务一次性视为
+// 已确认，并落一条内置配置记住做过了；之后新建或编辑任务都要重新显式确认。
+func backfillCronProdConfirmed(g *gorm.DB) error {
+	var exist model.SysConfig
+	err := g.Where("`key` = ?", cfgCronBackfill).First(&exist).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	res := g.Model(&model.CronJob{}).Where("prod_confirmed = ?", false).Update("prod_confirmed", true)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("[migrate] 下发闸门上线：%d 个存量定时任务按「已确认生产变更」处理，之后编辑需重新确认",
+			res.RowsAffected)
+	}
+	return g.Create(&model.SysConfig{
+		Group: "migration", Key: cfgCronBackfill, Value: "true", Type: "bool",
+		Label:   "定时任务生产确认已回填",
+		Remark:  "下发闸门上线时把存量定时任务视为已确认，只执行一次，请勿手工改动",
+		Builtin: true,
+	}).Error
 }
 
 // Seed 初始化菜单树、内置角色与管理员账号，可重复执行。
@@ -403,6 +441,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.model_call_days", Value: "365", Type: "int", Label: "模型调用流水保留天数", Remark: "AI 网关的用量与成本就从这张表算；删了就算不出那段时间的账。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.agent_run_days", Value: "365", Type: "int", Label: "Agent 运行记录保留天数", Remark: "含模型给出的结论正文；删了结论就找不回来了。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.db_query_days", Value: "180", Type: "int", Label: "数据库查询流水保留天数", Remark: "谁在哪个库跑过什么只读语句、被拦了哪些；能查库等于能看业务数据，建议与审计日志同档。0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.exec_guard_days", Value: "365", Type: "int", Label: "下发拦截流水保留天数", Remark: "被闸门拦下的下发尝试不会产生执行记录，这张表是唯一线索；建议比执行记录留得更久。0 表示永久保留", Builtin: true},
 	}
 
 	for i := range configs {

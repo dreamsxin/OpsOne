@@ -129,6 +129,8 @@ export interface CronJob {
   hostIds: number[]
   timeout: number
   enabled: boolean
+  /** 保存任务时是否确认过「会定期动生产主机」，调度触发时用的就是这次确认 */
+  prodConfirmed: boolean
   operator: string
   runCount: number
   lastStatus: string
@@ -136,6 +138,7 @@ export interface CronJob {
   lastJobId: number
   createdAt: string
 }
+
 
 export interface Alert {
   id: number
@@ -686,6 +689,60 @@ export const listExecJobs = (params: Record<string, any>) =>
   request<PageData<ExecJob>>({ url: '/exec/jobs', params })
 export const getExecJob = (id: number) => request<ExecJob>({ url: `/exec/jobs/${id}` })
 
+// ---------- 下发闸门（命令规则 + 生产确认） ----------
+
+export interface ExecPrecheckHit {
+  ruleId: number
+  pattern: string
+  action: 'block' | 'warn'
+  description: string
+  line: number
+  snippet: string
+}
+
+export interface ExecPrecheckResult {
+  status: 'pass' | 'warn' | 'blocked' | 'unknown'
+  blocked: boolean
+  /** true 表示被拦截级命令规则拦下，false 且 blocked 表示只是缺生产确认 */
+  ruleBlocked: boolean
+  needConfirm: boolean
+  reason: string
+  hits: ExecPrecheckHit[]
+  prodHosts: string[]
+  hostCount: number
+}
+
+export interface ExecGuardLog {
+  id: number
+  source: string
+  status: 'blocked' | 'warn'
+  reason: string
+  command: string
+  hostCount: number
+  prodCount: number
+  hostNames: string
+  ruleId: number
+  pattern: string
+  action: string
+  cronJobId: number
+  userId: number
+  username: string
+  clientIp: string
+  createdAt: string
+}
+
+export const precheckExec = (data: { command: string; hostIds?: number[] }) =>
+  request<ExecPrecheckResult>({ url: '/exec/precheck', method: 'POST', data })
+export const listExecGuardLogs = (params?: Record<string, any>) =>
+  request<{
+    list: ExecGuardLog[]
+    total: number
+    page: number
+    pageSize: number
+    summary: Record<string, number>
+  }>({ url: '/exec/guard-logs', params })
+
+
 export const listUsers = (params: Record<string, any>) =>
   request<PageData<User>>({ url: '/system/users', params })
 export const createUser = (data: Record<string, any>) =>
@@ -795,8 +852,8 @@ export const updateCronJob = (id: number, data: Record<string, any>) =>
   request<CronJob>({ url: `/scheduler/jobs/${id}`, method: 'PUT', data })
 export const deleteCronJob = (id: number) =>
   request({ url: `/scheduler/jobs/${id}`, method: 'DELETE' })
-export const runCronJobNow = (id: number) =>
-  request<ExecJob>({ url: `/scheduler/jobs/${id}/run`, method: 'POST' })
+export const runCronJobNow = (id: number, confirmProd = false) =>
+  request<ExecJob>({ url: `/scheduler/jobs/${id}/run`, method: 'POST', data: { confirmProd } })
 
 // ---------- 告警 ----------
 
@@ -2099,7 +2156,12 @@ export const renderScript = (id: number, params: Record<string, string>) =>
   })
 export const runScript = (
   id: number,
-  data: { hostIds: number[]; params?: Record<string, string>; timeout?: number }
+  data: {
+    hostIds: number[]
+    params?: Record<string, string>
+    timeout?: number
+    confirmProd?: boolean
+  }
 ) =>
   request<{ job: ExecJob; command: string; precheckStatus: string; precheckHits: PrecheckHit[] }>({
     url: `/exec/scripts/${id}/run`,

@@ -27,6 +27,7 @@ const (
 	CfgRetentionModelCall    = "retention.model_call_days"
 	CfgRetentionAgentRun     = "retention.agent_run_days"
 	CfgRetentionDBQuery      = "retention.db_query_days"
+	CfgRetentionExecGuard    = "retention.exec_guard_days"
 )
 
 // retentionTarget 一类可清理的数据
@@ -245,6 +246,20 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.DBQueryLog{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionExecGuard, label: "下发拦截流水",
+		note:      "被闸门拦下的下发尝试（高危命令、未确认的生产变更）与命中提醒规则的下发；这些尝试不产生执行记录，删了就查不到「谁试过下发 rm -rf」",
+		irreverse: true,
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.ExecGuardLog{}).Count(&total)
+			h.DB.Model(&model.ExecGuardLog{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.ExecGuardLog{}).RowsAffected
 		},
 	},
 }

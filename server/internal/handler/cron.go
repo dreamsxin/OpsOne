@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +46,9 @@ type cronJobReq struct {
 	HostIDs []uint `json:"hostIds" binding:"required,min=1"`
 	Timeout int    `json:"timeout"`
 	Enabled *bool  `json:"enabled"`
+	// ConfirmProd 目标含生产主机时必须为 true。调度触发时无人在场，
+	// 用的就是这次确认（落在 CronJob.ProdConfirmed 上）。
+	ConfirmProd bool `json:"confirmProd"`
 }
 
 // ListCronJobs 定时任务列表
@@ -89,6 +94,17 @@ func (h *Handler) CreateCronJob(c *gin.Context) {
 		response.Forbidden(c, "目标主机中包含你无权访问的主机")
 		return
 	}
+	// 拦截级命令在保存时就拒绝：等到凌晨三点触发才失败，那时没人看着
+	if err := h.guardCronCommand(req.Command); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	prod := h.prodHostNames(req.HostIDs)
+	if len(prod) > 0 && !req.ConfirmProd {
+		response.BadRequest(c, fmt.Sprintf("目标里有 %d 台生产主机（%s），需要确认后才能保存为定时任务",
+			len(prod), truncate(strings.Join(prod, "、"), 120)))
+		return
+	}
 
 	hostIDs, err := json.Marshal(req.HostIDs)
 	if err != nil {
@@ -99,7 +115,8 @@ func (h *Handler) CreateCronJob(c *gin.Context) {
 	job := model.CronJob{
 		Name: req.Name, Spec: req.Spec, Command: req.Command, HostIDs: string(hostIDs),
 		Timeout: normalizeTimeout(req.Timeout), Enabled: true,
-		CreatedBy: user.ID, Operator: user.Username,
+		ProdConfirmed: len(prod) > 0 && req.ConfirmProd,
+		CreatedBy:     user.ID, Operator: user.Username,
 	}
 	if req.Enabled != nil {
 		job.Enabled = *req.Enabled
@@ -132,6 +149,23 @@ func (h *Handler) UpdateCronJob(c *gin.Context) {
 		return
 	}
 
+	// 编辑同样要校验数据范围：否则能先建一个合规任务，再把目标改成范围外的主机
+	user := middleware.CurrentUser(c)
+	if len(h.filterVisibleHostIDs(user, req.HostIDs)) != len(req.HostIDs) {
+		response.Forbidden(c, "目标主机中包含你无权访问的主机")
+		return
+	}
+	if err := h.guardCronCommand(req.Command); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	prod := h.prodHostNames(req.HostIDs)
+	if len(prod) > 0 && !req.ConfirmProd {
+		response.BadRequest(c, fmt.Sprintf("目标里有 %d 台生产主机（%s），需要确认后才能保存",
+			len(prod), truncate(strings.Join(prod, "、"), 120)))
+		return
+	}
+
 	hostIDs, err := json.Marshal(req.HostIDs)
 	if err != nil {
 		response.Error(c, "主机列表序列化失败")
@@ -141,6 +175,7 @@ func (h *Handler) UpdateCronJob(c *gin.Context) {
 	job.Name, job.Spec, job.Command = req.Name, req.Spec, req.Command
 	job.HostIDs = string(hostIDs)
 	job.Timeout = normalizeTimeout(req.Timeout)
+	job.ProdConfirmed = len(prod) > 0 && req.ConfirmProd
 	if req.Enabled != nil {
 		job.Enabled = *req.Enabled
 	}
@@ -174,10 +209,26 @@ func (h *Handler) RunCronJobNow(c *gin.Context) {
 		return
 	}
 
+	// 立即执行是人工动作，按当前操作人的数据范围复查一次，
+	// 否则「有 cron:run 权限」就等于能借任务之名往范围外的主机上下发
+	hostIDs := parseHostIDs(job.HostIDs)
+	user := middleware.CurrentUser(c)
+	if len(h.filterVisibleHostIDs(user, hostIDs)) != len(hostIDs) {
+		response.Forbidden(c, "该任务的目标主机中包含你无权访问的主机")
+		return
+	}
+
+	// 立即执行时人在场，所以要求本次请求自己确认，而不是复用保存时的确认
+	var body struct {
+		ConfirmProd bool `json:"confirmProd"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
 	execJob, err := h.RunOnHosts(c.Request.Context(), ExecRequest{
 		Name: job.Name, Command: job.Command, Timeout: job.Timeout,
-		HostIDs: parseHostIDs(job.HostIDs), UserID: job.CreatedBy,
-		Operator: middleware.CurrentUser(c).Username, Source: "cron", CronJobID: job.ID,
+		HostIDs: hostIDs, UserID: job.CreatedBy,
+		Operator: user.Username, Source: "cron", CronJobID: job.ID,
+		ConfirmProd: body.ConfirmProd, ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -202,6 +253,8 @@ func (h *Handler) ExecuteCronJob(job model.CronJob) {
 	execJob, err := h.RunOnHosts(ctx, ExecRequest{
 		Name: job.Name, Command: job.Command, Timeout: job.Timeout, HostIDs: hostIDs,
 		UserID: job.CreatedBy, Operator: "scheduler", Source: "cron", CronJobID: job.ID,
+		// 调度触发时无人在场，用保存任务时的那次生产确认
+		ConfirmProd: job.ProdConfirmed,
 	})
 	if err != nil {
 		log.Printf("[scheduler] 任务 %d(%s) 执行失败: %v", job.ID, job.Name, err)

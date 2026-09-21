@@ -229,8 +229,11 @@ async function submitRun() {
   try {
     const res = await runScript(current.value.id, {
       hostIds: runHostIDs.value,
-      params: runParams.value
+      params: runParams.value,
+      // 后端会自己判断目标里有没有生产主机；这里如实告诉它「人已经确认过了」
+      confirmProd: prodHosts.length > 0
     })
+
     runJob.value = res.job
     renderedCommand.value = res.command
     ElMessage.success(`执行完成：成功 ${res.job.successNum}，失败 ${res.job.failedNum}`)

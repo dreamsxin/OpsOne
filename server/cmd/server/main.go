@@ -420,6 +420,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/exec/jobs", h.ListExecJobs)
 		auth.GET("/exec/jobs/:id", h.GetExecJob)
 		auth.POST("/exec/jobs", middleware.RequirePerm("exec:run"), h.RunExecJob)
+		// 下发闸门：预检与拦截流水
+		auth.POST("/exec/precheck", middleware.RequirePerm("exec:run"), h.PrecheckExec)
+		auth.GET("/exec/guard-logs", h.ListExecGuardLogs)
 
 		auth.GET("/sessions", h.ListSessions)
 		auth.GET("/sessions/commands", h.SearchSessionCommands)

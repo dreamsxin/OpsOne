@@ -26,11 +26,19 @@ type ExecRequest struct {
 	HostIDs   []uint
 	UserID    uint
 	Operator  string
-	Source    string // manual | cron
+	Source    string // manual | script | cron
 	CronJobID uint
+	// ConfirmProd 调用方已显式确认「要往生产主机上下发」。
+	// 目标里有生产主机而这里是 false 时，下发会被闸门拒绝（见 exec_guard.go）。
+	ConfirmProd bool
+	// ClientIP 仅用于闸门流水留痕，调度器触发时为空
+	ClientIP string
 }
 
 // RunOnHosts 在指定主机上并发执行命令并落库，同步等待全部主机结束。
+//
+// 所有下发路径（批量执行 / 脚本下发 / 定时任务立即执行与调度触发）都走这里，
+// 下发闸门也挂在这里——见 exec_guard.go 的说明。
 func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJob, error) {
 	if req.Command == "" {
 		return nil, errors.New("命令不能为空")
@@ -48,6 +56,13 @@ func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJ
 		return nil, errors.New("目标主机不存在")
 	}
 
+	// 下发闸门：命令规则与生产确认。被拦下的尝试不会产生执行记录，所以单独留痕。
+	decision := h.inspectExec(req.Command, hosts, req.ConfirmProd)
+	h.recordExecGuard(req, hosts, decision)
+	if decision.Status == "blocked" {
+		return nil, errors.New(decision.Reason)
+	}
+
 	name := req.Name
 	if name == "" {
 		name = "批量执行"
@@ -62,6 +77,8 @@ func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJ
 		Source: source, CronJobID: req.CronJobID,
 		CreatedBy: req.UserID, Operator: req.Operator,
 		Total: len(hosts), StartedAt: time.Now(),
+		RiskStatus: decision.Status, RiskHits: hitsJSON(decision.Hits),
+		ProdCount: len(decision.ProdHosts), ProdConfirmed: req.ConfirmProd,
 	}
 	if err := h.DB.Create(&job).Error; err != nil {
 		return nil, err
@@ -93,6 +110,8 @@ type execReq struct {
 	Command string `json:"command" binding:"required"`
 	HostIDs []uint `json:"hostIds" binding:"required,min=1"`
 	Timeout int    `json:"timeout"`
+	// ConfirmProd 目标含生产主机时必须为 true，否则后端拒绝下发
+	ConfirmProd bool `json:"confirmProd"`
 }
 
 // RunExecJob 手动批量下发命令，同步返回全部结果
@@ -114,6 +133,7 @@ func (h *Handler) RunExecJob(c *gin.Context) {
 	job, err := h.RunOnHosts(c.Request.Context(), ExecRequest{
 		Name: req.Name, Command: req.Command, Timeout: req.Timeout, HostIDs: allowed,
 		UserID: user.ID, Operator: user.Username, Source: "manual",
+		ConfirmProd: req.ConfirmProd, ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		response.BadRequest(c, err.Error())

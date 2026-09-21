@@ -390,7 +390,7 @@ type ExecJob struct {
 	Command    string     `gorm:"type:text;not null" json:"command"`
 	Timeout    int        `gorm:"default:60" json:"timeout"` // 单主机超时秒数
 	Status     string     `gorm:"size:16;default:running" json:"status"`
-	Source     string     `gorm:"size:16;default:manual" json:"source"` // manual | cron
+	Source     string     `gorm:"size:16;default:manual" json:"source"` // manual | script | cron
 	CronJobID  uint       `gorm:"index;default:0" json:"cronJobId"`
 	CreatedBy  uint       `gorm:"index" json:"createdBy"`
 	Operator   string     `gorm:"size:64" json:"operator"`
@@ -400,26 +400,59 @@ type ExecJob struct {
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt"`
 
+	// 下发闸门的判定结果（见 handler/exec_guard.go）
+	RiskStatus    string `gorm:"size:16" json:"riskStatus"` // pass | warn（blocked 不会产生作业）
+	RiskHits      string `gorm:"type:text" json:"riskHits"` // 命中的命令规则 JSON
+	ProdCount     int    `json:"prodCount"`                 // 目标里的生产主机台数
+	ProdConfirmed bool   `json:"prodConfirmed"`             // 下发时是否显式确认过生产变更
+
 	Results []ExecResult `gorm:"foreignKey:JobID" json:"results,omitempty"`
+}
+
+// ExecGuardLog 下发闸门流水：被拦下的下发尝试，以及命中提醒级规则的下发。
+//
+// 放行且没命中任何规则的下发不记这里（exec_jobs 本身就是记录）；
+// 被拦下的下发不会产生 exec_jobs，不单独记就彻底查不到。
+type ExecGuardLog struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Source    string `gorm:"size:16;index" json:"source"` // manual | script | cron
+	Status    string `gorm:"size:16;index" json:"status"` // blocked | warn
+	Reason    string `gorm:"size:512" json:"reason"`
+	Command   string `gorm:"type:text" json:"command"`
+	HostCount int    `json:"hostCount"`
+	ProdCount int    `json:"prodCount"`
+	HostNames string `gorm:"type:text" json:"hostNames"` // 顿号分隔，超长截断
+	RuleID    uint   `json:"ruleId"`
+	Pattern   string `gorm:"size:256" json:"pattern"`
+	Action    string `gorm:"size:16" json:"action"` // block | warn
+	CronJobID uint   `gorm:"index;default:0" json:"cronJobId"`
+	UserID    uint   `gorm:"index" json:"userId"`
+	Username  string `gorm:"size:64" json:"username"`
+	ClientIP  string `gorm:"size:64" json:"clientIp"`
+
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // CronJob 定时任务：按 cron 表达式在一批主机上执行命令
 type CronJob struct {
-	ID         uint       `gorm:"primaryKey" json:"id"`
-	Name       string     `gorm:"size:128;not null" json:"name"`
-	Spec       string     `gorm:"size:64;not null" json:"spec"` // 五段 cron 表达式
-	Command    string     `gorm:"type:text;not null" json:"command"`
-	HostIDs    string     `gorm:"type:text" json:"-"` // JSON 数组，接口层用 hostIds 暴露
-	Timeout    int        `gorm:"default:60" json:"timeout"`
-	Enabled    bool       `gorm:"default:true" json:"enabled"`
-	CreatedBy  uint       `gorm:"index" json:"createdBy"`
-	Operator   string     `gorm:"size:64" json:"operator"`
-	RunCount   int        `json:"runCount"`
-	LastStatus string     `gorm:"size:16" json:"lastStatus"` // success | partial | failed
-	LastRunAt  *time.Time `json:"lastRunAt"`
-	LastJobID  uint       `json:"lastJobId"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	Name    string `gorm:"size:128;not null" json:"name"`
+	Spec    string `gorm:"size:64;not null" json:"spec"` // 五段 cron 表达式
+	Command string `gorm:"type:text;not null" json:"command"`
+	HostIDs string `gorm:"type:text" json:"-"` // JSON 数组，接口层用 hostIds 暴露
+	Timeout int    `gorm:"default:60" json:"timeout"`
+	Enabled bool   `gorm:"default:true" json:"enabled"`
+	// ProdConfirmed 保存任务时是否确认过「这个任务会定期往生产主机上下发」。
+	// 调度触发时无人在场，就用保存时的这次确认；目标改成含生产主机就要重新确认。
+	ProdConfirmed bool       `json:"prodConfirmed"`
+	CreatedBy     uint       `gorm:"index" json:"createdBy"`
+	Operator      string     `gorm:"size:64" json:"operator"`
+	RunCount      int        `json:"runCount"`
+	LastStatus    string     `gorm:"size:16" json:"lastStatus"` // success | partial | failed
+	LastRunAt     *time.Time `json:"lastRunAt"`
+	LastJobID     uint       `json:"lastJobId"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // FileAudit 文件传输留痕，列目录不记录，仅记录产生变更或数据外带的动作

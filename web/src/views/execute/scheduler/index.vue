@@ -108,11 +108,24 @@ async function submit() {
     return
   }
 
+  // 定时任务触发时没人在场，所以「会不会定期动生产机器」要在保存这一刻确认
+  const prodHosts = hosts.value.filter((h) => form.hostIds.includes(h.id) && h.env === 'prod')
+  if (prodHosts.length) {
+    await ElMessageBox.confirm(
+      `该任务会按计划在 ${prodHosts.length} 台生产主机上执行（${prodHosts
+        .map((h) => h.name)
+        .join('、')}），确认保存？`,
+      '生产环境确认',
+      { type: 'warning' }
+    )
+  }
+  const payload = { ...form, confirmProd: prodHosts.length > 0 }
+
   if (editingId.value) {
-    await updateCronJob(editingId.value, { ...form })
+    await updateCronJob(editingId.value, payload)
     ElMessage.success('已更新')
   } else {
-    await createCronJob({ ...form })
+    await createCronJob(payload)
     ElMessage.success('已创建')
   }
   dialogVisible.value = false
@@ -126,7 +139,9 @@ async function toggleEnabled(row: CronJob) {
     command: row.command,
     hostIds: row.hostIds,
     timeout: row.timeout,
-    enabled: row.enabled
+    enabled: row.enabled,
+    // 只是启停，不改目标；沿用这条任务已有的生产确认，避免启停时被闸门要求重新确认
+    confirmProd: row.prodConfirmed
   })
   ElMessage.success(row.enabled ? '已启用调度' : '已停用调度')
   load()
@@ -142,7 +157,8 @@ async function runNow(row: CronJob) {
     )
   }
 
-  const job = await runCronJobNow(row.id)
+  const job = await runCronJobNow(row.id, prodHosts.length > 0)
+
   ElMessage.success(`执行完成：成功 ${job.successNum}，失败 ${job.failedNum}`)
   detail.value = job
   currentJob.value = row

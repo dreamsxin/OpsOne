@@ -386,6 +386,8 @@ type scriptRunReq struct {
 	HostIDs []uint            `json:"hostIds" binding:"required,min=1"`
 	Params  map[string]string `json:"params"`
 	Timeout int               `json:"timeout"`
+	// ConfirmProd 目标含生产主机时必须为 true，否则闸门拒绝下发
+	ConfirmProd bool `json:"confirmProd"`
 }
 
 // RunScript 把脚本渲染后通过批量执行下发。
@@ -445,6 +447,7 @@ func (h *Handler) RunScript(c *gin.Context) {
 	job, err := h.RunOnHosts(c.Request.Context(), ExecRequest{
 		Name: "脚本：" + item.Name, Command: command, Timeout: timeout,
 		HostIDs: allowed, UserID: user.ID, Operator: user.Username, Source: "script",
+		ConfirmProd: req.ConfirmProd, ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
