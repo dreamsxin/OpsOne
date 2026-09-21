@@ -576,37 +576,27 @@ type Event struct {
 	LastSeen  time.Time `json:"lastSeen"`
 }
 
-// Events 取事件。onlyWarning=true 时只要 Warning，排查时先看这些。
-func (c *Client) Events(ctx context.Context, namespace string, onlyWarning bool, limit int) ([]Event, error) {
-	query := url.Values{}
-	if limit > 0 {
-		query.Set("limit", strconv.Itoa(limit))
-	}
-	if onlyWarning {
-		query.Set("fieldSelector", "type=Warning")
-	}
+// eventList API Server 返回的事件列表。抽成命名类型是为了让按对象反查
+// （ObjectEvents）复用同一套解析，避免两处结构慢慢长歪。
+type eventList struct {
+	Items []struct {
+		Metadata struct {
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+		Type           string `json:"type"`
+		Reason         string `json:"reason"`
+		Message        string `json:"message"`
+		Count          int    `json:"count"`
+		LastTimestamp  string `json:"lastTimestamp"`
+		FirstTimestamp string `json:"firstTimestamp"`
+		InvolvedObject struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"involvedObject"`
+	} `json:"items"`
+}
 
-	var raw struct {
-		Items []struct {
-			Metadata struct {
-				Namespace string `json:"namespace"`
-			} `json:"metadata"`
-			Type           string `json:"type"`
-			Reason         string `json:"reason"`
-			Message        string `json:"message"`
-			Count          int    `json:"count"`
-			LastTimestamp  string `json:"lastTimestamp"`
-			FirstTimestamp string `json:"firstTimestamp"`
-			InvolvedObject struct {
-				Kind string `json:"kind"`
-				Name string `json:"name"`
-			} `json:"involvedObject"`
-		} `json:"items"`
-	}
-	if err := c.get(ctx, namespacedPath("/api/v1", namespace, "events"), query, &raw); err != nil {
-		return nil, err
-	}
-
+func convertEvents(raw eventList) []Event {
 	list := make([]Event, 0, len(raw.Items))
 	for _, item := range raw.Items {
 		event := Event{
@@ -626,5 +616,22 @@ func (c *Client) Events(ctx context.Context, namespace string, onlyWarning bool,
 		}
 		list = append(list, event)
 	}
-	return list, nil
+	return list
+}
+
+// Events 取事件。onlyWarning=true 时只要 Warning，排查时先看这些。
+func (c *Client) Events(ctx context.Context, namespace string, onlyWarning bool, limit int) ([]Event, error) {
+	query := url.Values{}
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	if onlyWarning {
+		query.Set("fieldSelector", "type=Warning")
+	}
+
+	var raw eventList
+	if err := c.get(ctx, namespacedPath("/api/v1", namespace, "events"), query, &raw); err != nil {
+		return nil, err
+	}
+	return convertEvents(raw), nil
 }

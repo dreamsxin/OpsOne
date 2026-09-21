@@ -171,7 +171,17 @@
 ### 16. 容器平台（集群接入与资源改动）
 
 - **kubeconfig 明文存库**（`kube_clusters.kubeconfig`），里面的客户端证书与私钥通常就是 cluster-admin 凭据 —— **这是本平台目前权限最大的一份存储凭据**，拿到数据库等于拿到集群。与主机凭据同等对待（见第 1 节），接口不返回该字段，编辑时留空表示不修改。生产环境建议给平台单独签一个权限收敛的 ServiceAccount kubeconfig，而不是直接用 admin 那份。
-- **平台开放的写操作只有两种**：服务端 apply（`application/apply-patch+yaml`，`fieldManager=opsone`）与改副本数（`/scale` 子资源），且**只对白名单类型生效**：Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / Ingress。**不提供 delete、exec，也不开放 Secret / Namespace / RBAC 对象** —— 要动这些仍然走 kubectl。白名单在 `server/internal/k8s/resource.go` 的 `resourceKinds`。但**凭据本身的权限不受平台限制** —— 拿到数据库的人可以用这份 kubeconfig 直接对集群做任何事。
+- **平台开放的写操作只有三种**：服务端 apply（`application/apply-patch+yaml`，`fieldManager=opsone`）、改副本数（`/scale` 子资源）、滚动重启（给 Pod 模板打 `kubectl.kubernetes.io/restartedAt` 注解，与 `kubectl rollout restart` 同一做法）。**不提供 delete、exec** —— 要做这些仍然走 kubectl。
+- **资源类型分三档，白名单在 `server/internal/k8s/resource.go` 的 `resourceKinds`**：
+  - 可写：Deployment / StatefulSet / DaemonSet / CronJob / Job / Service / Ingress / ConfigMap / PersistentVolumeClaim（只有前三种可滚动重启，前两种可改副本数）
+  - 只读：Pod / ReplicaSet / Endpoints / Namespace / Node / PersistentVolume / StorageClass —— 由控制器维护或改动代价过大，apply / scale / restart 在**客户端与 handler 两处**都会拒绝，界面上也不给按钮
+  - 脱敏只读：Secret。列表只给「类型 + N 个键」，详情把 `data` / `stringData` 的值换成占位符。**这份 YAML 禁止提交**，否则会把真实值覆盖成占位符 —— 这是「功能看起来能用其实是破坏性的」最典型的一种，因此在 handler 里显式挡掉
+  - **RBAC（Role / ClusterRole / Binding / ServiceAccount）始终不开放**，连只读都不给：能看到全部权限绑定本身就是侦察面
+- **凭据本身的权限不受平台限制** —— 拿到数据库的人可以用这份 kubeconfig 直接对集群做任何事，白名单只约束平台这条路径。
+- **滚动重启不是「重启容器」**：它让控制器用新 Pod 逐步替换旧 Pod，副本数为 1 或没有就绪探针时会有短暂不可用，界面确认框里写明了这一点。重启同样过 `kube:write` 与留痕（action=restart），也支持预检。
+- **按对象反查事件用的是 `fieldSelector=involvedObject.name`**，不是把整命名空间的事件拉回来自己筛。事件在集群里有保留期（默认 1 小时），**空列表只说明「最近没有事件」**，界面上照实写，不暗示「一切正常」。
+- **关联 Pod 只认等值标签选择器**（`spec.selector.matchLabels` 或 Service 的 `spec.selector`）。用 `matchExpressions` 的对象问不出来时返回空并说明原因，**不按名字前缀猜** —— 猜出来的关联关系比没有更危险。
+
 - **写操作要 `kube:write` 权限**，与「维护集群」的 `kube:manage` 分开：能改资源的人不一定要能换 kubeconfig，反之亦然。前端 `v-perm` 只控制显示，拦截在路由上。
 - **每次写操作单独留痕**（`kube_change_logs`）：集群、对象、动作、是否只预检、是否强制接管字段、**提交的 YAML 原文**、成功或失败、API Server 的原话、操作人与来源 IP，失败也落库。留痕会原样存下 YAML 里的一切内容，**别把密钥写进 ConfigMap 再 apply**，那等于把密钥抄进了留痕表。保留天数由「数据留存」的 `retention.kube_change_days` 控制（默认 180 天）。
 - **预检（`dryRun=All`）是 API Server 侧的完整校验**（含准入控制）但不落盘，用来在真改之前确认 YAML 能过。预检也记留痕，检索时可用「只看真改过的」排除。

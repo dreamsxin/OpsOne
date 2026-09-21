@@ -85,20 +85,25 @@ func TestWrongKeyFails(t *testing.T) {
 	}
 }
 
-// GCM 的完整性：改一个字节就要解不开，而不是解出半截垃圾
+// GCM 的完整性：改一个字节就要解不开，而不是解出半截垃圾。
+//
+// 改的是中间位置的字符而不是末尾：末尾那个字符只承载几个有效 bit，
+// 改它可能解出完全相同的字节，测试就会时而通过时而失败
 func TestTamperDetected(t *testing.T) {
 	b := New("k")
 	sealed := b.Seal("payload")
-	tampered := sealed[:len(sealed)-2] + func() string {
-		if strings.HasSuffix(sealed, "A=") {
-			return "B="
-		}
-		return "A="
-	}()
+	body := strings.TrimPrefix(sealed, "enc:v1:")
+	mid := len(body) / 2
+	swap := byte('A')
+	if body[mid] == 'A' {
+		swap = 'B'
+	}
+	tampered := "enc:v1:" + body[:mid] + string(swap) + body[mid+1:]
 	if _, err := b.Open(tampered); err == nil {
 		t.Fatal("篡改后仍能解密")
 	}
 }
+
 
 func min(a, b int) int {
 	if a < b {

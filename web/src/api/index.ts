@@ -2490,6 +2490,14 @@ export interface KubeResourceKind {
   resource: string
   namespaced: boolean
   scalable: boolean
+  /** 支持滚动重启（有 Pod 模板的工作负载） */
+  restartable: boolean
+  /** 只读：apply / scale / restart 都会被拒 */
+  readOnly: boolean
+  /** 详情脱敏（Secret 只给键名不给值），因此也不能提交 */
+  redacted: boolean
+  /** 界面分组：工作负载 / 网络 / 配置 / 存储 / 集群 */
+  group: string
 }
 
 export interface KubeResourceItem {
@@ -2498,6 +2506,7 @@ export interface KubeResourceItem {
   name: string
   summary: string
   createdAt: string
+  labels?: Record<string, string>
 }
 
 export interface KubeResourceDetail {
@@ -2505,9 +2514,35 @@ export interface KubeResourceDetail {
   namespace: string
   name: string
   scalable: boolean
+  restartable: boolean
+  readOnly: boolean
+  redacted: boolean
   yaml: string
   hint: string
+  /** 非空表示这个对象能按标签下钻到 Pod */
+  podSelector: string
 }
+
+export interface KubeRestartResult {
+  kind: string
+  namespace: string
+  name: string
+  restartedAt: string
+  replicas: number
+  dryRun: boolean
+  detail: string
+}
+
+export interface KubeEventItem {
+  namespace: string
+  type: string
+  reason: string
+  message: string
+  object: string
+  count: number
+  lastSeen: string
+}
+
 
 export interface KubeApplyResult {
   kind: string
@@ -2536,7 +2571,7 @@ export interface KubeChangeLog {
   kind: string
   namespace: string
   name: string
-  action: 'apply' | 'scale'
+  action: 'apply' | 'scale' | 'restart'
   dryRun: boolean
   forced: boolean
   payload: string
@@ -2549,16 +2584,45 @@ export interface KubeChangeLog {
 }
 
 export const listKubeResourceKinds = () => request<KubeResourceKind[]>({ url: '/kube/resource-kinds' })
-export const listKubeResources = (id: number, kind: string, namespace?: string) =>
-  request<{ items: KubeResourceItem[]; total: number; scalable: boolean }>({
+export const listKubeResources = (
+  id: number,
+  kind: string,
+  params?: { namespace?: string; keyword?: string; labelSelector?: string }
+) =>
+  request<{
+    items: KubeResourceItem[]
+    total: number
+    matched: number
+    kind: string
+    scalable: boolean
+    restartable: boolean
+    readOnly: boolean
+    namespaced: boolean
+    namespaceIgnored: boolean
+  }>({
     url: `/kube/clusters/${id}/resources`,
-    params: { kind, ...(namespace ? { namespace } : {}) }
+    params: { kind, ...(params || {}) }
   })
 export const getKubeResource = (id: number, kind: string, namespace: string, name: string) =>
   request<KubeResourceDetail>({
     url: `/kube/clusters/${id}/resource`,
     params: { kind, namespace, name }
   })
+export const listKubeObjectEvents = (id: number, kind: string, namespace: string, name: string) =>
+  request<{ items: KubeEventItem[]; total: number; note: string }>({
+    url: `/kube/clusters/${id}/resource/events`,
+    params: { kind, namespace, name }
+  })
+export const listKubeRelatedPods = (id: number, kind: string, namespace: string, name: string) =>
+  request<{ items: KubeResourceItem[]; total: number; selector: string; note: string }>({
+    url: `/kube/clusters/${id}/resource/pods`,
+    params: { kind, namespace, name }
+  })
+export const restartKubeWorkload = (
+  id: number,
+  data: { kind: string; namespace: string; name: string; dryRun: boolean }
+) => request<KubeRestartResult>({ url: `/kube/clusters/${id}/resource/restart`, method: 'POST', data })
+
 export const applyKubeResource = (id: number, data: { yaml: string; dryRun: boolean; force?: boolean }) =>
   request<KubeApplyResult>({ url: `/kube/clusters/${id}/resource/apply`, method: 'POST', data })
 export const scaleKubeResource = (

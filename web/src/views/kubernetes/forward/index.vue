@@ -111,7 +111,7 @@ async function loadTargets() {
         summary: `${p.phase} · ${p.ready}`
       }))
     } else {
-      const data = await listKubeResources(form.clusterId, 'Service', form.namespace)
+      const data = await listKubeResources(form.clusterId, 'Service', { namespace: form.namespace })
       targets.value = (data.items || []).map((s) => ({ name: s.name, summary: s.summary }))
     }
   } catch (err: any) {
