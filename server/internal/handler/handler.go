@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"ops-platform/server/internal/config"
+	"ops-platform/server/internal/cryptox"
 	"ops-platform/server/internal/scheduler"
 )
 
@@ -36,9 +37,18 @@ type Handler struct {
 
 	// imLogins 扫码登录的 state 与一次性 ticket，同样只在进程内
 	imLogins *imLoginStore
+
+	// Crypto 凭证库的字段加解密。OPS_SECRET_KEY 为空时它是明文模式（Enabled() == false），
+	// 页面上会如实标注，不做「看起来加密了」的暗示
+	Crypto *cryptox.Box
 }
 
 func New(g *gorm.DB, cfg *config.Config) *Handler {
+	// 单元测试里会传 nil cfg（只测某个查询），这里不能因此崩掉
+	secretKey := ""
+	if cfg != nil {
+		secretKey = cfg.SecretKey
+	}
 	return &Handler{
 		DB: g, Cfg: cfg, StartedAt: time.Now(),
 		fixedRunAt:   map[string]time.Time{},
@@ -46,6 +56,7 @@ func New(g *gorm.DB, cfg *config.Config) *Handler {
 		forwards:     newForwardRegistry(),
 		terminals:    newTerminalRegistry(),
 		imLogins:     newImLoginStore(),
+		Crypto:       cryptox.New(secretKey),
 	}
 }
 

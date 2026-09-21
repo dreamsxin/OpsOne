@@ -11,10 +11,13 @@ import {
   exportHostsCSV,
   getDepartmentTree,
   importHosts,
+  listCredentials,
   listHosts,
   listTags,
   updateHost,
+  type Credential,
   type DeptNode,
+
   type Host,
   type HostImportResult,
   type Tag
@@ -224,8 +227,18 @@ const form = reactive({
   tags: '',
   remark: '',
   proxyHostId: 0,
-  deptId: 0
+  deptId: 0,
+  // 0 表示本机自填凭据；非 0 表示引用凭证库里的共享凭据
+  credentialId: 0
 })
+
+// 凭证库里的可选凭据。列表接口不返回密钥，只用来做下拉与展示
+const credentials = ref<Credential[]>([])
+const credentialLabel = computed(() => {
+  const map = new Map(credentials.value.map((c) => [c.id, `${c.name}（${c.username}）`]))
+  return (id: number) => map.get(id) || `凭据 #${id}`
+})
+
 
 // 部门树用于归属选择与列表展示
 const deptTree = ref<DeptNode[]>([])
@@ -313,10 +326,12 @@ function openCreate() {
     tags: '',
     remark: '',
     proxyHostId: 0,
-    deptId: 0
+    deptId: 0,
+    credentialId: 0
   })
   dialogVisible.value = true
 }
+
 
 
 
@@ -329,10 +344,12 @@ function openEdit(row: Host) {
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (!editingId.value && !form.secret) {
-    ElMessage.warning('新增主机必须填写密码或私钥')
+  // 引用共享凭据时不需要本机口令；两种情况都没给才是真的不行
+  if (!editingId.value && !form.secret && !form.credentialId) {
+    ElMessage.warning('新增主机必须填写密码或私钥，或改为引用凭证库')
     return
   }
+
 
   if (editingId.value) {
     await updateHost(editingId.value, { ...form })
@@ -371,7 +388,9 @@ onMounted(() => {
   loadAllHosts()
   getDepartmentTree().then((data) => (deptTree.value = data))
   listTags().then((data) => (tagDict.value = data))
+  listCredentials({ page: 1, pageSize: 200 }).then((data) => (credentials.value = data.list || []))
 })
+
 
 // 缓存页被带着新参数再次打开时重新应用筛选
 onActivated(() => {
@@ -460,7 +479,16 @@ onActivated(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="authType" label="认证" width="90" />
+        <el-table-column prop="authType" label="认证" width="150">
+          <template #default="{ row }">
+            <template v-if="row.credentialId">
+              <el-tag size="small" type="success" effect="plain">共享凭据</el-tag>
+              <div class="cell-sub">{{ credentialLabel(row.credentialId) }}</div>
+            </template>
+            <span v-else>{{ row.authType === 'key' ? '私钥' : '密码' }}</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="status" label="状态" width="90">
           <template #default="{ row }">
             <el-tag size="small" :type="statusMeta[row.status]?.type || 'info'">
@@ -515,21 +543,40 @@ onActivated(() => {
         <el-form-item label="登录用户" prop="username">
           <el-input v-model="form.username" />
         </el-form-item>
-        <el-form-item label="认证方式">
-          <el-radio-group v-model="form.authType">
-            <el-radio value="password">密码</el-radio>
-            <el-radio value="key">私钥</el-radio>
-          </el-radio-group>
+        <el-form-item label="凭据来源">
+          <el-select v-model="form.credentialId" style="width: 100%">
+            <el-option label="本机自填（这台机器单独存一份口令 / 私钥）" :value="0" />
+            <el-option
+              v-for="c in credentials"
+              :key="c.id"
+              :label="`凭证库：${c.name}（${c.username}${c.type === 'key' ? ' · 私钥' : ''}）`"
+              :value="c.id"
+              :disabled="!c.enabled"
+            />
+          </el-select>
+          <div class="form-hint">
+            引用凭证库时，登录用户与密钥都以凭据为准，本机那份会被清空；凭据轮换后这台主机自动跟着变。
+            从共享凭据切回本机自填，必须同时填一份新的密码或私钥。
+          </div>
         </el-form-item>
-        <el-form-item :label="form.authType === 'key' ? '私钥' : '密码'">
-          <el-input
-            v-model="form.secret"
-            :type="form.authType === 'key' ? 'textarea' : 'password'"
-            :rows="4"
-            show-password
-            :placeholder="editingId ? '留空表示不修改' : '必填'"
-          />
-        </el-form-item>
+        <template v-if="!form.credentialId">
+          <el-form-item label="认证方式">
+            <el-radio-group v-model="form.authType">
+              <el-radio value="password">密码</el-radio>
+              <el-radio value="key">私钥</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item :label="form.authType === 'key' ? '私钥' : '密码'">
+            <el-input
+              v-model="form.secret"
+              :type="form.authType === 'key' ? 'textarea' : 'password'"
+              :rows="4"
+              show-password
+              :placeholder="editingId ? '留空表示不修改' : '必填'"
+            />
+          </el-form-item>
+        </template>
+
         <el-form-item label="环境">
           <el-select v-model="form.env">
             <el-option label="开发" value="dev" />
@@ -693,7 +740,18 @@ onActivated(() => {
 </template>
 
 <style scoped>
+.cell-sub {
+  font-size: 12px;
+  color: var(--ops-text-secondary, #9ca3af);
+  line-height: 1.4;
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--ops-text-secondary, #9ca3af);
+  line-height: 1.5;
+}
 .bulk-bar {
+
   display: flex;
   align-items: center;
   gap: 8px;

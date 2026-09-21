@@ -405,6 +405,17 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/hosts/:id/metrics/collect", middleware.RequirePerm("host:check"), h.CollectHostMetric)
 		auth.GET("/hosts/:id/terminal", middleware.RequirePerm("terminal:connect"), h.Terminal)
 
+		// 凭证库：共享登录凭据。密钥永不出接口，轮换一次即对所有引用主机生效
+		auth.GET("/credentials", h.ListCredentials)
+		auth.GET("/credentials/state", h.GetCredentialState)
+		auth.GET("/credentials/:id/hosts", h.ListCredentialHosts)
+		auth.POST("/credentials", middleware.RequirePerm("credential:manage"), h.CreateCredential)
+		auth.PUT("/credentials/:id", middleware.RequirePerm("credential:manage"), h.UpdateCredential)
+		auth.DELETE("/credentials/:id", middleware.RequirePerm("credential:manage"), h.DeleteCredential)
+		auth.POST("/credentials/:id/rotate", middleware.RequirePerm("credential:manage"), h.RotateCredential)
+		auth.POST("/credentials/:id/hosts", middleware.RequirePerm("credential:manage"), h.BindCredentialHosts)
+		auth.POST("/credentials/:id/check", middleware.RequirePerm("credential:check"), h.CheckCredential)
+
 		auth.GET("/hosts/:id/files", middleware.RequirePerm("file:read"), h.ListFiles)
 		auth.GET("/hosts/:id/files/download", middleware.RequirePerm("file:read"), h.DownloadFile)
 		auth.POST("/hosts/:id/files/upload", middleware.RequirePerm("file:write"), h.UploadFile)

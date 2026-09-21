@@ -3,8 +3,10 @@ package sshx
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -20,6 +22,13 @@ type Target struct {
 	Username string
 	AuthType string
 	Secret   string // password 明文或私钥 PEM
+	// Passphrase 私钥口令，空表示私钥未加密
+	Passphrase string
+
+	// PrepareError 调用方在组装本 Target 时就已经失败了（比如引用的共享凭据被禁用、
+	// 密文解不开）。非空时一律不尝试连接，直接把这个原因抛回去 ——
+	// 拿着空口令去连主机会表现成「认证失败」，把人引向错误的排查方向。
+	PrepareError string
 
 	// StrictHostKey 为 true 时校验主机公钥
 	StrictHostKey bool
@@ -62,6 +71,9 @@ func Dial(t Target, timeout time.Duration) (*Conn, error) {
 func dial(t Target, timeout time.Duration, depth int) (*Conn, error) {
 	if depth > MaxProxyDepth {
 		return nil, fmt.Errorf("跳板机层级超过 %d 层，请检查是否配置成环", MaxProxyDepth)
+	}
+	if t.PrepareError != "" {
+		return nil, errors.New(t.PrepareError)
 	}
 
 	cfg, err := clientConfig(t, timeout)
@@ -139,13 +151,49 @@ func hostKeyCallback(t Target) (ssh.HostKeyCallback, error) {
 
 func authMethod(t Target) (ssh.AuthMethod, error) {
 	if t.AuthType == "key" {
-		signer, err := ssh.ParsePrivateKey([]byte(t.Secret))
+		signer, err := parseKey(t)
 		if err != nil {
-			return nil, fmt.Errorf("解析私钥失败: %w", err)
+			return nil, err
 		}
 		return ssh.PublicKeys(signer), nil
 	}
 	return ssh.Password(t.Secret), nil
+}
+
+// parseKey 解析私钥，带口令的私钥要用 Passphrase。
+// 「私钥是加密的但没给口令」单独报错：默认的报错只说 parse failed，看不出缺的是口令。
+func parseKey(t Target) (ssh.Signer, error) {
+	if t.Passphrase != "" {
+		signer, err := ssh.ParsePrivateKeyWithPassphrase([]byte(t.Secret), []byte(t.Passphrase))
+		if err == nil {
+			return signer, nil
+		}
+		// 私钥其实没加密，却填了口令：这没有任何安全影响，按没口令再试一次，
+		// 别拿「口令不对」去误导人（表单里留着一段旧口令是很常见的）
+		if strings.Contains(err.Error(), "not password protected") {
+			return parseKey(Target{AuthType: t.AuthType, Secret: t.Secret})
+		}
+		return nil, fmt.Errorf("用口令解析私钥失败（口令不对或私钥损坏）: %w", err)
+	}
+	signer, err := ssh.ParsePrivateKey([]byte(t.Secret))
+	if err != nil {
+		var need *ssh.PassphraseMissingError
+		if errors.As(err, &need) {
+			return nil, errors.New("这份私钥有口令保护，请在凭据里填写私钥口令")
+		}
+		return nil, fmt.Errorf("解析私钥失败: %w", err)
+	}
+	return signer, nil
+}
+
+// PublicKeyFingerprint 返回私钥对应公钥的 SHA256 指纹（ssh-keygen -lf 的那种格式）。
+// 用来在界面上标识「这份凭据是哪把钥匙」而不泄露私钥本身。
+func PublicKeyFingerprint(pem, passphrase string) (string, error) {
+	signer, err := parseKey(Target{AuthType: "key", Secret: pem, Passphrase: passphrase})
+	if err != nil {
+		return "", err
+	}
+	return ssh.FingerprintSHA256(signer.PublicKey()), nil
 }
 
 // Result 单次命令执行结果

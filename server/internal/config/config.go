@@ -84,6 +84,11 @@ type Config struct {
 	// 只能在界面上手动扫。扫描会对目标发起大量 TCP 连接，默认每天一次。
 	ExposureSpec string
 
+	// SecretKey 凭证库的字段加密密钥（AES-GCM，任意长度口令派生）。留空表示凭据明文存库，
+	// 界面上会如实标出来 —— 不能让人以为「有凭证库就等于加密了」。
+	// 一旦设过就不要改：改了之后已有密文全部解不开（平台会明确报错而不是当口令错误）。
+	SecretKey string
+
 	// ---------- 备份 ----------
 
 	// BackupSpec 自动备份的 cron 表达式。留空表示不自动备份（只能手动跑
@@ -179,8 +184,9 @@ func Load() (*Config, error) {
 		OnCallSpec:         strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
 		ExposureSpec:       strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
 
-		BackupSpec: strings.TrimSpace(env("OPS_BACKUP_SPEC", "0 3 * * *")),
-		BackupDir:  strings.TrimSpace(env("OPS_BACKUP_DIR", "backups")),
+		SecretKey: strings.TrimSpace(env("OPS_SECRET_KEY", "")),
+
+		BackupSpec: strings.TrimSpace(env("OPS_BACKUP_SPEC", "0 3 * * *")),		BackupDir:  strings.TrimSpace(env("OPS_BACKUP_DIR", "backups")),
 		BackupKeep: envInt("OPS_BACKUP_KEEP", 7),
 
 		ForwardBind:       strings.TrimSpace(env("OPS_FORWARD_BIND", "0.0.0.0")),
@@ -267,6 +273,11 @@ func (c *Config) Validate() error {
 	}
 	if c.WebDir == "" {
 		add(false, "OPS_WEB_DIR 为空：后端不托管前端静态文件，需要另配 nginx 之类")
+	}
+	if c.SecretKey == "" {
+		add(false, "OPS_SECRET_KEY 未设置：凭证库里的口令与私钥以明文落库（页面上会标出来）")
+	} else if len(c.SecretKey) < 16 {
+		add(false, "OPS_SECRET_KEY 只有 %d 字节，偏短，建议 32 字节以上随机串", len(c.SecretKey))
 	}
 
 	var fatals []string

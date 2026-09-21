@@ -53,7 +53,10 @@ export interface Host {
   deptId: number
   createdBy: number
   createdAt: string
+  /** 引用凭证库里的共享凭据，0 表示用本机自填的口令 / 私钥 */
+  credentialId: number
 }
+
 
 
 export interface SessionCommand {
@@ -3486,6 +3489,89 @@ export const dispatchFirewallGroup = (id: number) =>
     url: `/firewall/groups/${id}/dispatch`,
     method: 'POST'
   })
+
+/* ---------------- 凭证库（共享登录凭据） ---------------- */
+
+export interface Credential {
+  id: number
+  name: string
+  type: 'password' | 'key'
+  username: string
+  /** 私钥的公钥指纹（SHA256:...），口令类型为空 */
+  fingerprint: string
+  description: string
+  owner: string
+  deptId: number
+  enabled: boolean
+  rotatedAt: string | null
+  lastUsedAt: string | null
+  lastUsedHostId: number
+  createdAt: string
+  updatedAt: string
+  /** encrypted = 库里是 AES-GCM 密文，plain = 明文（没配 OPS_SECRET_KEY 或还没轮换过） */
+  storage: 'encrypted' | 'plain'
+  hasPassphrase: boolean
+  /** 有多少台主机在引用它 */
+  hostCount: number
+}
+
+export interface CredentialState {
+  encryptEnabled: boolean
+  total: number
+  sealed: number
+  plain: number
+  hostsShared: number
+  hostsLocal: number
+  note: string
+}
+
+export interface CredentialHostRef {
+  id: number
+  name: string
+  address: string
+  port: number
+  env: string
+  status: string
+  checkedAt: string | null
+}
+
+export const listCredentials = (params: Record<string, any>) =>
+  request<PageData<Credential>>({ url: '/credentials', params })
+export const getCredentialState = () => request<CredentialState>({ url: '/credentials/state' })
+export const listCredentialHosts = (id: number) =>
+  request<CredentialHostRef[]>({ url: `/credentials/${id}/hosts` })
+export const saveCredential = (id: number, data: Record<string, any>) =>
+  id
+    ? request<Credential>({ url: `/credentials/${id}`, method: 'PUT', data })
+    : request<Credential>({ url: '/credentials', method: 'POST', data })
+export const deleteCredential = (id: number) =>
+  request<null>({ url: `/credentials/${id}`, method: 'DELETE' })
+export const rotateCredential = (id: number, data: { secret: string; passphrase?: string }) =>
+  request<{
+    affectedHosts: number
+    oldFingerprint: string
+    fingerprint: string
+    note: string
+  }>({ url: `/credentials/${id}/rotate`, method: 'POST', data })
+export const bindCredentialHosts = (id: number, hostIds: number[]) =>
+  request<{ bound: number; skipped: number; skippedHosts: string[]; note: string }>({
+    url: `/credentials/${id}/hosts`,
+    method: 'POST',
+    data: { hostIds }
+  })
+export const checkCredential = (id: number, hostId: number) =>
+  request<{
+    ok: boolean
+    hostName: string
+    address: string
+    loginUser: string
+    detail: string
+    costMs: number
+    viaProxy: string
+    usernameMatch: boolean
+    credUsername: string
+  }>({ url: `/credentials/${id}/check`, method: 'POST', data: { hostId } })
+
 
 
 

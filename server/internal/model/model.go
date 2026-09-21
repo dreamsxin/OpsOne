@@ -314,8 +314,12 @@ type Host struct {
 	Port     int    `gorm:"default:22" json:"port"`
 	Username string `gorm:"size:64;not null" json:"username"`
 	AuthType string `gorm:"size:16;default:password" json:"authType"` // password | key
-	// Secret 登录密码或私钥，当前为明文存储（已知风险，见 docs/SECURITY.md），不出接口
+	// Secret 登录密码或私钥，当前为明文存储（已知风险，见 docs/SECURITY.md），不出接口。
+	// CredentialID != 0 时这里应为空：凭据统一由凭证库保管，本地不再留一份
 	Secret string `gorm:"type:text" json:"-"`
+	// CredentialID 引用凭证库里的共享凭据，0 表示用上面这份自带凭据。
+	// 非 0 时登录用的用户名 / 认证方式 / 密钥全部取凭据，取不到就直接失败，不回退
+	CredentialID uint `gorm:"index;default:0" json:"credentialId"`
 	// HostKey 主机公钥（authorized_keys 格式），开启指纹校验后首次连接自动记录
 	HostKey string `gorm:"type:text" json:"-"`
 	// ProxyHostID 跳板机，0 表示直连。目标主机不可直达时经该主机建立隧道
@@ -332,6 +336,42 @@ type Host struct {
 	Remark    string     `gorm:"size:255" json:"remark"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// Credential 共享登录凭据。一份口令 / 私钥存一处，多台主机引用它。
+//
+// 与 Host.Secret 的关系：主机 CredentialID != 0 时，登录用的用户名与密钥一律取这里，
+// 主机自己那份 Secret 不再参与（切过来时会被清空，免得留一份过期口令当后门）。
+// CredentialID = 0 的主机还是用自带凭据，老数据不需要迁移。
+type Credential struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	// Type password | key。与 Host.AuthType 取值一致，直接喂给 sshx
+	Type     string `gorm:"size:16;default:password" json:"type"`
+	Username string `gorm:"size:64;not null" json:"username"`
+	// Secret 口令或私钥 PEM。配了 OPS_SECRET_KEY 时以 AES-GCM 密文存（前缀 enc:v1:），
+	// 没配就是明文 —— 界面上会如实标出来，不做「看起来加密了」的暗示
+	Secret string `gorm:"type:text" json:"-"`
+	// Passphrase 私钥口令。平台此前完全不支持带口令的私钥（ParsePrivateKey 直接报错），
+	// 凭证库这条链路补上了
+	Passphrase string `gorm:"type:text" json:"-"`
+	// Fingerprint 私钥对应公钥的 SHA256 指纹，落库时算一次。
+	// 它能回答「这份凭据到底是哪把钥匙」而不泄露私钥，也用于换钥匙后的比对
+	Fingerprint string `gorm:"size:128" json:"fingerprint"`
+	Description string `gorm:"size:255" json:"description"`
+	// Owner 责任人（自由文本，与防火墙规则的 Owner 一致），凭据没人认领是常见的失控来源
+	Owner   string `gorm:"size:64" json:"owner"`
+	DeptID  uint   `gorm:"index;default:0" json:"deptId"`
+	Enabled bool   `gorm:"default:true" json:"enabled"`
+	// RotatedAt 最近一次换密钥的时间，为空表示从未轮换
+	RotatedAt *time.Time `json:"rotatedAt"`
+	// LastUsedAt / LastUsedHostID 最近一次真的用它连上了哪台机器。
+	// 只在「测试连接」时更新：普通业务链路每次连接都写库会把这张表写成热点
+	LastUsedAt     *time.Time `json:"lastUsedAt"`
+	LastUsedHostID uint       `gorm:"default:0" json:"lastUsedHostId"`
+	CreatedBy      uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // CommandRule 命令审计规则，命中后按 Action 处理

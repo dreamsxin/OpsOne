@@ -25,6 +25,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Company{}, &model.Department{},
 		&model.User{}, &model.Role{}, &model.Menu{},
 		&model.Host{}, &model.ExecJob{}, &model.ExecResult{}, &model.AuditLog{},
+		&model.Credential{},
 		&model.CommandRule{}, &model.Session{}, &model.SessionCommand{},
 		&model.CronJob{}, &model.FileAudit{},
 		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
@@ -214,6 +215,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 508, ParentID: 503, Title: "重置他人绑定", Type: "button", AuthCode: "totp:reset", Sort: 1},
 		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: todo, Icon: "Reading", Sort: 4},
 		{ID: 505, ParentID: 500, Name: "FeatureLibrary", Title: "特征库", Path: "/security/features", Component: todo, Icon: "Collection", Sort: 5},
+		{ID: 511, ParentID: 500, Name: "Credential", Title: "凭证库", Path: "/security/credential", Component: "/security/credential/index", Icon: "Key", Sort: 6},
+		{ID: 512, ParentID: 511, Title: "维护凭据", Type: "button", AuthCode: "credential:manage", Sort: 1},
+		{ID: 513, ParentID: 511, Title: "测试连接", Type: "button", AuthCode: "credential:check", Sort: 2},
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},

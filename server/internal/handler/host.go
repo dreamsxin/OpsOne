@@ -26,6 +26,9 @@ type hostReq struct {
 	Remark      string `json:"remark"`
 	ProxyHostID uint   `json:"proxyHostId"` // 跳板机，0 表示直连
 	DeptID      uint   `json:"deptId"`      // 归属部门，参与数据权限过滤
+	// CredentialID 引用凭证库里的共享凭据，0 表示用本机自填的凭据。
+	// 非 0 时 username / authType / secret 都以凭据为准，本机那份会被清空
+	CredentialID uint `json:"credentialId"`
 }
 
 // loadHostScoped 按数据权限（含资源授权）加载主机，不校验具体动作
@@ -95,8 +98,14 @@ func (h *Handler) CreateHost(c *gin.Context) {
 		response.BadRequest(c, "主机名称、地址、登录用户为必填项")
 		return
 	}
-	if req.Secret == "" {
-		response.BadRequest(c, "请提供登录密码或私钥")
+	// 引用共享凭据时不需要本机口令；反之必须给
+	if req.CredentialID != 0 {
+		if err := h.assertCredentialUsable(req.CredentialID); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	} else if req.Secret == "" {
+		response.BadRequest(c, "请提供登录密码或私钥，或改为引用凭证库")
 		return
 	}
 	if req.ProxyHostID != 0 {
@@ -111,7 +120,12 @@ func (h *Handler) CreateHost(c *gin.Context) {
 		Username: req.Username, AuthType: defaultAuth(req.AuthType), Secret: req.Secret,
 		Env: defaultEnv(req.Env), Tags: req.Tags, Remark: req.Remark, Status: "unknown",
 		ProxyHostID: req.ProxyHostID, DeptID: req.DeptID,
-		CreatedBy: middleware.CurrentUser(c).ID,
+		CredentialID: req.CredentialID,
+		CreatedBy:    middleware.CurrentUser(c).ID,
+	}
+	// 引用凭证库的主机不留本机口令副本：留着就是一份没人维护、也不会被轮换的后门
+	if host.CredentialID != 0 {
+		host.Secret = ""
 	}
 	if err := h.DB.Create(&host).Error; err != nil {
 		response.Error(c, "主机创建失败")
@@ -158,6 +172,26 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 	if req.Secret != "" {
 		host.Secret = req.Secret
 	}
+
+	// 凭据来源切换。注意「secret 留空表示不变」这条老规则在这里会咬人：
+	// 从共享凭据切回本机自填时，本机那份早就被清空了，此时必须让人重新给一份，
+	// 否则会存出一台没有任何凭据、连不上却看不出原因的主机。
+	switch {
+	case req.CredentialID != 0:
+		if err := h.assertCredentialUsable(req.CredentialID); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		host.CredentialID = req.CredentialID
+		host.Secret = ""
+	case host.CredentialID != 0 && req.CredentialID == 0:
+		if req.Secret == "" {
+			response.BadRequest(c, "要从共享凭据切回本机自填，必须同时提供登录密码或私钥")
+			return
+		}
+		host.CredentialID = 0
+	}
+
 	if err := h.DB.Save(&host).Error; err != nil {
 		response.Error(c, "主机更新失败")
 		return
@@ -236,6 +270,21 @@ func (h *Handler) buildTarget(host *model.Host, seen map[uint]bool) sshx.Target 
 		OnLearnHostKey: func(authorizedKey string) {
 			h.DB.Model(&model.Host{}).Where("id = ?", hostID).Update("host_key", authorizedKey)
 		},
+	}
+
+	// 引用了凭证库：用户名与密钥一律以凭据为准。
+	// 解析失败不回退到主机自带凭据 —— 那会让「凭据被禁用了」表现成「连上了」，
+	// 是比连不上更糟的结果。
+	if host.CredentialID != 0 {
+		cred, err := h.loadCredentialSecret(host.CredentialID)
+		if err != nil {
+			t.PrepareError = fmt.Sprintf("主机 %s 引用的共享凭据不可用: %v", host.Name, err)
+		} else {
+			t.Username = cred.Username
+			t.AuthType = cred.Type
+			t.Secret = cred.Secret
+			t.Passphrase = cred.Passphrase
+		}
 	}
 
 	seen[host.ID] = true
