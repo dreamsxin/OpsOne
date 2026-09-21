@@ -29,6 +29,8 @@ func TestValidateProdRejectsDebug(t *testing.T) {
 	t.Setenv("OPS_JWT_SECRET", strings.Repeat("k", 48))
 	t.Setenv("OPS_ADMIN_PASSWORD", "Str0ng-Pwd-For-Test")
 	t.Setenv("OPS_ALLOW_ORIGINS", "https://ops.example.com")
+	// 字段加密密钥的默认值是演示用的 demo，prod 下必须换掉（见下面的专项测试）
+	t.Setenv("OPS_SECRET_KEY", strings.Repeat("s", 40))
 
 	cfg, err := Load()
 	if err != nil {
@@ -48,6 +50,41 @@ func TestValidateProdRejectsDebug(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "OPS_DEBUG") {
 		t.Fatalf("prod 模式开 DEBUG 应当被拒，实际: %v", err)
+	}
+}
+
+// 演示默认密钥 demo 写在仓库里，prod 下带着它启动等于没加密，必须被拒
+func TestValidateProdRejectsDemoSecretKey(t *testing.T) {
+	t.Setenv("OPS_ENV", "prod")
+	t.Setenv("OPS_JWT_SECRET", strings.Repeat("k", 48))
+	t.Setenv("OPS_ADMIN_PASSWORD", "Str0ng-Pwd-For-Test")
+	t.Setenv("OPS_ALLOW_ORIGINS", "https://ops.example.com")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load 失败: %v", err)
+	}
+	if cfg.SecretKey != DefaultSecretKey {
+		t.Fatalf("没配 OPS_SECRET_KEY 时应当回落到演示默认值，实际 %q", cfg.SecretKey)
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "OPS_SECRET_KEY") {
+		t.Fatalf("prod 下带着演示密钥应当被拒，实际: %v", err)
+	}
+}
+
+// off / none / plain 表示显式关闭加密（明文落库），这是被支持的选择，
+// 不能被当成「没配」而回落到默认密钥
+func TestSecretKeyOffMeansPlaintext(t *testing.T) {
+	for _, off := range []string{"off", "OFF", "none", "plain", " disabled "} {
+		t.Setenv("OPS_ENV", "dev")
+		t.Setenv("OPS_SECRET_KEY", off)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load 失败: %v", err)
+		}
+		if cfg.SecretKey != "" {
+			t.Fatalf("OPS_SECRET_KEY=%q 应当表示不加密（空密钥），实际 %q", off, cfg.SecretKey)
+		}
 	}
 }
 

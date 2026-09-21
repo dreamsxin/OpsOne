@@ -1852,3 +1852,115 @@ type LdapAccount struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 }
+
+// ---------- 安全意识（培训与考核） ----------
+
+// AwarenessCourse 一个必修项：一段要读的内容，加上可选的几道题。
+//
+// 做成「培训 + 考核」而不是「上传课件」：平台不做内容管理，正文就是几条要点，
+// 真正有价值的是**谁读了、谁答对了、谁到期还没做**这三件事能被查出来。
+type AwarenessCourse struct {
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	Title   string `gorm:"size:128;not null" json:"title"`
+	Summary string `gorm:"size:255" json:"summary"`
+	// Content 正文，Markdown 风格的纯文本（前端按预换行展示，不渲染 HTML）
+	Content string `gorm:"type:text" json:"content"`
+	// Scope 必修范围：all 全员 | role 指定角色 | dept 指定部门（含子部门）
+	Scope       string `gorm:"size:16;default:all" json:"scope"`
+	ScopeRoleID uint   `gorm:"default:0" json:"scopeRoleId"`
+	ScopeDeptID uint   `gorm:"default:0" json:"scopeDeptId"`
+	// PassScore 及格分（百分制）。没有题目时只要求「确认已读」，这个值不参与判定
+	PassScore int `gorm:"default:80" json:"passScore"`
+	// DueAt 截止时间。到期未完成的人会收到站内消息并在完成率里被点名；空表示不限期
+	DueAt       *time.Time `json:"dueAt"`
+	Published   bool       `gorm:"default:false" json:"published"`
+	PublishedAt *time.Time `json:"publishedAt"`
+	Publisher   string     `gorm:"size:64" json:"publisher"`
+	// TargetCount / DoneCount 发布后回写的统计快照，列表页直接读，不用每行现算
+	TargetCount int `gorm:"default:0" json:"targetCount"`
+	DoneCount   int `gorm:"default:0" json:"doneCount"`
+	// LastRemindAt 最近一次逾期提醒的时间，避免同一天反复轰炸
+	LastRemindAt *time.Time `json:"lastRemindAt"`
+	CreatedBy    uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// AwarenessQuestion 培训项下的一道题。
+//
+// Answer 带 json:"-"：正确答案绝不出接口，判分只在后端做 ——
+// 否则「考核」就是把答案先发给浏览器再问一遍，等于送分。
+type AwarenessQuestion struct {
+	ID       uint `gorm:"primaryKey" json:"id"`
+	CourseID uint `gorm:"index;not null" json:"courseId"`
+	Content  string `gorm:"size:512;not null" json:"content"`
+	// Options 选项文本，JSON 数组
+	Options string `gorm:"type:text" json:"options"`
+	// Answer 正确选项的下标，JSON 数组（多选就是多个）。不出接口
+	Answer string `gorm:"size:64" json:"-"`
+	// Multi 多选题。单选时提交多个答案一律判错
+	Multi bool `gorm:"default:false" json:"multi"`
+	// Explain 答案解析，只在交卷之后随结果返回
+	Explain   string    `gorm:"size:512" json:"explain"`
+	Sort      int       `gorm:"default:0" json:"sort"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// AwarenessRecord 某个人在某个培训项上的完成情况。
+//
+// 一人一项一条（唯一索引），既是「已读确认」的签署记录，也是答题成绩单。
+type AwarenessRecord struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	CourseID uint   `gorm:"uniqueIndex:idx_awareness_user_course;not null" json:"courseId"`
+	UserID   uint   `gorm:"uniqueIndex:idx_awareness_user_course;not null" json:"userId"`
+	Username string `gorm:"size:64" json:"username"`
+	// Status pending 未开始 | read 已确认已读（无题目时即完成）| passed 已通过 | failed 答过但没及格
+	Status string     `gorm:"size:16;default:pending;index" json:"status"`
+	ReadAt *time.Time `json:"readAt"`
+	// Attempts 交卷次数；Score 最近一次得分（百分制）
+	Attempts int        `gorm:"default:0" json:"attempts"`
+	Score    int        `gorm:"default:0" json:"score"`
+	PassedAt *time.Time `json:"passedAt"`
+	// ClientIP 确认已读时的来源，签署记录要能回答「是谁在哪确认的」
+	ClientIP string `gorm:"size:64" json:"clientIp"`
+	// Wrong 最近一次答错的题目 ID，JSON 数组；让人知道错在哪，而不是只给个分数
+	Wrong     string    `gorm:"size:255" json:"wrong"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ---------- 特征库 ----------
+
+// Signature 一条特征。
+//
+// 这个模块最容易做成「又一张永远不生效的模式表」，所以定的规矩是：
+// **特征必须能落到一个真在跑的检测点上**，否则不收。目前两类：
+//   - command：落到命令规则（下发闸门与 Web 终端都在用它拦命令）
+//   - port：落到暴露面扫描结果（真机 TCP 探测出来的开放端口）
+//
+// 特征库负责「判断依据从哪来、灰度到什么程度」，执行仍由原来的检测点做 ——
+// 平台不搞两套并行的拦截逻辑。
+type Signature struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:128;not null" json:"name"`
+	// Kind command | port
+	Kind string `gorm:"size:16;default:command;index" json:"kind"`
+	// Pattern command 时是 Go 正则；port 时是端口清单（支持 22,80 与 8000-8010 混写）
+	Pattern     string `gorm:"size:255;not null" json:"pattern"`
+	Description string `gorm:"size:255" json:"description"`
+	// Stage 灰度开关：observe 只提醒（命令规则按 warn 应用）| enforce 真拦（按 block 应用）
+	Stage string `gorm:"size:16;default:observe" json:"stage"`
+	// Severity high | medium | low，只用于展示与排序
+	Severity string `gorm:"size:16;default:medium" json:"severity"`
+	Enabled  bool   `gorm:"default:true" json:"enabled"`
+	// Builtin 内置特征：可以停用、可以改灰度，但不允许删除（删了下次启动又会回来，反而更乱）
+	Builtin bool `gorm:"default:false" json:"builtin"`
+	// RuleID command 类特征应用后对应的 command_rules 行，0 表示还没应用
+	RuleID    uint       `gorm:"default:0" json:"ruleId"`
+	AppliedAt *time.Time `json:"appliedAt"`
+	AppliedBy string     `gorm:"size:64" json:"appliedBy"`
+	CreatedBy uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}

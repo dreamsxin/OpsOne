@@ -124,8 +124,7 @@ func main() {
 	} else {
 		log.Println("[kube] 定时检查未启用（OPS_KUBE_CHECK_SPEC 为空），只能手动检查")
 	}
-	if cfg.HostMetricSpec != "" {
-		if err := sched.AddFixed(cfg.HostMetricSpec, h.CollectHostMetricsForSchedule); err != nil {
+	if cfg.HostMetricSpec != "" {		if err := sched.AddFixed(cfg.HostMetricSpec, h.CollectHostMetricsForSchedule); err != nil {
 			log.Fatalf("主机指标采集 cron 表达式无效(%s): %v", cfg.HostMetricSpec, err)
 		}
 		log.Printf("[metric] 定时采集已启用: %s", cfg.HostMetricSpec)
@@ -147,6 +146,14 @@ func main() {
 		log.Printf("[exposure] 定时扫描已启用: %s", cfg.ExposureSpec)
 	} else {
 		log.Println("[exposure] 定时扫描未启用（OPS_EXPOSURE_SPEC 为空），只能手动扫描")
+	}
+	if cfg.AwarenessSpec != "" {
+		if err := sched.AddFixed(cfg.AwarenessSpec, h.RemindOverdueAwareness); err != nil {
+			log.Fatalf("安全意识逾期提醒 cron 表达式无效(%s): %v", cfg.AwarenessSpec, err)
+		}
+		log.Printf("[awareness] 逾期提醒已启用: %s", cfg.AwarenessSpec)
+	} else {
+		log.Println("[awareness] 逾期提醒未启用（OPS_AWARENESS_SPEC 为空），逾期未完成的必修项不会自动催办")
 	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
@@ -417,6 +424,35 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/credentials/:id/rotate", middleware.RequirePerm("credential:manage"), h.RotateCredential)
 		auth.POST("/credentials/:id/hosts", middleware.RequirePerm("credential:manage"), h.BindCredentialHosts)
 		auth.POST("/credentials/:id/check", middleware.RequirePerm("credential:check"), h.CheckCredential)
+
+		// 安全意识：学员侧（人人可用，只能看/做自己的那份）
+		auth.GET("/security/awareness/my", h.ListMyAwareness)
+		auth.GET("/security/awareness/my/:id", h.GetMyAwarenessCourse)
+		auth.POST("/security/awareness/my/:id/read", h.ConfirmAwarenessRead)
+		auth.POST("/security/awareness/my/:id/quiz", h.SubmitAwarenessQuiz)
+		// 安全意识：管理侧
+		auth.GET("/security/awareness/courses", h.ListAwarenessCourses)
+		auth.POST("/security/awareness/courses", middleware.RequirePerm("awareness:manage"), h.CreateAwarenessCourse)
+		auth.PUT("/security/awareness/courses/:id", middleware.RequirePerm("awareness:manage"), h.UpdateAwarenessCourse)
+		auth.DELETE("/security/awareness/courses/:id", middleware.RequirePerm("awareness:manage"), h.DeleteAwarenessCourse)
+		auth.POST("/security/awareness/courses/:id/publish", middleware.RequirePerm("awareness:manage"), h.PublishAwarenessCourse)
+		auth.POST("/security/awareness/courses/:id/unpublish", middleware.RequirePerm("awareness:manage"), h.UnpublishAwarenessCourse)
+		auth.POST("/security/awareness/courses/:id/remind", middleware.RequirePerm("awareness:manage"), h.RemindAwarenessCourse)
+		auth.GET("/security/awareness/courses/:id/records", middleware.RequirePerm("awareness:manage"), h.ListAwarenessRecords)
+		auth.GET("/security/awareness/courses/:id/questions", middleware.RequirePerm("awareness:manage"), h.ListAwarenessQuestions)
+		auth.POST("/security/awareness/courses/:id/questions", middleware.RequirePerm("awareness:manage"), h.CreateAwarenessQuestion)
+		auth.PUT("/security/awareness/questions/:id", middleware.RequirePerm("awareness:manage"), h.UpdateAwarenessQuestion)
+		auth.DELETE("/security/awareness/questions/:id", middleware.RequirePerm("awareness:manage"), h.DeleteAwarenessQuestion)
+
+		// 特征库：特征本身 + 应用到真正在跑的检测点（命令规则 / 暴露面扫描结果）
+		auth.GET("/security/signatures", h.ListSignatures)
+		auth.POST("/security/signatures", middleware.RequirePerm("signature:manage"), h.CreateSignature)
+		auth.PUT("/security/signatures/:id", middleware.RequirePerm("signature:manage"), h.UpdateSignature)
+		auth.DELETE("/security/signatures/:id", middleware.RequirePerm("signature:manage"), h.DeleteSignature)
+		auth.POST("/security/signatures/:id/apply", middleware.RequirePerm("signature:apply"), h.ApplySignature)
+		auth.POST("/security/signatures/:id/revoke", middleware.RequirePerm("signature:apply"), h.RevokeSignature)
+		auth.POST("/security/signatures/:id/port-check", h.CheckPortSignature)
+		auth.GET("/security/signatures/reconcile", h.ReconcileSignatures)
 
 		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
 		auth.GET("/secrets/audit", h.GetSecretAudit)

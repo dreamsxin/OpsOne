@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"log"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -56,6 +57,8 @@ func Migrate(g *gorm.DB) error {
 		&model.LdapServer{}, &model.LdapAccount{},
 		&model.ApiToken{},
 		&model.FirewallRule{}, &model.FirewallGroup{}, &model.FirewallSnapshot{},
+		&model.AwarenessCourse{}, &model.AwarenessQuestion{}, &model.AwarenessRecord{},
+		&model.Signature{},
 	); err != nil {
 		return err
 	}
@@ -214,8 +217,11 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 510, ParentID: 502, Title: "下发与回滚", Type: "button", AuthCode: "firewall:apply", Sort: 2},
 		{ID: 503, ParentID: 500, Name: "TwoFA", Title: "双因子口令", Path: "/security/twofa", Component: "/security/twofa/index", Icon: "Key", Sort: 3},
 		{ID: 508, ParentID: 503, Title: "重置他人绑定", Type: "button", AuthCode: "totp:reset", Sort: 1},
-		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: todo, Icon: "Reading", Sort: 4},
-		{ID: 505, ParentID: 500, Name: "FeatureLibrary", Title: "特征库", Path: "/security/features", Component: todo, Icon: "Collection", Sort: 5},
+		{ID: 504, ParentID: 500, Name: "SecurityAwareness", Title: "安全意识", Path: "/security/awareness", Component: "/security/awareness/index", Icon: "Reading", Sort: 4},
+		{ID: 514, ParentID: 504, Title: "维护与催办", Type: "button", AuthCode: "awareness:manage", Sort: 1},
+		{ID: 505, ParentID: 500, Name: "FeatureLibrary", Title: "特征库", Path: "/security/features", Component: "/security/features/index", Icon: "Collection", Sort: 5},
+		{ID: 515, ParentID: 505, Title: "维护特征", Type: "button", AuthCode: "signature:manage", Sort: 1},
+		{ID: 516, ParentID: 505, Title: "应用与撤下", Type: "button", AuthCode: "signature:apply", Sort: 2},
 		{ID: 511, ParentID: 500, Name: "Credential", Title: "凭证库", Path: "/security/credential", Component: "/security/credential/index", Icon: "Key", Sort: 6},
 		{ID: 512, ParentID: 511, Title: "维护凭据", Type: "button", AuthCode: "credential:manage", Sort: 1},
 		{ID: 513, ParentID: 511, Title: "测试连接", Type: "button", AuthCode: "credential:check", Sort: 2},
@@ -340,6 +346,12 @@ func Seed(g *gorm.DB, adminPwd string) error {
 	}
 
 	if err := seedCommandRules(g); err != nil {
+		return err
+	}
+	if err := seedSignatures(g); err != nil {
+		return err
+	}
+	if err := seedAwarenessDemo(g); err != nil {
 		return err
 	}
 	if err := seedEmailTemplates(g); err != nil {
@@ -502,6 +514,122 @@ func seedCommandRules(g *gorm.DB) error {
 	for i := range rules {
 		r := rules[i]
 		if err := g.Where("id = ?", r.ID).Attrs(r).FirstOrCreate(&model.CommandRule{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedSignatures 内置特征库。
+//
+// 前 7 条刻意**直接挂在内置命令规则（id 1-7）上**：那 7 条规则本来就是「危险命令特征」，
+// 让特征库一打开就是「已生效」的真实状态，而不是一张空表或一堆等着被应用的摆设。
+// 后面几条是内置规则里没有的，默认停在 observe 且未应用 —— 由人决定要不要放进闸门。
+//
+// 只在 ID 不存在时写入：管理员改过的灰度与开关不会被启动覆盖。
+func seedSignatures(g *gorm.DB) error {
+	sigs := []model.Signature{
+		// kind=command，已挂到内置命令规则
+		{ID: 1, Name: "递归删除根目录", Kind: "command", Pattern: `rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+/\s*$`,
+			Description: "rm -rf / 这类一条命令干掉整台机器的写法", Stage: "enforce", Severity: "high",
+			Enabled: true, Builtin: true, RuleID: 1},
+		{ID: 2, Name: "格式化文件系统", Kind: "command", Pattern: `^\s*mkfs(\.\w+)?\s`,
+			Description: "mkfs 会把分区上的数据全部抹掉", Stage: "enforce", Severity: "high",
+			Enabled: true, Builtin: true, RuleID: 2},
+		{ID: 3, Name: "裸写块设备", Kind: "command", Pattern: `\bdd\s+.*of=/dev/(sd|nvme|vd|hd)`,
+			Description: "dd of=/dev/sdX 绕过文件系统直接写盘", Stage: "enforce", Severity: "high",
+			Enabled: true, Builtin: true, RuleID: 3},
+		{ID: 4, Name: "关机或重启主机", Kind: "command", Pattern: `^\s*(shutdown|reboot|halt|poweroff)\b`,
+			Description: "批量执行里最常见的误操作之一", Stage: "enforce", Severity: "high",
+			Enabled: true, Builtin: true, RuleID: 4},
+		{ID: 5, Name: "根目录权限放开为 777", Kind: "command", Pattern: `\bchmod\s+(-R\s+)?777\s+/\s*$`,
+			Description: "chmod -R 777 / 之后 sshd 会拒绝登录，机器基本失联", Stage: "enforce", Severity: "high",
+			Enabled: true, Builtin: true, RuleID: 5},
+		{ID: 6, Name: "关闭防火墙或 SSH 服务", Kind: "command", Pattern: `\b(iptables\s+-F|systemctl\s+(stop|disable)\s+(firewalld|sshd))\b`,
+			Description: "关掉之后往往连不回来；默认只提醒，确认过场景再升到 enforce", Stage: "observe", Severity: "medium",
+			Enabled: true, Builtin: true, RuleID: 6},
+		{ID: 7, Name: "数据库删库或清表", Kind: "command", Pattern: `\b(drop\s+database|truncate\s+table)\b`,
+			Description: "命令行里直接删库；正常流程应当走数据库查询模块", Stage: "observe", Severity: "medium",
+			Enabled: true, Builtin: true, RuleID: 7},
+
+		// kind=command，内置规则里没有，默认未应用（RuleID=0）
+		{ID: 8, Name: "下载脚本直接执行", Kind: "command", Pattern: `\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b`,
+			Description: "curl ... | sh：执行的内容完全取决于对端那一刻返回什么，事后无法复现",
+			Stage:       "observe", Severity: "high", Enabled: true, Builtin: true},
+		{ID: 9, Name: "清空命令历史", Kind: "command", Pattern: `\b(history\s+-c|>\s*~?/?\.bash_history)\b`,
+			Description: "清历史本身不破坏系统，但它是「掩盖痕迹」的典型动作，值得留痕",
+			Stage:       "observe", Severity: "medium", Enabled: true, Builtin: true},
+		{ID: 10, Name: "监听端口等待连接", Kind: "command", Pattern: `\bnc\s+(-[a-zA-Z]*l[a-zA-Z]*)\s`,
+			Description: "nc -l 在主机上开一个监听口，常见于临时后门与数据外带",
+			Stage:       "observe", Severity: "medium", Enabled: true, Builtin: true},
+
+		// kind=port，配合暴露面扫描结果核对
+		{ID: 11, Name: "管理端口对外开放", Kind: "port", Pattern: "22,3389,5900",
+			Description: "SSH / RDP / VNC 直接暴露在公网是入口级风险",
+			Stage:       "observe", Severity: "high", Enabled: true, Builtin: true},
+		{ID: 12, Name: "数据库端口对外开放", Kind: "port", Pattern: "3306,5432,6379,9200,27017",
+			Description: "MySQL / PG / Redis / ES / Mongo 暴露在公网，等于把数据摆在门口",
+			Stage:       "observe", Severity: "high", Enabled: true, Builtin: true},
+	}
+	now := time.Now()
+	for i := range sigs {
+		s := sigs[i]
+		if s.RuleID != 0 {
+			s.AppliedAt = &now
+			s.AppliedBy = "内置"
+		}
+		if err := g.Where("id = ?", s.ID).Attrs(s).FirstOrCreate(&model.Signature{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedAwarenessDemo 一条示例培训项（草稿，不自动发布）。
+//
+// 刻意不发布：一发布就会给所有人推站内消息，那不该由「启动初始化」替管理员决定。
+// 内容与题目都可以直接改，也可以整条删掉（还没有人留下记录时允许删除）。
+func seedAwarenessDemo(g *gorm.DB) error {
+	course := model.AwarenessCourse{
+		ID:      1,
+		Title:   "高危命令与生产变更须知（示例）",
+		Summary: "示例培训项：读完确认 + 两道题。可直接改成贵司的版本，也可以整条删掉",
+		Content: `一、下发前先想清楚「影响面」
+- 批量执行选中的主机里有没有生产？平台会拦下来要你二次确认，那一步不是形式。
+- 命令里带 rm -rf、mkfs、dd of=/dev/sdX、chmod 777 / 的，闸门会直接拒绝下发。
+
+二、不要把口令写在命令行里
+- 会话录像与命令审计会留下完整原文，口令会跟着一起留在记录里。
+- 需要凭据时用「凭证库」，轮换一次所有引用主机下次连接生效。
+
+三、拿不准就先预检
+- 批量执行与脚本下发都有「预检」：把将要执行的命令原样摊开、把命中的规则列出来，再决定发不发。
+
+四、出事之后
+- 先在「消息中心 / 告警」里确认影响面，再动手回滚；防火墙与集群改动都有快照可回滚。`,
+		Scope: "all", PassScore: 100,
+	}
+	if err := g.Where("id = ?", course.ID).Attrs(course).
+		FirstOrCreate(&model.AwarenessCourse{}).Error; err != nil {
+		return err
+	}
+
+	questions := []model.AwarenessQuestion{
+		{ID: 1, CourseID: 1, Multi: false, Sort: 1,
+			Content: "批量执行时目标里包含生产主机，平台的行为是？",
+			Options: `["直接下发，事后在审计里留痕","要求显式确认后才下发","一律拒绝，生产只能上机操作","按主机标签随机决定"]`,
+			Answer:  `[1]`,
+			Explain: "下发闸门会把生产主机列出来并要求显式确认；确认这一步是后端校验的，绕过前端直接调接口同样过不去。"},
+		{ID: 2, CourseID: 1, Multi: true, Sort: 2,
+			Content: "以下哪些做法是对的？（多选）",
+			Options: `["需要口令时从凭证库引用","把 root 口令写在批量执行的命令里","下发前先用预检看命中了哪些规则","用 curl 下载脚本直接管道给 sh 执行"]`,
+			Answer:  `[0,2]`,
+			Explain: "命令原文会进审计与录像，口令绝不能写在命令行里；curl | sh 执行的内容取决于对端那一刻返回什么，事后无法复现。"},
+	}
+	for i := range questions {
+		q := questions[i]
+		if err := g.Where("id = ?", q.ID).Attrs(q).
+			FirstOrCreate(&model.AwarenessQuestion{}).Error; err != nil {
 			return err
 		}
 	}

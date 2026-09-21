@@ -3811,6 +3811,194 @@ export const rekeySecrets = (data: { mode: 'encrypt' | 'plain'; newKey?: string;
     note: string
   }>({ url: '/secrets/rekey', method: 'POST', data })
 
+/* ---------------- 安全意识（培训与考核） ---------------- */
+
+export interface AwarenessCourse {
+  id: number
+  title: string
+  summary: string
+  content: string
+  scope: 'all' | 'role' | 'dept'
+  scopeRoleId: number
+  scopeDeptId: number
+  passScore: number
+  dueAt: string | null
+  published: boolean
+  publishedAt: string | null
+  publisher: string
+  targetCount: number
+  doneCount: number
+  lastRemindAt: string | null
+  questionCount: number
+  overdue: boolean
+  scopeLabel: string
+}
+
+export interface AwarenessQuestion {
+  id: number
+  courseId: number
+  content: string
+  multi: boolean
+  explain: string
+  sort: number
+  optionList: string[]
+  answerList: number[]
+}
+
+export interface AwarenessRecord {
+  id: number
+  courseId: number
+  userId: number
+  username: string
+  status: 'pending' | 'read' | 'passed' | 'failed'
+  readAt: string | null
+  attempts: number
+  score: number
+  passedAt: string | null
+  clientIp: string
+  wrong: string
+}
+
+export interface MyAwarenessItem {
+  id: number
+  title: string
+  summary: string
+  dueAt: string | null
+  passScore: number
+  questionCount: number
+  status: 'pending' | 'read' | 'passed' | 'failed'
+  score: number
+  attempts: number
+  overdue: boolean
+}
+
+export const listMyAwareness = () =>
+  request<{ list: MyAwarenessItem[]; pending: number }>({ url: '/security/awareness/my' })
+export const getMyAwarenessCourse = (id: number) =>
+  request<{
+    course: { id: number; title: string; summary: string; content: string; dueAt: string | null; passScore: number }
+    /** 学员侧的题目不含正确答案，判分在后端做 */
+    questions: { id: number; content: string; options: string[]; multi: boolean }[]
+    record: AwarenessRecord
+  }>({ url: `/security/awareness/my/${id}` })
+export const confirmAwarenessRead = (id: number) =>
+  request<{ record: AwarenessRecord; detail: string }>({
+    url: `/security/awareness/my/${id}/read`,
+    method: 'POST'
+  })
+export const submitAwarenessQuiz = (id: number, answers: Record<string, number[]>) =>
+  request<{
+    score: number
+    passScore: number
+    status: string
+    correct: number
+    total: number
+    review: { id: number; ok: boolean; explain: string }[]
+    detail: string
+  }>({ url: `/security/awareness/my/${id}/quiz`, method: 'POST', data: { answers } })
+
+export const listAwarenessCourses = () =>
+  request<{ list: AwarenessCourse[]; note: string }>({ url: '/security/awareness/courses' })
+export const saveAwarenessCourse = (id: number | null, data: Record<string, any>) =>
+  id
+    ? request<AwarenessCourse>({ url: `/security/awareness/courses/${id}`, method: 'PUT', data })
+    : request<AwarenessCourse>({ url: '/security/awareness/courses', method: 'POST', data })
+export const deleteAwarenessCourse = (id: number) =>
+  request({ url: `/security/awareness/courses/${id}`, method: 'DELETE' })
+export const publishAwarenessCourse = (id: number) =>
+  request<{ course: AwarenessCourse; detail: string }>({
+    url: `/security/awareness/courses/${id}/publish`,
+    method: 'POST'
+  })
+export const unpublishAwarenessCourse = (id: number) =>
+  request<{ id: number; detail: string }>({
+    url: `/security/awareness/courses/${id}/unpublish`,
+    method: 'POST'
+  })
+export const remindAwarenessCourse = (id: number) =>
+  request<{ sent: number; detail: string }>({
+    url: `/security/awareness/courses/${id}/remind`,
+    method: 'POST'
+  })
+export const listAwarenessRecords = (id: number, status?: string) =>
+  request<{ course: AwarenessCourse; list: AwarenessRecord[]; stats: Record<string, number> }>({
+    url: `/security/awareness/courses/${id}/records`,
+    params: { status }
+  })
+export const listAwarenessQuestions = (courseId: number) =>
+  request<AwarenessQuestion[]>({ url: `/security/awareness/courses/${courseId}/questions` })
+export const createAwarenessQuestion = (courseId: number, data: Record<string, any>) =>
+  request<AwarenessQuestion>({
+    url: `/security/awareness/courses/${courseId}/questions`,
+    method: 'POST',
+    data
+  })
+export const updateAwarenessQuestion = (id: number, data: Record<string, any>) =>
+  request<AwarenessQuestion>({ url: `/security/awareness/questions/${id}`, method: 'PUT', data })
+export const deleteAwarenessQuestion = (id: number) =>
+  request({ url: `/security/awareness/questions/${id}`, method: 'DELETE' })
+
+/* ---------------- 特征库 ---------------- */
+
+export interface Signature {
+  id: number
+  name: string
+  kind: 'command' | 'port'
+  pattern: string
+  description: string
+  /** observe 只提醒（命令规则按 warn 应用）| enforce 真拦（按 block 应用） */
+  stage: 'observe' | 'enforce'
+  severity: 'high' | 'medium' | 'low'
+  enabled: boolean
+  builtin: boolean
+  ruleId: number
+  appliedAt: string | null
+  appliedBy: string
+  /** unapplied | applied | drift | missing | n/a（port 类不生成规则） */
+  applyStatus: string
+  applyDetail: string
+  ruleAction: string
+  ruleEnabled: boolean
+}
+
+export const listSignatures = (params?: { kind?: string; stage?: string; keyword?: string }) =>
+  request<{ list: Signature[]; stats: Record<string, number>; note: string }>({
+    url: '/security/signatures',
+    params
+  })
+export const saveSignature = (id: number | null, data: Record<string, any>) =>
+  id
+    ? request<{ signature: Signature; warn?: string }>({
+        url: `/security/signatures/${id}`,
+        method: 'PUT',
+        data
+      })
+    : request<Signature>({ url: '/security/signatures', method: 'POST', data })
+export const deleteSignature = (id: number) =>
+  request<{ id: number; ruleRemoved: boolean }>({ url: `/security/signatures/${id}`, method: 'DELETE' })
+export const applySignature = (id: number) =>
+  request<{ signature: Signature; detail: string }>({
+    url: `/security/signatures/${id}/apply`,
+    method: 'POST'
+  })
+export const revokeSignature = (id: number) =>
+  request<{ signature: Signature; detail: string }>({
+    url: `/security/signatures/${id}/revoke`,
+    method: 'POST'
+  })
+export const checkPortSignature = (id: number) =>
+  request<{
+    ports: string
+    hits: { targetId: number; name: string; address: string; hitPorts: string; lastScanAt: string; note: string }[]
+    targetCount: number
+    neverScanned: string[]
+    detail: string
+  }>({ url: `/security/signatures/${id}/port-check`, method: 'POST' })
+export const reconcileSignatures = () =>
+  request<{ total: number; drift: { id: number; name: string; status: string; detail: string }[]; note: string }>({
+    url: '/security/signatures/reconcile'
+  })
+
 
 
 

@@ -11,24 +11,9 @@ const router = useRouter()
 
 const title = computed(() => (route.meta.title as string) || '模块')
 
-// 已知占位模块的说明与替代方案
-const notes: Record<string, { plan: string; alternatives: { title: string; path: string }[] }> = {
-  '/security/firewall': {
-    plan: '下一轮实现：SSH 真连主机读取 firewalld / iptables / ufw 的现有规则，并支持放行与封禁下发（走命令闸门与生产二次确认）。',
-    alternatives: [
-      { title: '公网监测（看哪些端口暴露在公网）', path: '/monitor/public-ip' },
-      { title: '命令规则（拦截高危的防火墙操作）', path: '/system/command-rule' }
-    ]
-  },
-  '/security/awareness': {
-    plan: '暂未排期。这类内容更适合放在公司内部知识库，平台侧只会做「公告 + 必读确认」这种轻量形态。',
-    alternatives: [{ title: '公告管理', path: '/system/announcement' }]
-  },
-  '/security/features': {
-    plan: '暂未排期。检测规则已经承担了「按特征判定异常」的职责，特征库只有在需要共享规则集时才有意义。',
-    alternatives: [{ title: '检测规则', path: '/monitor/detection-rules' }]
-  }
-}
+// 已知占位模块的说明与替代方案。
+// 模块实现之后要把对应条目删掉，否则占位说明会与真实功能互相矛盾。
+const notes: Record<string, { plan: string; alternatives: { title: string; path: string }[] }> = {}
 
 const note = computed(() => notes[route.path])
 </script>

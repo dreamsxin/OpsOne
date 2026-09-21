@@ -14,6 +14,30 @@ const DevJWTSecret = "dev-only-jwt-secret-change-me"
 // DefaultAdminPassword 内置 admin 的初始口令默认值，生产模式下必须改掉
 const DefaultAdminPassword = "Admin@123456"
 
+// DefaultSecretKey 演示用的字段加密默认密钥。
+//
+// 与 DevJWTSecret / DefaultAdminPassword 同一性质：写在仓库里，人人可见，
+// 只适合演示与本地开发 —— 所以 prod 模式下带着它启动会被直接拒绝。
+// 有这个默认值是为了让「带演示数据的库」开箱即用：演示库里的凭据就是用它加密的。
+const DefaultSecretKey = "demo"
+
+// SecretOffValues 显式关闭字段加密的取值。
+//
+// 默认密钥不为空，所以「留空」不再等于「不加密」，必须有一个显式说法。
+// 明文落库是被支持的选择（内网自用、不想额外保管一把密钥），照实标注而不是拦着不让用。
+var SecretOffValues = []string{"off", "none", "plain", "disabled"}
+
+// normalizeSecretKey 把显式关闭的写法归一成空串
+func normalizeSecretKey(raw string) string {
+	v := strings.TrimSpace(raw)
+	for _, off := range SecretOffValues {
+		if strings.EqualFold(v, off) {
+			return ""
+		}
+	}
+	return v
+}
+
 // Config 运行配置，全部来自环境变量，便于本地与容器部署共用。
 type Config struct {
 	// Env 运行模式：dev（默认，宽松）或 prod。prod 下不安全的配置会让进程拒绝启动，
@@ -84,8 +108,14 @@ type Config struct {
 	// 只能在界面上手动扫。扫描会对目标发起大量 TCP 连接，默认每天一次。
 	ExposureSpec string
 
-	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。留空表示**不加密存储**，
-	// 这是被允许的配置，界面上会如实标出来 —— 不能让人以为「有凭证库就等于加密了」。
+	// AwarenessSpec 安全意识逾期提醒的 cron 表达式。留空表示不自动催办
+	//（必修项仍然可用，只是逾期不会有人被提醒，完成率靠人去翻）。
+	AwarenessSpec string
+
+	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
+	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
+	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
+	// 想要明文落库（被支持的选择）用 OPS_SECRET_KEY=off，界面上会标成「不加密存储」。
 	// 要换密钥或退回明文，走凭证库页的「更换密钥 / 取消加密」（先备份、再逐行重写、
 	// 进程内密钥热切换），不要直接改这个值：直接改等于让已有密文全部解不开。
 	SecretKey string
@@ -184,8 +214,9 @@ func Load() (*Config, error) {
 		HostMetricSpec:     strings.TrimSpace(env("OPS_HOST_METRIC_SPEC", "*/5 * * * *")),
 		OnCallSpec:         strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
 		ExposureSpec:       strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
+		AwarenessSpec:      strings.TrimSpace(env("OPS_AWARENESS_SPEC", "0 9 * * *")),
 
-		SecretKey: strings.TrimSpace(env("OPS_SECRET_KEY", "")),
+		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 
 		BackupSpec: strings.TrimSpace(env("OPS_BACKUP_SPEC", "0 3 * * *")),		BackupDir:  strings.TrimSpace(env("OPS_BACKUP_DIR", "backups")),
 		BackupKeep: envInt("OPS_BACKUP_KEEP", 7),
@@ -276,7 +307,10 @@ func (c *Config) Validate() error {
 		add(false, "OPS_WEB_DIR 为空：后端不托管前端静态文件，需要另配 nginx 之类")
 	}
 	if c.SecretKey == "" {
-		add(false, "OPS_SECRET_KEY 未设置：凭据以明文落库（这是被允许的配置，页面上会标成「不加密存储」）")
+		add(false, "OPS_SECRET_KEY 显式关闭了加密：凭据以明文落库（这是被允许的配置，页面上会标成「不加密存储」）")
+	} else if c.SecretKey == DefaultSecretKey {
+		add(true, "OPS_SECRET_KEY 还是演示默认值 %q —— 它写在仓库里，等于没加密；"+
+			"换成随机串时不要直接改这个变量，走「凭证库 → 密钥加密体检 → 更换密钥」，否则已有密文解不开", DefaultSecretKey)
 	} else if len(c.SecretKey) < 16 {
 		add(false, "OPS_SECRET_KEY 只有 %d 字节，偏短，建议 32 字节以上随机串", len(c.SecretKey))
 	}
