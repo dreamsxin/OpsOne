@@ -544,6 +544,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/databases/:id", middleware.RequirePerm("db:manage"), h.DeleteDBInstance)
 		auth.POST("/databases/:id/check", h.CheckDBInstance)
 
+		// 数据库只读查询：元数据浏览 + 只读 SQL + 流水
+		auth.GET("/databases/:id/schemas", middleware.RequirePerm("db:query"), h.ListDBSchemas)
+		auth.GET("/databases/:id/tables", middleware.RequirePerm("db:query"), h.ListDBTables)
+		auth.GET("/databases/:id/columns", middleware.RequirePerm("db:query"), h.DescribeDBTable)
+		auth.POST("/databases/:id/query", middleware.RequirePerm("db:query"), h.RunDBQuery)
+		auth.POST("/databases/:id/query/export", middleware.RequirePerm("db:query"), h.ExportDBQuery)
+		auth.POST("/databases/query/check", middleware.RequirePerm("db:query"), h.CheckDBQueryStatement)
+		auth.GET("/databases/query-logs", h.ListDBQueryLogs)
+
 		auth.GET("/fixed-assets", h.ListFixedAssets)
 		auth.GET("/fixed-assets/stats", h.FixedAssetStats)
 		auth.POST("/fixed-assets", middleware.RequirePerm("asset:manage"), h.CreateFixedAsset)

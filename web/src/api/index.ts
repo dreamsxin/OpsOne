@@ -1745,6 +1745,115 @@ export const listAlertSilenceHits = (id: number) =>
     url: `/monitor/silences/${id}/hits`
   })
 
+// ---------- 数据库只读查询 ----------
+
+export interface DBSchemaItem {
+  name: string
+  tables: number
+}
+
+export interface DBTableItem {
+  schema: string
+  name: string
+  kind: string // table | view
+  rows: number
+  comment: string
+}
+
+export interface DBColumnItem {
+  name: string
+  dataType: string
+  nullable: boolean
+  default: string
+  isPk: boolean
+  comment: string
+}
+
+export interface DBIndexItem {
+  name: string
+  columns: string
+  unique: boolean
+}
+
+export interface DBQueryResult {
+  columns: string[]
+  rows: string[][]
+  truncated: boolean
+  costMs: number
+  statement: string
+}
+
+export interface DBQueryLog {
+  id: number
+  instanceId: number
+  instanceName: string
+  dbType: string
+  schema: string
+  statement: string
+  status: string // success | blocked | failed
+  reason: string
+  rows: number
+  costMs: number
+  exported: boolean
+  username: string
+  clientIp: string
+  createdAt: string
+}
+
+export const listDBSchemas = (id: number) =>
+  request<{ instance: string; dbType: string; list: DBSchemaItem[] }>({
+    url: `/databases/${id}/schemas`
+  })
+export const listDBTables = (id: number, schema: string) =>
+  request<{ schema: string; list: DBTableItem[] }>({
+    url: `/databases/${id}/tables`,
+    params: { schema }
+  })
+export const describeDBTable = (id: number, schema: string, table: string) =>
+  request<{ schema: string; table: string; columns: DBColumnItem[]; indexes: DBIndexItem[] }>({
+    url: `/databases/${id}/columns`,
+    params: { schema, table }
+  })
+export const runDBQuery = (id: number, data: Record<string, any>) =>
+  request<DBQueryResult>({ url: `/databases/${id}/query`, method: 'POST', data })
+export const checkDBQueryStatement = (data: Record<string, any>) =>
+  request<{ allowed: boolean; reason?: string; statement?: string }>({
+    url: '/databases/query/check',
+    method: 'POST',
+    data
+  })
+export const listDBQueryLogs = (params?: Record<string, any>) =>
+  request<{ list: DBQueryLog[]; total: number }>({ url: '/databases/query-logs', params })
+
+/** 导出查询结果为 CSV。与其它导出一致：走 fetch 拿 blob，自己触发下载 */
+export async function exportDBQueryCSV(id: number, data: Record<string, any>) {
+  const token = localStorage.getItem('ops-token') || ''
+  const res = await fetch(`/api/v1/databases/${id}/query/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  })
+  if (!res.ok) {
+    let msg = `导出失败（HTTP ${res.status}）`
+    try {
+      const body = await res.json()
+      if (body?.msg) msg = body.msg
+    } catch {
+      // 响应不是 JSON 就用默认文案
+    }
+    throw new Error(msg)
+  }
+  const truncated = res.headers.get('X-Export-Truncated') === '1'
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `db-query-${Date.now()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+  return { truncated }
+}
+
 // ---------- 事件中心 ----------
 
 export interface OpsEvent {

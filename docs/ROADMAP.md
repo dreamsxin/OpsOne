@@ -18,7 +18,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 ## 资产管理（ID 100-199）
 
 - [x] 主机资产 `/asset/host` — CRUD、环境/标签/状态过滤、连通性探测、跳板机关联、CSV 批量导入导出（模板下载、试运行报告、按 address+port 幂等更新，**导出不含登录凭据**）
-- [x] 数据库资产 `/asset/database` — 实例纳管（MySQL/PG/Redis/Mongo）、按类型带默认端口、TCP 端口探测
+- [x] 数据库资产 `/asset/database` — 实例纳管（MySQL/PG/Redis/Mongo）、按类型带默认端口；连通性检查对 MySQL/PG **真建连接**并回写版本号，其余类型退化为 TCP 端口探测
 - [x] 云账号 `/asset/cloud` — 云账号与密钥台账（AK 列表页脱敏展示）；**不做资源同步**，需各厂商 SDK 与出网能力
 
 - [x] 标签管理 `/asset/tag` — 标签字典、分类与配色、主机/数据库用量统计，表单内可选可新建
@@ -37,6 +37,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 定时任务 `/execute/scheduler` — 标准五段 cron、多主机并发下发、启停与立即执行、运行记录复用批量执行历史
 - [x] 脚本库 `/execute/script` — 分类/说明/参数化（`${PARAM}` + 必填 + 默认值）、命令规则静态预检（拦截级禁止下发）、渲染预览、下发复用批量执行链路、使用计数；**不做版本管理与审批流**
 - [x] 构建发布 `/execute/build` — Jenkins 服务器登记与连通性测试、参数化触发构建、构建记录手动同步状态（平台不轮询）
+- [x] 数据库查询 `/execute/db-query` — 复用「数据库资产」里的实例（MySQL/PG）浏览库/表/字段/索引（含注释、行数估算、视图标记）并执行**只读 SQL**；三层防线 = 语句白名单（只放 select/with/show/explain/describe，拒多语句、注释绕过、`INTO OUTFILE`/`FOR UPDATE`/`pg_read_file`/`COPY ... TO PROGRAM`/`sleep`/`benchmark`）+ 会话级只读（PG `default_transaction_read_only`、MySQL `SET SESSION TRANSACTION READ ONLY`）+ 库侧只读授权；500 行截断并标注、30s 语句超时、CSV 导出（BOM，≤10000 行）、执行前预检、全量查询流水（语句原文/操作人/来源 IP/耗时/行数/拦截原因，留存天数可配）。**不做写操作、结果集编辑、Redis/Mongo、BI 报表与 AI 生成 SQL**
 
 
 ## 容器平台（ID 300-399）

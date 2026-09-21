@@ -26,6 +26,7 @@ const (
 	CfgRetentionAlert        = "retention.alert_days"
 	CfgRetentionModelCall    = "retention.model_call_days"
 	CfgRetentionAgentRun     = "retention.agent_run_days"
+	CfgRetentionDBQuery      = "retention.db_query_days"
 )
 
 // retentionTarget 一类可清理的数据
@@ -230,6 +231,20 @@ var retentionSpecs = []retentionSpec{
 		},
 		purge: func(h *Handler, deadline time.Time) int64 {
 			return h.DB.Where("created_at < ?", deadline).Delete(&model.AgentRun{}).RowsAffected
+		},
+	},
+	{
+		key: CfgRetentionDBQuery, label: "数据库查询流水",
+		note:      "谁在哪个库跑过什么只读语句、被拦了哪些；能查库等于能看业务数据，这段流水删了就说不清了",
+		irreverse: true,
+		count: func(h *Handler, deadline time.Time) (int64, int64) {
+			var total, expired int64
+			h.DB.Model(&model.DBQueryLog{}).Count(&total)
+			h.DB.Model(&model.DBQueryLog{}).Where("created_at < ?", deadline).Count(&expired)
+			return total, expired
+		},
+		purge: func(h *Handler, deadline time.Time) int64 {
+			return h.DB.Where("created_at < ?", deadline).Delete(&model.DBQueryLog{}).RowsAffected
 		},
 	},
 }

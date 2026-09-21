@@ -39,6 +39,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Probe{}, &model.ProbeRecord{},
 		&model.AggregationPolicy{},
 		&model.AlertSilence{},
+		&model.DBQueryLog{},
 		&model.Event{}, &model.EventLog{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
@@ -109,6 +110,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 219, ParentID: 212, Title: "触发构建与同步", Type: "button", AuthCode: "build:run", Sort: 2},
 		{ID: 205, ParentID: 200, Name: "ScriptLibrary", Title: "脚本库", Path: "/execute/script", Component: "/execute/script/index", Icon: "Notebook", Sort: 7},
 		{ID: 220, ParentID: 205, Title: "维护脚本", Type: "button", AuthCode: "script:manage", Sort: 1},
+		{ID: 221, ParentID: 200, Name: "DBQuery", Title: "数据库查询", Path: "/execute/db-query", Component: "/execute/db-query/index", Icon: "Coin", Sort: 8},
+		{ID: 222, ParentID: 221, Title: "浏览与查询数据库", Type: "button", AuthCode: "db:query", Sort: 1},
 
 		// ---------- 容器平台 ----------
 		{ID: 300, Name: "Kubernetes", Title: "容器平台", Path: "/kubernetes", Icon: "Ship", Sort: 40},
@@ -399,6 +402,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.alert_days", Value: "180", Type: "int", Label: "已恢复告警保留天数", Remark: "只清理已恢复的告警，未恢复的不动；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.model_call_days", Value: "365", Type: "int", Label: "模型调用流水保留天数", Remark: "AI 网关的用量与成本就从这张表算；删了就算不出那段时间的账。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.agent_run_days", Value: "365", Type: "int", Label: "Agent 运行记录保留天数", Remark: "含模型给出的结论正文；删了结论就找不回来了。0 表示永久保留", Builtin: true},
+		{Group: "retention", Key: "retention.db_query_days", Value: "180", Type: "int", Label: "数据库查询流水保留天数", Remark: "谁在哪个库跑过什么只读语句、被拦了哪些；能查库等于能看业务数据，建议与审计日志同档。0 表示永久保留", Builtin: true},
 	}
 
 	for i := range configs {

@@ -555,9 +555,32 @@ type AlertSilence struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-// AggregationPolicy 告警聚合策略：把同类告警按维度归到一个桶，
-// 对付「一台机器挂了刷出一堆告警」这类噪音。
+// DBQueryLog 数据库只读查询的执行流水。
 //
+// 为什么必须有：能查库就等于能看到业务数据本身，比看日志敏感得多。
+// 被拦下的语句也要留痕（status=blocked），否则「谁试过跑 delete」这种事查不到。
+type DBQueryLog struct {
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	InstanceID   uint   `gorm:"index" json:"instanceId"`
+	InstanceName string `gorm:"size:64" json:"instanceName"`
+	DBType       string `gorm:"size:16" json:"dbType"`
+	Schema       string `gorm:"size:64" json:"schema"`
+	Statement    string `gorm:"type:text" json:"statement"`
+	// Status success（执行成功）| blocked（被守卫拦下，没有下发到库）| failed（下发了但报错）
+	Status   string `gorm:"size:16;index" json:"status"`
+	Reason   string `gorm:"size:255" json:"reason"` // 拦截原因或数据库返回的错误
+	Rows     int    `gorm:"default:0" json:"rows"`
+	CostMs   int64  `gorm:"default:0" json:"costMs"`
+	Exported bool   `gorm:"default:false" json:"exported"` // 是不是导出操作（数据外带）
+
+	UserID    uint      `gorm:"index;default:0" json:"userId"`
+	Username  string    `gorm:"size:64;index" json:"username"`
+	ClientIP  string    `gorm:"size:64" json:"clientIp"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// AggregationPolicy 告警聚合策略：把同类告警按维度归到一个桶，
+// 对付「一台机器挂了刷出一堆告警」这类噪音。//
 // 归桶是实时计算的，不改动告警本身；只有显式打开「抑制通知」才会影响投递，
 // 被抑制的告警仍然入库、页面可见，并在告警上记下是哪条策略抑制的。
 type AggregationPolicy struct {

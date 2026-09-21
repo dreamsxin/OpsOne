@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ops-platform/server/internal/dbquery"
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
@@ -259,8 +261,9 @@ func (h *Handler) DeleteDBInstance(c *gin.Context) {
 
 // CheckDBInstance 连通性探测。
 //
-// 注意：这里只做 TCP 端口可达性检测，不做数据库协议握手与账号验证 ——
-// 平台不内置各数据库驱动，端口通不代表账号密码可用。
+// 检测分两种：MySQL / PostgreSQL 会**真连一次并取版本号**（顺带验证登记的账号密码可用），
+// 其余类型（Redis / Mongo / other）平台没有对应驱动，仍然只做 TCP 端口可达性检测 ——
+// 端口通不代表账号能用，返回里的 note 会说清这次用的是哪一种。
 func (h *Handler) CheckDBInstance(c *gin.Context) {
 	item, ok := h.loadDBScoped(c)
 	if !ok {
@@ -268,26 +271,48 @@ func (h *Handler) CheckDBInstance(c *gin.Context) {
 	}
 
 	start := time.Now()
-	addr := net.JoinHostPort(item.Address, strconv.Itoa(item.Port))
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	status := "offline"
+	detail := ""
+	note := "仅检测 TCP 端口可达性，未做账号认证"
+	version := ""
+
+	if dbquery.Supported(item.Type) && strings.TrimSpace(item.Username) != "" {
+		note = "已真实连接数据库并取到版本号（账号密码有效）"
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
+		defer cancel()
+		v, err := dbquery.Probe(ctx, dbTarget(item, ""))
+		if err == nil {
+			status = "online"
+			version = v
+		} else {
+			detail = err.Error()
+		}
+	} else {
+		if dbquery.Supported(item.Type) {
+			note = "没有登记账号，只做了 TCP 端口探测；补上账号密码后会改成真实连接检测"
+		}
+		addr := net.JoinHostPort(item.Address, strconv.Itoa(item.Port))
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			status = "online"
+		} else {
+			detail = err.Error()
+		}
+	}
 	cost := time.Since(start).Milliseconds()
 
 	now := time.Now()
-	status := "offline"
-	detail := ""
-	if err == nil {
-		_ = conn.Close()
-		status = "online"
-	} else {
-		detail = err.Error()
+	updates := map[string]any{"status": status, "checked_at": &now}
+	// 真连上了就把版本号回填，省得手工维护
+	if version != "" {
+		updates["version"] = truncate(version, 32)
 	}
-
-	h.DB.Model(&model.DBInstance{}).Where("id = ?", item.ID).
-		Updates(map[string]any{"status": status, "checked_at": &now})
+	h.DB.Model(&model.DBInstance{}).Where("id = ?", item.ID).Updates(updates)
 
 	response.OK(c, gin.H{
 		"status": status, "costMs": cost, "detail": detail,
-		"note": "仅检测 TCP 端口可达性，未做账号认证",
+		"version": version, "note": note,
 	})
 }
 
