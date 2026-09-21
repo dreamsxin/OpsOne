@@ -324,6 +324,35 @@ func (h *Handler) KubePodDetail(c *gin.Context) {
 	})
 }
 
+// KubeCapacity 集群容量与配额。
+//
+// 这一页最容易被做成误导人的页面，因为「已分配」和「实际用量」是两件事：
+// 调度器看 requests，OOM 看实际用量。两个都给，metrics 缺失时明说缺，不用 0 充数。
+func (h *Handler) KubeCapacity(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	// 容量统计要拉全量 Pod，比普通列表慢，给到写操作那档超时
+	ctx, cancel := context.WithTimeout(context.Background(), kubeApplyTimeout)
+	defer cancel()
+
+	result, err := client.Capacity(ctx, strings.TrimSpace(c.Query("namespace")))
+	if err != nil {
+		response.Error(c, "统计容量失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{
+		"nodes": result.Nodes, "namespaces": result.Namespaces,
+		"podsCounted": result.PodsCounted, "podsSkipped": result.PodsSkipped,
+		"metricsAvailable": result.MetricsAvailable, "metricsNote": result.MetricsNote,
+		// 这三句解释的是「数字怎么来的」，不写清楚就会被当成监控页来读
+		"note": "已分配 = 活着的 Pod 的 requests 之和（Succeeded / Failed 的 Pod 不算，它们已经把资源还回去了）；" +
+			"init 容器按「单个最大值」与普通容器之和取较大者，与调度器规则一致；" +
+			"占比的分母是节点可分配量（allocatable）而不是总容量，因为调度看的是可分配量",
+	})
+}
+
 // ApplyKubeResource 提交一段 YAML。dryRun=true 时只让 API Server 校验不落盘。
 func (h *Handler) ApplyKubeResource(c *gin.Context) {
 	cluster, client, ok := h.requireKubeCluster(c)

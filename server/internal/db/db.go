@@ -167,6 +167,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 306, ParentID: 303, Title: "改动集群资源", Type: "button", AuthCode: "kube:write", Sort: 1},
 		{ID: 304, ParentID: 300, Name: "K8sForward", Title: "服务转发", Path: "/kubernetes/forward", Component: "/kubernetes/forward/index", Icon: "Share", Sort: 4},
 		{ID: 307, ParentID: 304, Title: "开关转发隧道", Type: "button", AuthCode: "kube:forward", Sort: 1},
+		{ID: 308, ParentID: 300, Name: "K8sCapacity", Title: "容量与配额", Path: "/kubernetes/capacity", Component: "/kubernetes/capacity/index", Icon: "Odometer", Sort: 5},
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},

@@ -2674,6 +2674,68 @@ export const getKubePodDetail = (id: number, namespace: string, name: string) =>
     params: { namespace, name }
   })
 
+export interface KubeNodeCapacity {
+  name: string
+  roles: string
+  ready: boolean
+  schedulable: boolean
+  podCount: number
+  podCapacity: number
+  cpuCapacity: string
+  cpuAllocatable: string
+  cpuRequests: string
+  cpuLimits: string
+  cpuUsage: string
+  cpuRequestPct: number
+  cpuLimitPct: number
+  cpuUsagePct: number
+  memCapacity: string
+  memAllocatable: string
+  memRequests: string
+  memLimits: string
+  memUsage: string
+  memRequestPct: number
+  memLimitPct: number
+  memUsagePct: number
+  /** 这个节点有没有实际用量数据（要 metrics-server） */
+  hasUsage: boolean
+}
+
+export interface KubeQuotaItem {
+  name: string
+  resource: string
+  hard: string
+  used: string
+  percent: number
+}
+
+export interface KubeNamespaceCapacity {
+  namespace: string
+  podCount: number
+  cpuRequests: string
+  cpuLimits: string
+  memRequests: string
+  memLimits: string
+  cpuUsage: string
+  memUsage: string
+  hasUsage: boolean
+  quotas: KubeQuotaItem[]
+  /** 没配 limits 的 Pod 数：这些 Pod 能把节点吃满 */
+  noLimitPods: number
+}
+
+export const getKubeCapacity = (id: number, namespace?: string) =>
+  request<{
+    nodes: KubeNodeCapacity[]
+    namespaces: KubeNamespaceCapacity[]
+    podsCounted: number
+    podsSkipped: number
+    metricsAvailable: boolean
+    metricsNote: string
+    note: string
+  }>({ url: `/kube/clusters/${id}/capacity`, params: namespace ? { namespace } : {} })
+
+
 
 export const applyKubeResource = (id: number, data: { yaml: string; dryRun: boolean; force?: boolean }) =>
   request<KubeApplyResult>({ url: `/kube/clusters/${id}/resource/apply`, method: 'POST', data })

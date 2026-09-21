@@ -688,6 +688,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/kube/clusters/:id/resource/events", h.KubeObjectEvents)
 		auth.GET("/kube/clusters/:id/resource/pods", h.KubeRelatedPods)
 		auth.GET("/kube/clusters/:id/pod", h.KubePodDetail)
+		auth.GET("/kube/clusters/:id/capacity", h.KubeCapacity)
 		auth.POST("/kube/clusters/:id/resource/apply", middleware.RequirePerm("kube:write"), h.ApplyKubeResource)
 		auth.POST("/kube/clusters/:id/resource/scale", middleware.RequirePerm("kube:write"), h.ScaleKubeResource)
 		auth.POST("/kube/clusters/:id/resource/restart", middleware.RequirePerm("kube:write"), h.RestartKubeWorkload)
