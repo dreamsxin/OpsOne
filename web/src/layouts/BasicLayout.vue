@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { changePassword, getBranding, getMessageSummary, type MenuNode, type MessageSummary } from '@/api'
+import MenuTree from './MenuTree.vue'
 
 
 const store = useUserStore()
@@ -14,6 +15,7 @@ const collapse = ref(false)
 const pwdVisible = ref(false)
 const pwdFormRef = ref<FormInstance>()
 const pwdForm = ref({ oldPassword: '', newPassword: '', confirm: '' })
+
 
 const summary = ref<MessageSummary>({ unread: 0, unreadAlert: 0, latest: [] })
 const platformName = ref('OpsOne 运维平台')
@@ -51,7 +53,45 @@ function gotoInbox() {
 
 const visibleMenus = computed(() => store.menus.filter((m) => !m.hidden))
 const activeMenu = computed(() => route.path)
+
+// 菜单搜索：功能多了之后「知道有这个能力但找不到在哪个分组」是最常见的摩擦，
+// 拍平成「一级 / 二级 / 页面」的形式，按标题或路径模糊匹配。
+type FlatMenu = { id: number; title: string; path: string; trail: string }
+
+const flatMenus = computed<FlatMenu[]>(() => {
+  const list: FlatMenu[] = []
+  const walk = (nodes: MenuNode[], parents: string[]) => {
+    for (const node of nodes) {
+      const chain = [...parents, node.title]
+      // 只有真正能打开的页面才进搜索结果，分组本身不进
+      if (node.path && !node.children?.length) {
+        list.push({ id: node.id, title: node.title, path: node.path, trail: chain.join(' / ') })
+      }
+      if (node.children?.length) walk(node.children, chain)
+    }
+  }
+  walk(visibleMenus.value, [])
+  return list
+})
+
+const searchRef = ref()
+const searchValue = ref('')
+
+function gotoMenu(path: string) {
+  if (!path) return
+  searchValue.value = ''
+  router.push(path)
+}
+
+function onSearchHotkey(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    searchRef.value?.focus?.()
+  }
+}
+
 const breadcrumbs = computed(() => {
+
   const trail: string[] = []
   const walk = (nodes: MenuNode[], parents: string[]) => {
     for (const node of nodes) {
@@ -99,9 +139,15 @@ async function handleLogout() {
 onMounted(() => {
   loadSummary()
   loadBranding()
+  window.addEventListener('keydown', onSearchHotkey)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onSearchHotkey)
 })
 
 </script>
+
 
 
 <template>
@@ -132,26 +178,10 @@ onMounted(() => {
         unique-opened
       >
         <template v-for="menu in visibleMenus" :key="menu.id">
-          <el-sub-menu v-if="menu.children?.length" :index="menu.path">
-            <template #title>
-              <el-icon v-if="menu.icon"><component :is="menu.icon" /></el-icon>
-              <span>{{ menu.title }}</span>
-            </template>
-            <el-menu-item
-              v-for="child in menu.children.filter((c) => !c.hidden)"
-              :key="child.id"
-              :index="child.path"
-            >
-              <el-icon v-if="child.icon"><component :is="child.icon" /></el-icon>
-              <span>{{ child.title }}</span>
-            </el-menu-item>
-          </el-sub-menu>
-          <el-menu-item v-else :index="menu.path">
-            <el-icon v-if="menu.icon"><component :is="menu.icon" /></el-icon>
-            <template #title>{{ menu.title }}</template>
-          </el-menu-item>
+          <MenuTree :items="[menu]" />
         </template>
       </el-menu>
+
     </el-aside>
 
     <el-container>
@@ -174,7 +204,24 @@ onMounted(() => {
           </el-breadcrumb-item>
         </el-breadcrumb>
         <div style="flex: 1"></div>
+        <el-select
+          ref="searchRef"
+          v-model="searchValue"
+          filterable
+          clearable
+          placeholder="搜功能（Ctrl+K）"
+          style="width: 240px"
+          @change="gotoMenu"
+        >
+          <el-option v-for="item in flatMenus" :key="item.id" :label="item.title" :value="item.path">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span>{{ item.title }}</span>
+              <span style="margin-left: auto; color: #9ca3af; font-size: 12px">{{ item.trail }}</span>
+            </div>
+          </el-option>
+        </el-select>
         <el-dropdown trigger="click" @visible-change="onBellToggle">
+
           <el-badge :value="summary.unread" :hidden="summary.unread === 0" :max="99">
             <el-icon size="18" style="cursor: pointer; vertical-align: middle"><Bell /></el-icon>
           </el-badge>
