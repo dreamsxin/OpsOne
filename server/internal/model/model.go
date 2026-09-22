@@ -17,8 +17,10 @@
 // 由建记录的代码负责显式赋值（平台所有 CRUD handler 本来就是这么写的：
 // 先 `enabled := true`，再按请求里的 *bool 覆盖）。
 //
-// 还带着这个标签的字段列在 bool_default_test.go 的 auditedPending 清单里，
-// 每一条都注明了为什么还没动。新增模型如果给布尔字段加了这个标签，那个测试会失败。
+// 现在带着这个标签的布尔字段**一个都没有**了：43 个全部清掉（14 个先清，
+// 剩下 29 个在逐一确认过「每一处会落库的创建点都显式赋值」之后一起清），
+// handler 里那七处「插完再 Updates 一次」的补丁也一并删了。
+// bool_default_test.go 解析这个文件断言这一点，新增模型再加这个标签就会失败。
 package model
 
 import "time"
@@ -155,7 +157,7 @@ type SiteLink struct {
 	Icon        string    `gorm:"size:64" json:"icon"`
 	Description string    `gorm:"size:255" json:"description"`
 	Sort        int       `gorm:"default:0" json:"sort"`
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -214,7 +216,7 @@ type EmailTemplate struct {
 	Body      string    `gorm:"type:text" json:"body"`
 	Variables string    `gorm:"size:255" json:"variables"` // 可用变量提示，逗号分隔
 	Builtin   bool      `gorm:"default:false" json:"builtin"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -291,6 +293,17 @@ type HostMetric struct {
 	// 只留最满的一个：磁盘告警关心的是「哪里先满」，全量挂载点留着会把表撑大
 	DiskMaxPercent float64 `json:"diskMaxPercent"`
 	DiskMaxMount   string  `gorm:"size:128" json:"diskMaxMount"`
+	// InodeMaxPercent / InodeMaxMount inode 用得最满的挂载点。
+	//
+	// 单独采一遍是因为「空间还很空但 inode 用光了」是一种常见又很难猜的故障：
+	// 表现是写文件报 No space left on device，而 df -k 看上去一切正常
+	// （典型场景：会话或缓存目录里堆了几百万个小文件）。
+	InodeMaxPercent float64 `json:"inodeMaxPercent"`
+	InodeMaxMount   string  `gorm:"size:128" json:"inodeMaxMount"`
+	// InodeRead 这次采样有没有读到 inode 数据。
+	// 不加这个标志就分不清「这台机器 inode 用量是 0%」和「这条采样是 inode 采集上线前的」——
+	// 两者在数据库里都是 0，而前者是好消息、后者是没有数据
+	InodeRead bool `json:"inodeRead"`
 
 	Load1  float64 `json:"load1"`
 	Load5  float64 `json:"load5"`
@@ -333,7 +346,7 @@ type OnCallSchedule struct {
 	// NotifyEmail 是否同时发邮件（要求 SMTP 已配置且用户填了邮箱）
 	NotifyEmail bool `gorm:"default:false" json:"notifyEmail"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -429,7 +442,7 @@ type Credential struct {
 	// Owner 责任人（自由文本，与防火墙规则的 Owner 一致），凭据没人认领是常见的失控来源
 	Owner   string `gorm:"size:64" json:"owner"`
 	DeptID  uint   `gorm:"index;default:0" json:"deptId"`
-	Enabled bool   `gorm:"default:true" json:"enabled"`
+	Enabled bool   `json:"enabled"`
 	// RotatedAt 最近一次换密钥的时间，为空表示从未轮换
 	RotatedAt *time.Time `json:"rotatedAt"`
 	// LastUsedAt / LastUsedHostID 最近一次真的用它连上了哪台机器。
@@ -538,7 +551,7 @@ type CommandRule struct {
 	Pattern     string    `gorm:"size:255;not null" json:"pattern"` // Go 正则
 	Description string    `gorm:"size:255" json:"description"`
 	Action      string    `gorm:"size:16;default:block" json:"action"` // block | warn
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -639,7 +652,7 @@ type CronJob struct {
 	Command string `gorm:"type:text;not null" json:"command"`
 	HostIDs string `gorm:"type:text" json:"-"` // JSON 数组，接口层用 hostIds 暴露
 	Timeout int    `gorm:"default:60" json:"timeout"`
-	Enabled bool   `gorm:"default:true" json:"enabled"`
+	Enabled bool   `json:"enabled"`
 	// ProdConfirmed 保存任务时是否确认过「这个任务会定期往生产主机上下发」。
 	// 调度触发时无人在场，就用保存时的这次确认；目标改成含生产主机就要重新确认。
 	ProdConfirmed bool       `json:"prodConfirmed"`
@@ -775,7 +788,7 @@ type FirewallRule struct {
 	Origin string `gorm:"size:16;default:platform" json:"origin"`
 	// State pending 待下发 | synced 已生效 | drift 真机上没有 | extra 真机有平台没登记
 	State   string `gorm:"size:16;default:pending" json:"state"`
-	Enabled bool   `gorm:"default:true" json:"enabled"`
+	Enabled bool   `json:"enabled"`
 
 	// Hits / LastCheckAt 来自最近一次读取；HasCounter=false 说明这台机器读不到计数，
 	// 界面必须区分「命中 0 次」和「没有计数器」
@@ -797,7 +810,7 @@ type FirewallGroup struct {
 	Description string `gorm:"size:255" json:"description"`
 	// MemberHostIDs 主机 ID 列表，JSON 数组字符串（与 CronJob.HostIDs 同格式，都用 parseHostIDs 读）
 	MemberHostIDs string    `gorm:"size:512" json:"memberHostIds"`
-	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	Enabled       bool      `json:"enabled"`
 	CreatedBy     string    `gorm:"size:64" json:"createdBy"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -828,7 +841,7 @@ type AlertSource struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	Name          string     `gorm:"size:64;not null" json:"name"`
 	Token         string     `gorm:"size:64;uniqueIndex;not null" json:"token"`
-	Enabled       bool       `gorm:"default:true" json:"enabled"`
+	Enabled       bool       `json:"enabled"`
 	Remark        string     `gorm:"size:255" json:"remark"`
 	ReceivedCount int        `json:"receivedCount"`
 	LastSeenAt    *time.Time `json:"lastSeenAt"`
@@ -893,7 +906,7 @@ type AlertSilence struct {
 	EndAt   time.Time `gorm:"index" json:"endAt"`
 
 	Reason  string `gorm:"size:255" json:"reason"`
-	Enabled bool   `gorm:"default:true" json:"enabled"`
+	Enabled bool   `json:"enabled"`
 
 	// ---------- 运行痕迹 ----------
 
@@ -953,7 +966,7 @@ type AggregationPolicy struct {
 	SuppressNotify bool `gorm:"default:false" json:"suppressNotify"`
 	// Priority 越小越先匹配，一条告警只会被第一条命中的策略处理
 	Priority  int       `gorm:"default:100" json:"priority"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -983,7 +996,7 @@ type NotifyChannel struct {
 	// 一个都没登记时回落到系统配置里那套全局 SMTP
 	MailAccountID uint `gorm:"index;default:0" json:"mailAccountId"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -1085,7 +1098,7 @@ type NotifyRoute struct {
 	MatchLabels   string    `gorm:"type:text" json:"matchLabels"` // JSON 对象，需全部命中
 	ChannelIDs    string    `gorm:"type:text" json:"-"`           // JSON 数组，接口层用 channelIds 暴露
 	IsDefault     bool      `gorm:"default:false" json:"isDefault"`
-	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
@@ -1258,7 +1271,7 @@ type CloudAccount struct {
 	AccountID       string    `gorm:"size:64" json:"accountId"` // 云上主账号 ID，便于对账
 	DeptID          uint      `gorm:"index;default:0" json:"deptId"`
 	CreatedBy       uint      `gorm:"index;default:0" json:"createdBy"`
-	Enabled         bool      `gorm:"default:true" json:"enabled"`
+	Enabled         bool      `json:"enabled"`
 	Remark          string    `gorm:"size:255" json:"remark"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
@@ -1670,7 +1683,7 @@ type BuildServer struct {
 	Token     string    `gorm:"size:255" json:"-"` // 配了密钥时加密落库，不出接口
 	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -1686,7 +1699,7 @@ type BuildJob struct {
 	Params      string     `gorm:"type:text" json:"params"`          // 默认参数，JSON 对象
 	DeptID      uint       `gorm:"index;default:0" json:"deptId"`
 	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
-	Enabled     bool       `gorm:"default:true" json:"enabled"`
+	Enabled     bool       `json:"enabled"`
 	Remark      string     `gorm:"size:255" json:"remark"`
 	LastBuildNo int        `json:"lastBuildNo"`
 	LastStatus  string     `gorm:"size:16" json:"lastStatus"` // triggered | success | failure | unstable | aborted | unknown
@@ -2154,7 +2167,7 @@ type Runbook struct {
 	// Rollback 做错了怎么退回来
 	Rollback  string `gorm:"type:text" json:"rollback"`
 	RiskLevel string `gorm:"size:8;default:low" json:"riskLevel"` // low | medium | high
-	Enabled   bool   `gorm:"default:true" json:"enabled"`
+	Enabled   bool   `json:"enabled"`
 
 	// 以下由命令规则预检回填，与脚本库同一套规则
 	PrecheckStatus string     `gorm:"size:16;default:unknown" json:"precheckStatus"` // unknown | pass | warn | blocked
@@ -2215,7 +2228,7 @@ type Script struct {
 	UseCount    int        `json:"useCount"`
 	LastUsedAt  *time.Time `json:"lastUsedAt"`
 	LastUsedBy  string     `gorm:"size:64" json:"lastUsedBy"`
-	Enabled     bool       `gorm:"default:true" json:"enabled"`
+	Enabled     bool       `json:"enabled"`
 	CreatorName string     `gorm:"size:64" json:"creatorName"`
 	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -2315,7 +2328,7 @@ type DetectionRule struct {
 	LastEvalAt *time.Time `json:"lastEvalAt"`
 	LastFireAt *time.Time `json:"lastFireAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2351,7 +2364,7 @@ type MetricSource struct {
 	LastError   string     `gorm:"size:500" json:"lastError"`
 	LastCheckAt *time.Time `json:"lastCheckAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2381,7 +2394,7 @@ type LogSource struct {
 	LastError   string     `gorm:"size:500" json:"lastError"`
 	LastCheckAt *time.Time `json:"lastCheckAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2410,7 +2423,7 @@ type TraceSource struct {
 	LastError    string     `gorm:"size:500" json:"lastError"`
 	LastCheckAt  *time.Time `json:"lastCheckAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2424,7 +2437,7 @@ type SavedMetricQuery struct {
 	SourceID uint   `gorm:"index;default:0" json:"sourceId"`
 	Expr     string `gorm:"type:text;not null" json:"expr"`
 	// RangeMode 默认以范围查询打开（折线图），否则即时查询（表格）
-	RangeMode bool      `gorm:"default:true" json:"rangeMode"`
+	RangeMode bool      `json:"rangeMode"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2449,7 +2462,7 @@ type KubeCluster struct {
 	LastCheckAt *time.Time `json:"lastCheckAt"`
 	LastError   string     `gorm:"size:500" json:"lastError"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2493,7 +2506,7 @@ type ModelUpstream struct {
 	LastError   string     `gorm:"size:500" json:"lastError"`
 	LastCheckAt *time.Time `json:"lastCheckAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2554,7 +2567,7 @@ type AgentConfig struct {
 	Temperature    float64 `gorm:"default:0" json:"temperature"`
 	MaxTokens      int     `gorm:"default:800" json:"maxTokens"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2621,7 +2634,7 @@ type ImApp struct {
 	DefaultRoleID uint `gorm:"default:0" json:"defaultRoleId"`
 	// DisableMissing IM 侧已经查不到的人（离职），把平台账号置为停用。
 	// 只停用、不删除 —— 删了操作审计里的历史记录就对不上人了
-	DisableMissing bool `gorm:"default:true" json:"disableMissing"`
+	DisableMissing bool `json:"disableMissing"`
 
 	// LoginEnabled 是否允许用这个应用扫码登录平台
 	LoginEnabled bool `gorm:"default:false" json:"loginEnabled"`
@@ -2638,7 +2651,7 @@ type ImApp struct {
 	LastCheckAt *time.Time `json:"lastCheckAt"`
 	LastSyncAt  *time.Time `json:"lastSyncAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -2851,7 +2864,7 @@ type Signature struct {
 	Stage string `gorm:"size:16;default:observe" json:"stage"`
 	// Severity high | medium | low，只用于展示与排序
 	Severity string `gorm:"size:16;default:medium" json:"severity"`
-	Enabled  bool   `gorm:"default:true" json:"enabled"`
+	Enabled  bool   `json:"enabled"`
 	// Builtin 内置特征：可以停用、可以改灰度，但不允许删除（删了下次启动又会回来，反而更乱）
 	Builtin bool `gorm:"default:false" json:"builtin"`
 	// RuleID command 类特征应用后对应的 command_rules 行，0 表示还没应用

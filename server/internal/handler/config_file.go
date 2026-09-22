@@ -631,7 +631,8 @@ func (h *Handler) CreateConfigFile(c *gin.Context) {
 		response.Error(c, "登记失败")
 		return
 	}
-	// 带 default 的布尔列 Create 后会被回填成库默认值，显式写回
+	// diff_lines 先置成 -1 表示「还没比对过」——这一条是 Create 里给不了的
+	// （零值 0 会被读成「没有差异」）。critical / alert_enabled 一起写只是顺带
 	h.DB.Model(&model.ConfigFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 		"critical": file.Critical, "alert_enabled": file.AlertEnabled,
 		"diff_lines": -1,

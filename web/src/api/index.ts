@@ -4135,6 +4135,10 @@ export interface HostMetric {
   swapPercent: number
   diskMaxPercent: number
   diskMaxMount: string
+  /** inode 最满的挂载点；inodeRead 为 false 表示这条采样没有 inode 数据（不是 0%） */
+  inodeMaxPercent: number
+  inodeMaxMount: string
+  inodeRead: boolean
   load1: number
   load5: number
   load15: number

@@ -115,6 +115,7 @@ func (h *Handler) metricSection(hostID uint) reportSection {
 		gin.H{"name": "磁盘最满挂载点", "value": fmt.Sprintf("%.1f%%", latest.DiskMaxPercent),
 			"detail": latest.DiskMaxMount, "warn": latest.DiskMaxPercent >= 85,
 			"note": "只记最满的那一个挂载点，网络挂载不在统计内"},
+		inodeReportItem(latest),
 		gin.H{"name": "负载", "value": fmt.Sprintf("%.2f / %.2f / %.2f", latest.Load1, latest.Load5, latest.Load15),
 			"detail": fmt.Sprintf("%d 核", latest.CPUCores),
 			"warn":   latest.CPUCores > 0 && latest.Load5 > float64(latest.CPUCores)*2},
@@ -155,6 +156,18 @@ func formatUptime(sec int64) string {
 		return fmt.Sprintf("%d 天 %d 小时", days, hours)
 	}
 	return fmt.Sprintf("%d 小时", hours)
+}
+
+// inodeReportItem inode 那一条。老采样没有这个数据，照实说没有而不是显示 0%。
+func inodeReportItem(latest model.HostMetric) gin.H {
+	if !latest.InodeRead {
+		return gin.H{"name": "inode 最满挂载点", "value": "未采集",
+			"note": "这条采样是 inode 采集上线前采的（或者这台机器的 df -i 读不到）——" +
+				"不是「inode 很空」，是没有数据"}
+	}
+	return gin.H{"name": "inode 最满挂载点", "value": fmt.Sprintf("%.1f%%", latest.InodeMaxPercent),
+		"detail": latest.InodeMaxMount, "warn": latest.InodeMaxPercent >= 85,
+		"note": "inode 用光的表现是写文件报 No space left on device，而磁盘空间看着还很空"}
 }
 
 // serviceSection 纳管服务段。注意它的失败语义与指标不同：

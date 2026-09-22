@@ -170,6 +170,15 @@ var builtinMetrics = []metricDef{
 		},
 	},
 	{
+		Key: "host.inode_max", Label: "主机 inode 使用率最高值", Unit: "%", Windowed: true,
+		Hint: "「空间还很空但 inode 用光了」是一种常见又难猜的故障：写文件报 No space left on device，而 df -k 看着一切正常。只统计采到过 inode 的采样",
+		Eval: func(h *Handler, window time.Duration) (float64, string) {
+			return h.maxHostMetricIf(window, "%",
+				func(m model.HostMetric) bool { return m.InodeRead },
+				func(m model.HostMetric) float64 { return m.InodeMaxPercent })
+		},
+	},
+	{
 		Key: "host.load_per_core_max", Label: "主机单核负载最高值", Unit: "", Windowed: true,
 		Hint: "load1 除以核数，跨机型可比；经验上超过 1 说明 CPU 已经排队",
 		Eval: func(h *Handler, window time.Duration) (float64, string) {

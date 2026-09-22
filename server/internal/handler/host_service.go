@@ -780,11 +780,6 @@ func (h *Handler) AdoptHostServices(c *gin.Context) {
 		if err := h.DB.Create(&svc).Error; err != nil {
 			continue
 		}
-		// 带 default 的布尔列 Create 后会被回填成库默认值，显式写回
-		h.DB.Model(&model.HostService{}).Where("id = ?", svc.ID).Updates(map[string]any{
-			"expect_active": svc.ExpectActive, "expect_enabled": svc.ExpectEnabled,
-			"critical": svc.Critical, "alert_enabled": svc.AlertEnabled,
-		})
 		created++
 		if collectOK {
 			h.applyServiceState(&svc, snap.Units[unit], now)

@@ -332,7 +332,7 @@ func (h *Handler) CreateAlertSilence(c *gin.Context) {
 		StartAt:  parsed.start, EndAt: parsed.end,
 		Reason: parsed.Reason,
 	}
-	// Enabled 带 gorm default:true，先记下意图再在 Create 后回写
+	// 不传 enabled 时默认启用。模型上没有 gorm default，这一行就是最终结果
 	wantEnabled := parsed.Enabled == nil || *parsed.Enabled
 	item.Enabled = wantEnabled
 	if operator := middleware.CurrentUser(c); operator != nil {

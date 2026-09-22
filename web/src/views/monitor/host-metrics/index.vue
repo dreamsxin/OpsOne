@@ -208,6 +208,29 @@ onMounted(load)
             <span v-else>—</span>
           </template>
         </el-table-column>
+        <el-table-column label="inode（最满）" width="170">
+          <template #default="{ row }">
+            <template v-if="row.metric && row.metric.status === 'ok' && row.metric.inodeRead">
+              <el-progress
+                :percentage="Math.min(100, row.metric.inodeMaxPercent)"
+                :status="usageColor(row.metric.inodeMaxPercent)"
+                :stroke-width="12"
+                text-inside
+              />
+              <span style="color: var(--el-text-color-secondary); font-size: 12px">
+                {{ row.metric.inodeMaxMount }}
+              </span>
+            </template>
+            <el-tooltip
+              v-else-if="row.metric && row.metric.status === 'ok'"
+              content="这条采样没有 inode 数据（采集上线前的旧样本，或这台机器 df -i 读不到）——不是 inode 很空"
+              placement="top"
+            >
+              <span style="color: var(--el-text-color-secondary)">未采集</span>
+            </el-tooltip>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="磁盘（最满）" width="170">
           <template #default="{ row }">
             <template v-if="row.metric && row.metric.status === 'ok'">

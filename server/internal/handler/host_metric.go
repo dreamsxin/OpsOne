@@ -48,7 +48,8 @@ echo "load=$(cut -d' ' -f1-3 /proc/loadavg)"
 echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
 echo "procs=$(ls -1 /proc 2>/dev/null | grep -c '^[0-9]')"
 echo "tcp=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -c ':')"
-df -kP 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /loop/ && $6 !~ /^\/snap\// {gsub("%","",$5); print "disk=" $5 " " $6}'`
+df -kP 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /loop/ && $6 !~ /^\/snap\// {gsub("%","",$5); print "disk=" $5 " " $6}'
+df -iP 2>/dev/null | awk 'NR>1 && $1 ~ /^\/dev\// && $1 !~ /loop/ && $6 !~ /^\/snap\// {gsub("%","",$5); print "inode=" $5 " " $6}'`
 
 // metricSample 解析出来的一次采样，字段与 model.HostMetric 对应
 type metricSample struct {
@@ -57,15 +58,19 @@ type metricSample struct {
 	SwapPercent    float64
 	DiskMaxPercent float64
 	DiskMaxMount   string
-	Load1          float64
-	Load5          float64
-	Load15         float64
-	CPUCores       int
-	MemTotalMB     int64
-	MemUsedMB      int64
-	ProcCount      int
-	TCPConn        int
-	UptimeSec      int64
+	// InodeMaxPercent / InodeMaxMount / InodeRead 见 model.HostMetric 上的说明
+	InodeMaxPercent float64
+	InodeMaxMount   string
+	InodeRead       bool
+	Load1           float64
+	Load5           float64
+	Load15          float64
+	CPUCores        int
+	MemTotalMB      int64
+	MemUsedMB       int64
+	ProcCount       int
+	TCPConn         int
+	UptimeSec       int64
 }
 
 func parseFloat(s string) float64 {
@@ -135,6 +140,15 @@ func parseHostMetrics(raw string) (metricSample, error) {
 					sample.DiskMaxPercent, sample.DiskMaxMount = used, fields[1]
 				}
 			}
+		case "inode":
+			// 同样只留最满的一个。哪怕是 0% 也要把 InodeRead 置真：
+			// 「inode 很空」和「这台机器没采到 inode」必须分得开
+			if len(fields) >= 2 {
+				sample.InodeRead = true
+				if used := parseFloat(fields[0]); used > sample.InodeMaxPercent {
+					sample.InodeMaxPercent, sample.InodeMaxMount = used, fields[1]
+				}
+			}
 		}
 	}
 
@@ -193,6 +207,9 @@ func (h *Handler) collectHostMetric(ctx context.Context, host model.Host) model.
 	record.MemPercent = round2(sample.MemPercent)
 	record.SwapPercent = round2(sample.SwapPercent)
 	record.DiskMaxPercent = round2(sample.DiskMaxPercent)
+	record.InodeMaxPercent = round2(sample.InodeMaxPercent)
+	record.InodeMaxMount = sample.InodeMaxMount
+	record.InodeRead = sample.InodeRead
 	record.DiskMaxMount = sample.DiskMaxMount
 	record.Load1, record.Load5, record.Load15 = sample.Load1, sample.Load5, sample.Load15
 	record.CPUCores, record.MemTotalMB, record.MemUsedMB = sample.CPUCores, sample.MemTotalMB, sample.MemUsedMB
@@ -439,11 +456,21 @@ func (h *Handler) hostNameOf(hostID uint) string {
 // maxHostMetric 在窗口内最新采样里找某个维度的最大值，返回值与一句明细。
 // pick 返回该采样的取值；只看 status=ok 的样本。
 func (h *Handler) maxHostMetric(window time.Duration, unit string, pick func(model.HostMetric) float64) (float64, string) {
+	return h.maxHostMetricIf(window, unit, func(model.HostMetric) bool { return true }, pick)
+}
+
+// maxHostMetricIf 同上，但只统计满足 include 的采样。
+//
+// 存在的理由：inode 是后加的采集项，升级前的老采样里那一列是 0。
+// 把它们算进来会让「最高值」被一堆 0 拉着看起来很健康 ——
+// 所以 inode 规则只看 InodeRead 为真的采样，一台都没有时照实说没有数据。
+func (h *Handler) maxHostMetricIf(window time.Duration, unit string,
+	include func(model.HostMetric) bool, pick func(model.HostMetric) float64) (float64, string) {
 	metrics := h.freshHostMetrics(window)
 	best, bestID := 0.0, uint(0)
 	counted := 0
 	for _, item := range metrics {
-		if item.Status != "ok" {
+		if item.Status != "ok" || !include(item) {
 			continue
 		}
 		counted++

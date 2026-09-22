@@ -17,6 +17,9 @@ tcp=42
 disk=31 /
 disk=87 /data
 disk=5 /boot
+inode=12 /
+inode=93 /data
+inode=3 /boot
 `
 
 func TestParseHostMetrics(t *testing.T) {
@@ -47,6 +50,14 @@ func TestParseHostMetrics(t *testing.T) {
 	if sample.DiskMaxPercent != 87 || sample.DiskMaxMount != "/data" {
 		t.Fatalf("应取最满的 /data 87%%，实际 %v %s", sample.DiskMaxPercent, sample.DiskMaxMount)
 	}
+	// inode 单独一套，同样只留最满的那个。这条采样里 /data 的空间用了 87%、
+	// inode 用了 93% —— 两个维度会给出不同的「最满挂载点」，所以必须分开采
+	if sample.InodeMaxPercent != 93 || sample.InodeMaxMount != "/data" {
+		t.Fatalf("inode 应取最满的 /data 93%%，实际 %v %s", sample.InodeMaxPercent, sample.InodeMaxMount)
+	}
+	if !sample.InodeRead {
+		t.Fatal("读到了 inode 数据，InodeRead 应为真")
+	}
 	if sample.Load1 != 0.52 || sample.Load15 != 0.58 {
 		t.Fatalf("负载解析不对: %+v", sample)
 	}
@@ -64,6 +75,18 @@ func TestParseHostMetricsTolerance(t *testing.T) {
 	}
 	if sample.MemPercent != 0 || sample.DiskMaxPercent != 0 || sample.TCPConn != 0 {
 		t.Fatalf("缺失项应为 0，实际 %+v", sample)
+	}
+	// df -i 读不到时 InodeRead 必须是假：否则「没采到」会被当成「inode 用量 0%」
+	if sample.InodeRead {
+		t.Fatal("没有 inode 行时 InodeRead 应为假")
+	}
+	// 反过来：inode 真的是 0% 也要标成已读到
+	zero, err := parseHostMetrics("cpu1=100 50\ncpu2=200 100\ninode=0 /\n")
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if !zero.InodeRead || zero.InodeMaxPercent != 0 {
+		t.Fatalf("inode 为 0%% 时应该标成已读到: %+v", zero)
 	}
 	// 核数缺失时兜底为 1，避免除零
 	if sample.CPUCores != 1 {

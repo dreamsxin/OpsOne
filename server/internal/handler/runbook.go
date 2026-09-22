@@ -421,14 +421,10 @@ func (h *Handler) CreateRunbook(c *gin.Context) {
 		return
 	}
 
-	wantEnabled := book.Enabled
 	if err := h.DB.Create(&book).Error; err != nil {
 		response.Error(c, "创建失败")
 		return
 	}
-	// 带 default 的布尔列在 Create 后会被回填成库默认值，显式写回
-	book.Enabled = wantEnabled
-	h.DB.Model(&model.Runbook{}).Where("id = ?", book.ID).Update("enabled", wantEnabled)
 
 	response.OK(c, gin.H{"runbook": runbookView(book), "precheckHits": hits})
 }

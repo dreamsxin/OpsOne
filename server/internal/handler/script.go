@@ -269,14 +269,10 @@ func (h *Handler) CreateScript(c *gin.Context) {
 	}
 	hits := h.applyPrecheck(&item)
 
-	wantEnabled := item.Enabled
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "创建失败")
 		return
 	}
-	// 带 default 的布尔列在 Create 后会被回填成库默认值，显式写回
-	item.Enabled = wantEnabled
-	h.DB.Model(&model.Script{}).Where("id = ?", item.ID).Update("enabled", wantEnabled)
 
 	response.OK(c, gin.H{"script": item, "precheckHits": hits})
 }

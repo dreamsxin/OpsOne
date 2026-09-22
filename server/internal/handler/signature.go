@@ -207,10 +207,6 @@ func (h *Handler) CreateSignature(c *gin.Context) {
 		response.Error(c, "创建失败")
 		return
 	}
-	if !sig.Enabled {
-		h.DB.Model(&model.Signature{}).Where("id = ?", sig.ID).Update("enabled", false)
-		sig.Enabled = false
-	}
 	response.OK(c, h.reconcile(sig))
 }
 
@@ -319,10 +315,6 @@ func (h *Handler) writeSignatureRule(sig *model.Signature, operator string) erro
 	}
 	if err := h.DB.Create(&rule).Error; err != nil {
 		return err
-	}
-	// enabled 带 gorm default:true，显式关掉的要写回去
-	if !sig.Enabled {
-		h.DB.Model(&model.CommandRule{}).Where("id = ?", rule.ID).Update("enabled", false)
 	}
 	return h.DB.Model(sig).Updates(map[string]any{
 		"rule_id": rule.ID, "applied_at": &now, "applied_by": operator,

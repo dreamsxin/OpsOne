@@ -35,6 +35,7 @@ func newBoolDefaultTestHandler(t *testing.T) (*Handler, *gin.Engine) {
 	if err := g.AutoMigrate(
 		&model.Certificate{}, &model.Probe{}, &model.ProbeRecord{}, &model.ExposureTarget{},
 		&model.LdapServer{}, &model.Alert{}, &model.AlertSource{},
+		&model.MetricSource{}, &model.Signature{}, &model.CommandRule{},
 		&model.User{}, &model.Role{}, &model.SysConfig{},
 	); err != nil {
 		t.Fatalf("建表失败: %v", err)
@@ -56,6 +57,9 @@ func newBoolDefaultTestHandler(t *testing.T) (*Handler, *gin.Engine) {
 	engine.POST("/monitor/probes", h.CreateProbe)
 	engine.POST("/security/exposures", h.CreateExposureTarget)
 	engine.POST("/system/ldap-servers", h.CreateLdapServer)
+	engine.POST("/monitor/metric-sources", h.CreateMetricSource)
+	engine.POST("/security/signatures", h.CreateSignature)
+	engine.POST("/security/signatures/:id/apply", h.ApplySignature)
 	return h, engine
 }
 
@@ -179,7 +183,67 @@ func TestLdapLoginDisabledOnCreateSticks(t *testing.T) {
 	}
 }
 
-// 顺带确认响应体里回的也是关掉的状态：前端列表直接用它渲染开关
+// 指标数据源：这一批是第二轮清理里去掉标签的，同样要验证一次
+func TestMetricSourceDisabledOnCreateSticks(t *testing.T) {
+	h, engine := newBoolDefaultTestHandler(t)
+	code, raw := boolPost(t, engine, "/monitor/metric-sources",
+		`{"name":"内网 Prometheus","baseUrl":"http://prom.internal:9090","timeoutSec":5,"enabled":false}`)
+	if code != 200 {
+		t.Fatalf("创建失败: %d %s", code, raw)
+	}
+	var item model.MetricSource
+	h.DB.First(&item, 1)
+	if item.Enabled {
+		t.Error("enabled=false 被翻回了 true")
+	}
+
+	if code, raw := boolPost(t, engine, "/monitor/metric-sources",
+		`{"name":"默认 Prometheus","baseUrl":"http://prom2.internal:9090","timeoutSec":5}`); code != 200 {
+		t.Fatalf("创建失败: %s", raw)
+	}
+	var second model.MetricSource
+	h.DB.First(&second, 2)
+	if !second.Enabled {
+		t.Error("没传 enabled 时应该默认开启")
+	}
+}
+
+// 特征库：停用的特征在挂到命令规则时，那条规则也必须是停用的。
+//
+// 这一条覆盖的是第二处补丁（reconcile 里给 CommandRule 回写 enabled=false）——
+// 补丁删掉之后，靠的是 CommandRule.Enabled 不再带 default 标签。
+// 如果这里失败，说明「特征停用了但命令拦截规则还在生效」，那是会真的挡住运维操作的。
+func TestSignatureDisabledPropagatesToCommandRule(t *testing.T) {
+	h, engine := newBoolDefaultTestHandler(t)
+	code, raw := boolPost(t, engine, "/security/signatures",
+		`{"name":"测试特征","kind":"command","pattern":"rm -rf /tmp/x","stage":"enforce",
+		  "severity":"low","enabled":false}`)
+	if code != 200 {
+		t.Fatalf("创建失败: %d %s", code, raw)
+	}
+
+	var sig model.Signature
+	h.DB.First(&sig, 1)
+	if sig.Enabled {
+		t.Fatal("特征 enabled=false 被翻回了 true")
+	}
+
+	// 停用的特征「应用」到命令规则时，规则也必须是停用的。
+	// 这一条覆盖的是第二处补丁（原来在 writeSignatureRule 里给 CommandRule 回写
+	// enabled=false）——补丁删掉之后靠的是 CommandRule.Enabled 不再带 default 标签
+	if code, raw := boolPost(t, engine, "/security/signatures/1/apply", `{}`); code != 200 {
+		t.Fatalf("应用失败: %d %s", code, raw)
+	}
+	var rules []model.CommandRule
+	h.DB.Find(&rules)
+	if len(rules) != 1 {
+		t.Fatalf("应用后应该有一条命令规则，实际 %d 条", len(rules))
+	}
+	if rules[0].Enabled {
+		t.Fatal("特征是停用的，挂出来的命令拦截规则却是启用的 —— 会真的挡住运维操作")
+	}
+}
+
 func TestCreateResponseReflectsDisabled(t *testing.T) {
 	_, engine := newBoolDefaultTestHandler(t)
 	_, raw := boolPost(t, engine, "/security/certificates",
