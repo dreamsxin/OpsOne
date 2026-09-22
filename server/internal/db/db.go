@@ -38,6 +38,7 @@ func Migrate(g *gorm.DB) error {
 		&model.CloudAccount{}, &model.CloudResource{}, &model.CloudSyncRun{},
 		&model.Domain{},
 		&model.HostLogTarget{}, &model.HostLogScan{}, &model.HostLogUsage{},
+		&model.SecuritySuggestionDismissal{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -329,6 +330,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 517, ParentID: 500, Name: "SecurityEvent", Title: "安全事件", Path: "/security/events", Component: "/security/events/index", Icon: "WarnTriangleFilled", Sort: 7},
 		{ID: 518, ParentID: 517, Title: "研判与处置", Type: "button", AuthCode: "secevent:manage", Sort: 1},
 		{ID: 519, ParentID: 517, Title: "生成封禁草稿", Type: "button", AuthCode: "secevent:respond", Sort: 2},
+		{ID: 520, ParentID: 500, Name: "SecurityOverview", Title: "安全概览", Path: "/security/overview", Component: "/security/overview/index", Icon: "DataBoard", Sort: 8},
+		{ID: 521, ParentID: 500, Name: "SecuritySuggestion", Title: "学习建议", Path: "/security/suggestions", Component: "/security/suggestions/index", Icon: "MagicStick", Sort: 9},
+		{ID: 522, ParentID: 521, Title: "通过与拒绝建议", Type: "button", AuthCode: "suggestion:apply", Sort: 1},
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},

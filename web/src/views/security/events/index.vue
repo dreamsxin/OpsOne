@@ -5,7 +5,9 @@ import {
   addSecurityEventNote,
   blockSecurityEventSource,
   collectSecurityEvents,
+  escalateSecurityEvent,
   getSecurityEvent,
+  getSecurityEventRaw,
   getSecurityEventStats,
   listHosts,
   listSecurityEvents,
@@ -13,6 +15,7 @@ import {
   deleteSecurityMute,
   listUsers,
   triageSecurityEvents,
+  type SecRawResult,
   type SecurityEvent,
   type SecurityEventDetail,
   type SecurityEventLog,
@@ -35,6 +38,37 @@ const selection = ref<SecurityEvent[]>([])
 const detailVisible = ref(false)
 const detail = ref<SecurityEventDetail | null>(null)
 const noteContent = ref('')
+
+// 原始流水：证据摘要截断到 2000 字，原文要另外取一次
+const raw = ref<SecRawResult | null>(null)
+const rawLoading = ref(false)
+
+async function loadRaw() {
+  if (!detail.value) return
+  rawLoading.value = true
+  try {
+    raw.value = await getSecurityEventRaw(detail.value.event.id)
+  } finally {
+    rawLoading.value = false
+  }
+}
+
+// 升格为事件工单：平台里「派发」唯一诚实的落法 —— 交给事件中心那套已经在跑的机制
+async function openEscalate() {
+  if (!detail.value) return
+  const input = await ElMessageBox.prompt(
+    '升格后会在事件中心建一张工单，自动进入 SLA 计时。指派给谁？（留空表示暂不指派）\n\n' +
+      '注意 SLA 的「响应」口径：指派不算响应，要状态离开待处理或写下第一条处置记录才算。',
+    '升格为事件工单',
+    { inputPlaceholder: '用户名，留空则不指派', inputValue: detail.value.event.owner || '' }
+  ).catch(() => null)
+  if (!input) return
+
+  const res = await escalateSecurityEvent(detail.value.event.id, { assignee: input.value || '' })
+  ElMessage.success(`已建工单 #${res.eventId}`)
+  openDetail(detail.value.event)
+  load()
+}
 
 // 白名单标签页
 const muteTab = ref(false)
@@ -134,6 +168,7 @@ function onSelectionChange(rows: SecurityEvent[]) {
 async function openDetail(row: SecurityEvent) {
   detail.value = await getSecurityEvent(row.id)
   noteContent.value = ''
+  raw.value = null
   detailVisible.value = true
 }
 
@@ -420,6 +455,12 @@ onMounted(async () => {
           <el-descriptions-item label="研判结论" :span="2">{{ detail.event.verdict || '—' }}</el-descriptions-item>
           <el-descriptions-item label="负责人">{{ detail.event.owner || '—' }}</el-descriptions-item>
           <el-descriptions-item label="溯源">{{ detail.event.refTable }}#{{ detail.event.refId }}</el-descriptions-item>
+          <el-descriptions-item label="事件工单" :span="2">
+            <router-link v-if="detail.event.eventId" :to="`/monitor/events?id=${detail.event.eventId}`">
+              <el-link type="primary">#{{ detail.event.eventId }}（已升格，进入事件中心的 SLA 计时）</el-link>
+            </router-link>
+            <span v-else style="color: #9ca3af">未升格</span>
+          </el-descriptions-item>
         </el-descriptions>
 
         <el-alert v-if="detail.muted" type="info" :closable="false" style="margin-top: 10px"
@@ -427,13 +468,49 @@ onMounted(async () => {
 
         <!-- 证据 -->
         <el-card style="margin-top: 12px">
-          <template #header>证据摘要</template>
+          <template #header>
+            证据摘要
+            <el-text type="info" size="small" style="margin-left: 8px">
+              采集那一刻抄下来的，最多 2000 字
+            </el-text>
+            <el-button size="small" style="float: right" :loading="rawLoading" @click="loadRaw">
+              看原始流水
+            </el-button>
+          </template>
           <pre style="white-space: pre-wrap; word-break: break-all; font-size: 13px; margin: 0">{{ detail.evidence }}</pre>
+        </el-card>
+
+        <!-- 原始流水：没被摘要截断的原文 -->
+        <el-card v-if="raw" style="margin-top: 12px">
+          <template #header>
+            原始流水
+            <el-text v-if="raw.available" type="info" size="small" style="margin-left: 8px">
+              {{ raw.table }}#{{ raw.refId }} · 原文，未截断
+            </el-text>
+          </template>
+          <el-alert v-if="!raw.available" type="warning" :closable="false" :title="raw.reason" />
+          <el-descriptions v-else :column="1" border size="small">
+            <el-descriptions-item v-for="f in raw.fields" :key="f.label" :label="f.label">
+              <span style="white-space: pre-wrap; word-break: break-all">{{ f.value || '—' }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-text v-if="raw.available" type="info" size="small" style="display: block; margin-top: 8px">
+            {{ raw.note }}
+          </el-text>
         </el-card>
 
         <!-- 研判操作 -->
         <div v-perm="'secevent:manage'" style="margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
           <el-button v-perm="'secevent:respond'" size="small" type="danger" @click="openBlock">封禁源地址</el-button>
+          <el-button
+            v-if="!detail.event.eventId"
+            v-perm="'secevent:respond'"
+            size="small"
+            type="warning"
+            @click="openEscalate"
+          >
+            升格为事件工单
+          </el-button>
           <el-button size="small" @click="doTriage('investigating', [detail.event])">转研判中</el-button>
           <el-button size="small" type="danger" @click="doTriage('confirmed', [detail.event])">确认威胁</el-button>
           <el-button size="small" type="success" @click="doTriage('handled', [detail.event])">已处置</el-button>

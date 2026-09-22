@@ -563,6 +563,18 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/security/events/:id/block", middleware.RequirePerm("secevent:respond"), h.BlockSecurityEventSource)
 		auth.GET("/security/event-mutes", h.ListSecurityMutes)
 		auth.DELETE("/security/event-mutes/:id", middleware.RequirePerm("secevent:manage"), h.DeleteSecurityMute)
+		// 原始数据视图：按 RefTable/RefID 取回没被摘要截断的原始流水行
+		auth.GET("/security/events/:id/raw", h.GetSecurityEventRaw)
+		// 升格为事件工单 —— 平台里「派发」唯一诚实的落法（没有对接外部工单系统）
+		auth.POST("/security/events/:id/escalate", middleware.RequirePerm("secevent:respond"), h.EscalateSecurityEvent)
+
+		// 安全概览：只聚合已有数据，没采集的项在 gaps 里明说
+		auth.GET("/security/overview", h.SecurityOverview)
+		// 学习建议：从已有数据算出该改哪个配置，通过就真的去改
+		auth.GET("/security/suggestions", h.ListSecuritySuggestions)
+		auth.POST("/security/suggestions/apply", middleware.RequirePerm("suggestion:apply"), h.ApplySecuritySuggestions)
+		auth.GET("/security/suggestion-dismissals", h.ListSuggestionDismissals)
+		auth.DELETE("/security/suggestion-dismissals/:id", middleware.RequirePerm("suggestion:apply"), h.DeleteSuggestionDismissal)
 
 		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
 		auth.GET("/secrets/audit", h.GetSecretAudit)

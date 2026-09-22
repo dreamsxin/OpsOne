@@ -108,29 +108,18 @@ func (h *Handler) loadAlertsByIDs(ids []uint) ([]model.Alert, error) {
 	return alerts, nil
 }
 
-func (h *Handler) createEvent(c *gin.Context, req eventCreateReq, origin, originNote string) {
-	alerts, err := h.loadAlertsByIDs(req.AlertIDs)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	user := middleware.CurrentUser(c)
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		title = alerts[0].Title
-		if len(alerts) > 1 {
-			title = fmt.Sprintf("%s 等 %d 条告警", alerts[0].Title, len(alerts))
-		}
-	}
-	severity := normalizeSeverity(req.Severity)
-	if req.Severity == "" {
-		severity = highestSeverity(alerts)
-	}
+// newEvent 建单内核：不碰 HTTP，也**不要求必须关联告警**。
+//
+// 抽出来是因为安全事件升格出的工单没有 alert（它的线索来自流水表，不是告警），
+// 而 createEvent 那条路径刻意强制「至少一条告警」。两种建单共用这一段，
+// 差别只在各自的前置校验与 createDetail 文案里。
+func (h *Handler) newEvent(user *model.User, req eventCreateReq,
+	origin, originNote, createDetail string) (model.Event, error) {
 
 	now := time.Now()
 	event := model.Event{
-		Title: truncate(title, 250), Severity: severity, Status: "open",
+		Title:    truncate(strings.TrimSpace(req.Title), 250),
+		Severity: normalizeSeverity(req.Severity), Status: "open",
 		Summary: req.Summary, AlertIDs: marshalIDs(req.AlertIDs),
 		Origin: origin, OriginNote: truncate(originNote, 250),
 		CreatedByName: user.Username, LastActivityAt: now, CreatedBy: user.ID,
@@ -141,18 +130,43 @@ func (h *Handler) createEvent(c *gin.Context, req eventCreateReq, origin, origin
 		event.AssignedAt = &now
 	}
 	if err := h.DB.Create(&event).Error; err != nil {
-		response.Error(c, "创建事件失败")
+		return event, fmt.Errorf("创建事件失败")
+	}
+
+	h.appendEventLog(event.ID, "create", createDetail, user.Username)
+	if event.Assignee != "" {
+		h.appendEventLog(event.ID, "assign", "指派给 "+event.Assignee, user.Username)
+		h.notifyEventAssignee(event, user.Username)
+	}
+	return event, nil
+}
+
+func (h *Handler) createEvent(c *gin.Context, req eventCreateReq, origin, originNote string) {
+	alerts, err := h.loadAlertsByIDs(req.AlertIDs)
+	if err != nil {
+		response.BadRequest(c, err.Error())
 		return
+	}
+
+	if strings.TrimSpace(req.Title) == "" {
+		req.Title = alerts[0].Title
+		if len(alerts) > 1 {
+			req.Title = fmt.Sprintf("%s 等 %d 条告警", alerts[0].Title, len(alerts))
+		}
+	}
+	if req.Severity == "" {
+		req.Severity = highestSeverity(alerts)
 	}
 
 	detail := fmt.Sprintf("由 %d 条告警建单", len(alerts))
 	if originNote != "" {
 		detail += "（" + originNote + "）"
 	}
-	h.appendEventLog(event.ID, "create", detail, user.Username)
-	if event.Assignee != "" {
-		h.appendEventLog(event.ID, "assign", "指派给 "+event.Assignee, user.Username)
-		h.notifyEventAssignee(event, user.Username)
+
+	event, err := h.newEvent(middleware.CurrentUser(c), req, origin, originNote, detail)
+	if err != nil {
+		response.Error(c, err.Error())
+		return
 	}
 	response.OK(c, eventView(event))
 }

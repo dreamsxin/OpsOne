@@ -4579,6 +4579,7 @@ export interface SecurityEvent {
   evidence: string
   refTable: string
   refId: number
+  eventId: number
   hitCount: number
   hitsAfterClose: number
   firstSeenAt: string
@@ -4667,6 +4668,99 @@ export const listSecurityMutes = (params?: Record<string, any>) =>
   request<PageData<SecurityEventMute>>({ url: '/security/event-mutes', params })
 export const deleteSecurityMute = (id: number) =>
   request<{ revoked: string; blockedHits: number }>({ url: `/security/event-mutes/${id}`, method: 'DELETE' })
+
+/* ---------------- 安全响应：原始数据 / 升格工单 / 学习建议 / 概览 ---------------- */
+
+export interface SecRawField {
+  label: string
+  value: string
+}
+
+export interface SecRawResult {
+  available: boolean
+  reason?: string
+  table?: string
+  refId?: number
+  fields?: SecRawField[]
+  extra?: Record<string, any>
+  evidence?: string
+  note?: string
+}
+
+export interface SecSuggestion {
+  key: string
+  kind: 'port_baseline' | 'mute_fingerprint' | 'signature_enforce'
+  kindLabel: string
+  title: string
+  reason: string
+  action: string
+  hitCount: number
+  refId: number
+  refName: string
+  extra: string
+}
+
+export interface SecSuggestionList {
+  items: SecSuggestion[]
+  byKind: Record<string, number>
+  dismissed: number
+  minHits: number
+  note: string
+}
+
+export interface SecSuggestionDismissal {
+  id: number
+  key: string
+  kind: string
+  title: string
+  reason: string
+  operator: string
+  createdAt: string
+}
+
+export interface SecOverview {
+  events: Record<string, number>
+  intercept: Record<string, number>
+  exposure: Record<string, number>
+  certs: Record<string, number>
+  domains: Record<string, number>
+  signatures: Record<string, number>
+  firewall: Record<string, number>
+  twoFactor: { users: number; enabled: number }
+  hostLogs: Record<string, number>
+  suggestions: number
+  trend: { day: string; total: number }[]
+  gaps: { item: string; why: string }[]
+  note: string
+}
+
+export const getSecurityEventRaw = (id: number) =>
+  request<SecRawResult>({ url: `/security/events/${id}/raw` })
+export const escalateSecurityEvent = (
+  id: number,
+  data: { assignee?: string; title?: string; summary?: string }
+) => request<{ eventId: number; status: string; note: string }>({
+  url: `/security/events/${id}/escalate`,
+  method: 'POST',
+  data
+})
+export const securityOverview = () => request<SecOverview>({ url: '/security/overview' })
+export const listSecuritySuggestions = () =>
+  request<SecSuggestionList>({ url: '/security/suggestions' })
+export const applySecuritySuggestions = (data: {
+  keys: string[]
+  decision: 'approve' | 'dismiss'
+  reason?: string
+}) => request<{
+  done: { key: string; title: string; result: string }[]
+  failed: { key: string; error: string }[]
+}>({ url: '/security/suggestions/apply', method: 'POST', data })
+export const listSuggestionDismissals = () =>
+  request<{ rows: SecSuggestionDismissal[]; note: string }>({
+    url: '/security/suggestion-dismissals'
+  })
+export const deleteSuggestionDismissal = (id: number) =>
+  request({ url: `/security/suggestion-dismissals/${id}`, method: 'DELETE' })
 
 /* ---------------- 云资源同步 ---------------- */
 

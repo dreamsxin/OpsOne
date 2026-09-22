@@ -1527,7 +1527,8 @@ type Event struct {
 	Summary string `gorm:"type:text" json:"summary"`
 	// AlertIDs 关联告警 ID 的 JSON 数组，接口层用 alertIds 暴露
 	AlertIDs string `gorm:"type:text" json:"-"`
-	// Origin manual 手动选告警建单 | bucket 从聚合桶建单
+	// Origin manual 手动选告警建单 | bucket 从聚合桶建单 | secevent 从安全事件升格。
+	// secevent 这一种**没有关联告警**：线索来自流水表，不是告警
 	Origin     string `gorm:"size:16;default:manual" json:"origin"`
 	OriginNote string `gorm:"size:255" json:"originNote"` // 例如聚合策略名与桶 key
 
@@ -2575,6 +2576,12 @@ type SecurityEvent struct {
 	// RefTable / RefID 溯源到原始流水的最新一条，点进去能看到没被摘要过的原文
 	RefTable string `gorm:"size:32" json:"refTable"`
 	RefID    uint   `gorm:"default:0" json:"refId"`
+	// EventID 升格出来的事件工单号（model.Event），0 表示还没升格。
+	//
+	// 平台里「派发」只有这一种诚实的落法：把线索交给事件中心那套已经在跑的机制
+	// （负责人、处置时间线、SLA 计时），而不是新造一条对外派发链路 ——
+	// 没有对接的外部系统，派发页只会是一张永远空着的表。
+	EventID uint `gorm:"index;default:0" json:"eventId"`
 
 	HitCount    int       `gorm:"default:1" json:"hitCount"`
 	FirstSeenAt time.Time `json:"firstSeenAt"`
@@ -2626,4 +2633,21 @@ type SecurityEventMute struct {
 	Operator  string     `gorm:"size:64" json:"operator"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// SecuritySuggestionDismissal 被人工「拒绝」的学习建议。
+//
+// 这张表存在的唯一理由是让「拒绝」这个按钮是真的：建议是每次现算的，
+// 不记下来就会下一次刷新又冒出来，那个按钮就成了摆设。
+// 记的是建议的稳定标识（Key），不是建议内容 —— 内容会随数据变，标识不变。
+type SecuritySuggestionDismissal struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Key 建议的稳定标识，形如 `port_baseline|<targetId>|<port>`
+	Key  string `gorm:"size:128;uniqueIndex;not null" json:"key"`
+	Kind string `gorm:"size:32;index" json:"kind"`
+	// Title 拒绝时那条建议的标题，只为了让人看得懂这条拒绝记录是什么
+	Title     string    `gorm:"size:255" json:"title"`
+	Reason    string    `gorm:"size:255" json:"reason"`
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `json:"createdAt"`
 }

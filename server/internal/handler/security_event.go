@@ -587,6 +587,7 @@ func secEventView(event model.SecurityEvent) gin.H {
 		"actor": event.Actor, "actorIp": event.ActorIP,
 		"target": event.Target, "port": event.Port, "protocol": event.Protocol,
 		"refTable": event.RefTable, "refId": event.RefID,
+		"eventId":  event.EventID,
 		"hitCount": event.HitCount, "hitsAfterClose": event.HitsAfterClose,
 		"firstSeenAt": event.FirstSeenAt, "lastSeenAt": event.LastSeenAt,
 		"status": event.Status, "statusLabel": secStatusLabels[event.Status],
