@@ -165,6 +165,14 @@ func main() {
 	} else {
 		log.Println("[review] 改进项逾期催办未启用（OPS_REVIEW_SPEC 为空），逾期的改进项不会有人被提醒")
 	}
+	if cfg.ServiceSpec != "" {
+		if err := sched.AddFixed(cfg.ServiceSpec, h.CheckServicesForSchedule); err != nil {
+			log.Fatalf("主机服务巡检 cron 表达式无效(%s): %v", cfg.ServiceSpec, err)
+		}
+		log.Printf("[service] 服务巡检已启用: %s", cfg.ServiceSpec)
+	} else {
+		log.Println("[service] 服务巡检未启用（OPS_SERVICE_SPEC 为空），纳管服务只能手动巡检")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -423,6 +431,17 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/hosts/:id/metrics", h.HostMetricHistory)
 		auth.POST("/hosts/:id/metrics/collect", middleware.RequirePerm("host:check"), h.CollectHostMetric)
 		auth.GET("/hosts/:id/terminal", middleware.RequirePerm("terminal:connect"), h.Terminal)
+
+		// 主机服务：纳管 systemd unit、对照期望态巡检漂移、启停
+		auth.GET("/host-services", h.ListHostServices)
+		auth.GET("/host-services/stats", h.HostServiceStats)
+		auth.GET("/host-services/actions", h.ListHostServiceActions)
+		auth.POST("/host-services/check", middleware.RequirePerm("service:manage"), h.CheckHostServices)
+		auth.POST("/host-services", middleware.RequirePerm("service:manage"), h.AdoptHostServices)
+		auth.PUT("/host-services/:id", middleware.RequirePerm("service:manage"), h.UpdateHostService)
+		auth.DELETE("/host-services/:id", middleware.RequirePerm("service:manage"), h.DeleteHostService)
+		auth.POST("/host-services/:id/operate", middleware.RequirePerm("service:control"), h.OperateHostService)
+		auth.GET("/hosts/:id/services/discover", middleware.RequirePerm("service:manage"), h.DiscoverHostServices)
 
 		// 凭证库：共享登录凭据。密钥永不出接口，轮换一次即对所有引用主机生效
 		auth.GET("/credentials", h.ListCredentials)

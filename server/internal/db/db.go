@@ -47,6 +47,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Event{}, &model.EventLog{},
 		&model.EventReview{}, &model.EventActionItem{},
 		&model.Runbook{}, &model.RunbookUse{},
+		&model.HostService{}, &model.HostServiceAction{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
@@ -137,6 +138,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 120, ParentID: 114, Title: "维护盘点", Type: "button", AuthCode: "inventory:manage", Sort: 1},
 		{ID: 115, ParentID: 100, Name: "AssetPurchase", Title: "采购记录", Path: "/asset/purchase", Component: "/asset/purchase/index", Icon: "ShoppingCart", Sort: 7},
 		{ID: 121, ParentID: 115, Title: "维护采购单", Type: "button", AuthCode: "purchase:manage", Sort: 1},
+		{ID: 122, ParentID: 100, Name: "HostService", Title: "主机服务", Path: "/asset/service", Component: "/asset/service/index", Icon: "SetUp", Sort: 8},
+		{ID: 123, ParentID: 122, Title: "纳管与维护服务", Type: "button", AuthCode: "service:manage", Sort: 1},
+		{ID: 124, ParentID: 122, Title: "启停服务", Type: "button", AuthCode: "service:control", Sort: 2},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来
@@ -598,6 +602,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "retention", Key: "retention.exec_guard_days", Value: "365", Type: "int", Label: "下发拦截流水保留天数", Remark: "被闸门拦下的下发尝试不会产生执行记录，这张表是唯一线索；建议比执行记录留得更久。0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.firewall_snapshot_days", Value: "180", Type: "int", Label: "防火墙快照保留天数", Remark: "每次下发前后各存一份真机规则原文，删了就没法回滚到那个时点；0 表示永久保留", Builtin: true},
 		{Group: "security", Key: "firewall.sudo", Value: "true", Type: "bool", Label: "防火墙命令自动 sudo", Remark: "防火墙命令全都要 root。主机账号不是 root 时自动加 sudo -n，需要为该账号配置免密 sudo；关掉则原样执行", Builtin: true},
+		{Group: "security", Key: "service.sudo", Value: "true", Type: "bool", Label: "服务启停自动 sudo", Remark: "systemctl 的读操作普通用户可以做，start/stop/enable 必须 root。主机账号不是 root 时自动加 sudo -n；关掉则原样执行", Builtin: true},
 		{Group: "security", Key: "firewall.idle_days", Value: "30", Type: "int", Label: "防火墙规则闲置天数", Remark: "创建超过这么多天且从未命中的放行规则会进清理建议", Builtin: true},
 	}
 

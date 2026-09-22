@@ -2251,6 +2251,128 @@ export const draftRunbookFromReview = (eventId: number, name?: string) =>
     data: { eventId, name }
   })
 
+// ---------- 主机服务 ----------
+
+export interface HostService {
+  id: number
+  hostId: number
+  hostName: string
+  unit: string
+  name: string
+  description: string
+  expectActive: boolean
+  expectEnabled: boolean
+  critical: boolean
+  owner: string
+  alertEnabled: boolean
+  remark: string
+  loadState: string
+  activeState: string
+  subState: string
+  enableState: string
+  ports: string[]
+  procCount: number
+  drift: string
+  driftLabel: string
+  driftDetail: string
+  lastCheckAt: string | null
+  lastError: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DiscoveredUnit {
+  unit: string
+  loadState: string
+  activeState: string
+  subState: string
+  enableState: string
+  description: string
+  ports: number[]
+  procCount: number
+  managed: boolean
+}
+
+export interface HostServiceStats {
+  total: number
+  hosts: number
+  ok: number
+  inactive: number
+  unexpected: number
+  disabled: number
+  missing: number
+  error: number
+  unknown: number
+  critical: number
+  criticalDrift: number
+}
+
+export interface HostServiceAction {
+  id: number
+  hostId: number
+  hostName: string
+  serviceId: number
+  unit: string
+  action: string
+  status: string
+  detail: string
+  beforeState: string
+  afterState: string
+  execJobId: number
+  operator: string
+  clientIp: string
+  createdAt: string
+}
+
+export const listHostServices = (params: Record<string, any>) =>
+  request<PageData<HostService>>({ url: '/host-services', params })
+export const getHostServiceStats = () =>
+  request<HostServiceStats>({ url: '/host-services/stats' })
+export const discoverHostServices = (hostId: number) =>
+  request<{
+    hostId: number
+    hostName: string
+    units: DiscoveredUnit[]
+    total: number
+    listenPorts: number[]
+    orphanPorts: number[]
+    portsUnavailable: boolean
+    note: string
+    orphanNote: string
+  }>({ url: `/hosts/${hostId}/services/discover` })
+export const adoptHostServices = (data: Record<string, any>) =>
+  request<{ created: number; skipped: number; note?: string }>({
+    url: '/host-services',
+    method: 'POST',
+    data
+  })
+export const updateHostService = (id: number, data: Record<string, any>) =>
+  request<{ drift: string; driftDetail: string }>({
+    url: `/host-services/${id}`,
+    method: 'PUT',
+    data
+  })
+export const deleteHostService = (id: number) =>
+  request({ url: `/host-services/${id}`, method: 'DELETE' })
+export const checkHostServices = (hostId: number) =>
+  request<{ total: number; drifted: number }>({
+    url: `/host-services/check?hostId=${hostId}`,
+    method: 'POST'
+  })
+export const operateHostService = (id: number, data: Record<string, any>) =>
+  request<{
+    status: string
+    execJobId: number
+    beforeState: string
+    afterState: string
+    drift: string
+    driftDetail: string
+    detail: string
+  }>({ url: `/host-services/${id}/operate`, method: 'POST', data })
+export const listHostServiceActions = (params: Record<string, any>) =>
+  request<PageData<HostServiceAction>>({ url: '/host-services/actions', params })
+
+
 
 
 // ---------- 数据留存 ----------

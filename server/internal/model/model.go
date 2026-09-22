@@ -1356,6 +1356,79 @@ type EventActionItem struct {
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
+// HostService 主机上的一个被纳管服务（systemd unit）。
+//
+// 平台不把机器上几百个 unit 全部落库 —— 那是噪音。这里只存「人说了算的那几个」：
+// 纳管时登记期望态（该不该在跑、该不该开机自启、是不是关键服务），巡检拿真机实际态
+// 来对照，不一致就是漂移并产告警。没纳管的 unit 只在「发现服务」里实时列出来，不落库。
+//
+// 端口是按 systemd cgroup 反查的：先从 ss 拿到监听端口与持有它的 PID，再读
+// /proc/<pid>/cgroup 判断这个进程属于哪个 unit。这样 nginx 这类 master/worker
+// 模型也能把端口归到正确的服务上。
+type HostService struct {
+	ID     uint `gorm:"primaryKey" json:"id"`
+	HostID uint `gorm:"not null;uniqueIndex:idx_host_unit" json:"hostId"`
+	// Unit systemd 单元名，含 .service 后缀
+	Unit        string `gorm:"size:128;not null;uniqueIndex:idx_host_unit" json:"unit"`
+	Name        string `gorm:"size:64" json:"name"`
+	Description string `gorm:"size:255" json:"description"`
+
+	// ---------- 期望态，由人登记 ----------
+	// ExpectActive 期望这个服务在运行。置 false 表示「这个服务就该是停着的」，
+	// 它在跑反而算漂移（例如被禁用的旧版本服务）
+	ExpectActive bool `gorm:"default:true" json:"expectActive"`
+	// ExpectEnabled 期望开机自启。static / indirect 这类本来就不能 enable 的不算漂移
+	ExpectEnabled bool `gorm:"default:true" json:"expectEnabled"`
+	// Critical 关键服务：漂移时产 critical 告警，停服务/取消自启需要二次确认
+	Critical     bool   `gorm:"index" json:"critical"`
+	Owner        string `gorm:"size:64;index" json:"owner"`
+	AlertEnabled bool   `gorm:"default:true" json:"alertEnabled"`
+	Remark       string `gorm:"size:255" json:"remark"`
+
+	// ---------- 实际态，由巡检回填 ----------
+	LoadState   string `gorm:"size:24" json:"loadState"`          // loaded | not-found | masked | error
+	ActiveState string `gorm:"size:24;index" json:"activeState"`  // active | inactive | failed | activating…
+	SubState    string `gorm:"size:24" json:"subState"`           // running | exited | dead | failed…
+	EnableState string `gorm:"size:24" json:"enableState"`        // enabled | disabled | static | masked…
+	Ports       string `gorm:"size:255" json:"ports"`             // 逗号分隔，按 cgroup 反查出来的监听端口
+	ProcCount   int    `json:"procCount"`                         // 持有监听端口的进程数
+
+	// Drift ok 一致 | inactive 该跑没跑 | unexpected 该停在跑 | disabled 该自启没自启
+	//     | missing 机器上找不到这个 unit | unknown 还没巡检过 | error 巡检失败
+	Drift       string     `gorm:"size:16;index;default:unknown" json:"drift"`
+	DriftDetail string     `gorm:"size:255" json:"driftDetail"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastError   string     `gorm:"size:255" json:"lastError"`
+
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// HostServiceAction 一次服务启停留痕。只追加不修改。
+//
+// 记「动之前是什么样、动之后是什么样」：光记「执行了 restart」回答不了
+// 「到底起来了没有」，所以动作前后各读一次真机状态存进来。
+type HostServiceAction struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	HostID    uint   `gorm:"index;not null" json:"hostId"`
+	HostName  string `gorm:"size:64" json:"hostName"`
+	ServiceID uint   `gorm:"index;default:0" json:"serviceId"`
+	Unit      string `gorm:"size:128" json:"unit"`
+	// Action start | stop | restart | reload | enable | disable
+	Action string `gorm:"size:16;index" json:"action"`
+	// Status success | failed | blocked（被下发闸门拦下）
+	Status string `gorm:"size:16;index" json:"status"`
+	Detail string `gorm:"size:500" json:"detail"`
+	// BeforeState / AfterState 形如 active/running,enabled
+	BeforeState string `gorm:"size:64" json:"beforeState"`
+	AfterState  string `gorm:"size:64" json:"afterState"`
+	ExecJobID   uint   `gorm:"index;default:0" json:"execJobId"`
+	Operator    string `gorm:"size:64" json:"operator"`
+	ClientIP    string `gorm:"size:64" json:"clientIp"`
+	CreatedAt   time.Time `gorm:"index" json:"createdAt"`
+}
+
 // Runbook 处置剧本：把「这类告警来了该怎么办」写成可被推荐、可被执行、可被复盘的东西。
 //
 // 剧本不是 wiki 文档：

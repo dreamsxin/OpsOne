@@ -486,6 +486,41 @@ QoS、日志按容器取、容器名写错要报错、行数越界 400），CDP 
 - 内置剧本的步骤只放只读排查命令，止血动作留空给人填 —— 内置剧本不替人做决定
 
 
+## Round 9 — 主机服务（2026-09-22）
+
+**做了什么**
+- 新增 HostService / HostServiceAction 两张表。平台库不全量存机器上的几百个 unit（那是噪音），只存人纳管的那几个 + 期望态；没纳管的通过「发现服务」实时列出，不落库
+- 期望态三件事：该不该在跑（ExpectActive）、该不该开机自启（ExpectEnabled）、是不是关键服务（Critical）
+- 漂移判定六态：ok / inactive 该跑没跑 / unexpected 该停在跑 / disabled 该自启没自启 / missing unit 不存在 / error 巡检失败。static / indirect / generated 这类本来不能 enable 的 unit 不算漂移；自启状态没采到（空值）也不算漂移
+- 漂移产告警走既有通道（内部告警源「服务巡检」），关键服务是 critical 级，恢复后发 resolved
+- 端口归属走 /proc/<pid>/cgroup 而不是 MainPID：nginx 这类 master/worker 模型下监听套接字由 worker 持有，只看 MainPID 会漏
+- 归不到任何 systemd service 的监听端口单列为「无归属端口」——手工起的进程、脱管容器、别人偷偷跑的东西
+- 采集需要的 sudo：ss -p 要看别人家的进程必须 root。非 root 账号下自动加 sudo -n（service.sudo 配置项），sudo 不可用时退回不带 sudo 再采一次，并如实报出「读到端口但拿不到归属」
+- 启停六动作 start / stop / restart / reload / enable / disable，全部走 RunOnHosts，自动继承命令规则拦截、生产主机二次确认、拦截留痕
+- 关键服务的 stop / restart / disable 要把 unit 名抄一遍才放行；被拒的尝试也写进留痕（「谁想停这个关键服务」本身就是要留的信息）
+- 每次启停前后各读一次真机状态存进留痕——光记「执行了 restart」回答不了「到底起来了没有」
+- 改期望态会用上次采到的实际态立刻重判漂移，不重新连机器（改个备注不该触发 SSH）
+- 采集失败时不清空实际态字段，保留上次真值并标 error——把状态清空会让人以为「服务停了」
+- 定时巡检 OPS_SERVICE_SPEC（默认每 10 分钟），体检页新增「主机服务巡检」项
+
+**已验证**
+- 真实 WSL systemd 主机（host 15，zzx@172.20.46.126:2222，非 root + 免密 sudo 白名单）上 71/71 全通过
+- 真读：254 个 unit，含 failed 与 inactive 的；端口按 cgroup 归到 k3s.service（6443/10250 等 10 个）与 systemd-resolved.service（53）
+- 无归属端口真的被抓出来了：[22, 2222]，就是这台 WSL 上手工起的两个 sshd
+- 真写：把 cron.service 停掉再拉起来，状态 active/running,enabled → inactive/dead,enabled → active/running,enabled，逐步都被记进留痕；disable 后判 disabled 并产 critical 告警，enable 后告警转 resolved
+- 可证伪：把期望态从「该在跑」改成「该停着」，同一个服务立刻从 ok 变 unexpected，改回去又变 ok；关键服务不抄 unit 名 / 抄错都被拒且留痕
+- 定时巡检真实触发（lastCheckAt 变化 + 体检页显示「1 台主机、1 个服务，漂移 0」）
+- 单元测试 10/10：cgroup 端口归属、多进程去重、NOSYSTEMD、缺段容错、六种漂移判定、static 不算漂移、空自启状态不算漂移、动作高危分级
+
+**未验证 / 已知局限**
+- 只支持 systemd。非 systemd 主机会明确报「目标机器上没有 systemctl，服务管理只支持 systemd 主机」，不做兼容
+- 端口归属依赖 /proc/<pid>/cgroup：容器内进程、老内核读不到 cgroup 的会缺端口，UI 会标明
+- 没有 root 也没有免密 sudo 时，端口拿不到进程归属，界面会明确提示原因而不是把端口列留空
+- 服务的启停超时固定 60 秒，重启很慢的服务（大数据库）可能超时；超时后留痕里 afterState 仍会去读一次真机状态
+- 采集是「每次巡检全量读一遍」，没有做增量；一台机器 254 个 unit 的采集实测在 20 秒超时内
+- 没做服务之间的依赖关系（systemd 的 Requires/After 没读）
+
+
 
 
 

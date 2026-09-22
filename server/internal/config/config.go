@@ -116,6 +116,11 @@ type Config struct {
 	//（改进项仍然可以跟踪，只是逾期不会有人被提醒，等于复盘写完就烂在系统里）。
 	ReviewSpec string
 
+	// ServiceSpec 主机服务巡检的 cron 表达式。留空表示不自动巡检
+	//（纳管的服务仍能手动巡检，只是「该跑的没跑」不会自动被发现）。
+	// 每次巡检会对有纳管服务的主机各开一次 SSH，节奏不宜太密。
+	ServiceSpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -220,6 +225,7 @@ func Load() (*Config, error) {
 		ExposureSpec:       strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
 		AwarenessSpec:      strings.TrimSpace(env("OPS_AWARENESS_SPEC", "0 9 * * *")),
 		ReviewSpec:         strings.TrimSpace(env("OPS_REVIEW_SPEC", "10 9 * * *")),
+		ServiceSpec:        strings.TrimSpace(env("OPS_SERVICE_SPEC", "*/10 * * * *")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 
