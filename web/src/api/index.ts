@@ -1990,13 +1990,153 @@ export const updateEventStatus = (
   id: number,
   data: { status: string; note?: string; resolveAlerts?: boolean }
 ) =>
-  request<{ status: string; resolvedAlerts: number }>({
+  request<{ status: string; resolvedAlerts: number; reviewCreated?: boolean }>({
     url: `/monitor/events/${id}/status`,
     method: 'POST',
     data
   })
 export const deleteEvent = (id: number) =>
   request({ url: `/monitor/events/${id}`, method: 'DELETE' })
+
+// ---------- 事件复盘 ----------
+
+export interface ReviewDurations {
+  detectMinutes: number | null
+  ackMinutes: number | null
+  mitigateMinutes: number | null
+  recoverMinutes: number | null
+}
+
+export interface EventReview {
+  id: number
+  eventId: number
+  status: string
+  statusLabel: string
+  owner: string
+  happenedAt: string | null
+  detectedAt: string | null
+  respondedAt: string | null
+  mitigatedAt: string | null
+  recoveredAt: string | null
+  impact: string
+  rootCause: string
+  trigger: string
+  detectGap: string
+  mitigation: string
+  lesson: string
+  archivedAt: string | null
+  archivedBy: string
+  createdAt: string
+  updatedAt: string
+  durations: ReviewDurations
+  /** 看板列表里附带的事件与改进项计数 */
+  eventTitle?: string
+  eventSeverity?: string
+  eventStatus?: string
+  totalItems?: number
+  openItems?: number
+  overdueItems?: number
+}
+
+export interface ActionItem {
+  id: number
+  reviewId: number
+  eventId: number
+  title: string
+  detail: string
+  kind: string
+  kindLabel: string
+  owner: string
+  dueDate: string | null
+  status: string
+  statusLabel: string
+  doneAt: string | null
+  doneNote: string
+  overdue: boolean
+  lastRemindAt: string | null
+  createdByName: string
+  createdAt: string
+  eventTitle?: string
+}
+
+/** 里程碑建议值：at 是建议时间，source 说明它是从哪条记录算出来的 */
+export interface MilestoneHint {
+  at: string | null
+  source: string
+}
+
+export interface EventReviewDetail {
+  event: OpsEvent
+  review: EventReview | null
+  suggestions: Record<string, MilestoneHint>
+  actionItems: ActionItem[]
+}
+
+export interface ReviewStats {
+  pending: number
+  draft: number
+  reviewing: number
+  archived: number
+  openItems: number
+  overdueItems: number
+  mineItems: number
+  avgRecoverMinutes: number | null
+  recoverSamples: number
+}
+
+export interface EventEvidence {
+  window: { from: string; to: string; note: string }
+  notifyRecords: NotifyRecord[]
+  escalations: {
+    id: number
+    alertId: number
+    level: number
+    userName: string
+    source: string
+    channel: string
+    status: string
+    detail: string
+    createdAt: string
+  }[]
+  silences: AlertSilence[]
+  suppressed: { alertId: number; title: string; suppressedBy: string }[]
+  execGuardLogs: ExecGuardLog[]
+  hostMetrics: HostMetric[]
+  probeRecords: ProbeRecord[]
+  sources: string[]
+}
+
+export const getEventReview = (eventId: number) =>
+  request<EventReviewDetail>({ url: `/monitor/events/${eventId}/review` })
+export const saveEventReview = (eventId: number, data: Record<string, any>) =>
+  request<EventReview>({ url: `/monitor/events/${eventId}/review`, method: 'POST', data })
+export const archiveEventReview = (eventId: number) =>
+  request<{ status: string; actionItems: number }>({
+    url: `/monitor/events/${eventId}/review/archive`,
+    method: 'POST'
+  })
+export const reopenEventReview = (eventId: number, reason: string) =>
+  request({ url: `/monitor/events/${eventId}/review/reopen`, method: 'POST', data: { reason } })
+export const exportEventReview = (eventId: number) =>
+  request<{ filename: string; markdown: string }>({ url: `/monitor/events/${eventId}/review/export` })
+export const getEventEvidence = (eventId: number) =>
+  request<EventEvidence>({ url: `/monitor/events/${eventId}/evidence` })
+
+export const listReviews = (params: Record<string, any>) =>
+  request<PageData<EventReview>>({ url: '/monitor/reviews', params })
+export const getReviewStats = () => request<ReviewStats>({ url: '/monitor/reviews/stats' })
+
+export const listActionItems = (params: Record<string, any>) =>
+  request<PageData<ActionItem>>({ url: '/monitor/action-items', params })
+export const createActionItem = (eventId: number, data: Record<string, any>) =>
+  request<ActionItem>({ url: `/monitor/events/${eventId}/action-items`, method: 'POST', data })
+export const updateActionItem = (id: number, data: Record<string, any>) =>
+  request({ url: `/monitor/action-items/${id}`, method: 'PUT', data })
+export const finishActionItem = (id: number, note?: string) =>
+  request({ url: `/monitor/action-items/${id}/done`, method: 'POST', data: { note } })
+export const deleteActionItem = (id: number) =>
+  request({ url: `/monitor/action-items/${id}`, method: 'DELETE' })
+
 
 // ---------- 数据留存 ----------
 

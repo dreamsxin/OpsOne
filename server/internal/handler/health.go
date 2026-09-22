@@ -155,6 +155,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_EXPOSURE_SPEC 为空，端口暴露面只能手动扫描"))
 	items = append(items, h.fixedTaskItem("awareness", "安全意识逾期提醒", h.Cfg.AwarenessSpec,
 		"OPS_AWARENESS_SPEC 为空，逾期未完成的必修项不会自动催办"))
+	items = append(items, h.fixedTaskItem("review", "复盘改进项催办", h.Cfg.ReviewSpec,
+		"OPS_REVIEW_SPEC 为空，逾期的复盘改进项不会自动催办"))
 	items = append(items, h.fixedTaskItem("backup", "自动备份", h.Cfg.BackupSpec,
 		"OPS_BACKUP_SPEC 为空，只能手动执行 `ops backup`；而数据留存清理是真删且不可逆"))
 	return items

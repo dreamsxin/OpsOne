@@ -1293,6 +1293,69 @@ type EventLog struct {
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
+// EventReview 事件复盘。一个事件最多一份复盘，事件被标记「已解决」时自动建草稿。
+//
+// 复盘不是给人补作业的表单，而是把「这次到底发生了什么、为什么没早点发现、下次怎么防」
+// 三件事沉淀成可检索、可跟踪的记录。里程碑时间由平台从告警与处置时间线算出建议值，
+// 人可以改，但改了会在复盘里留下「与系统记录不一致」的痕迹（前端展示建议值对照）。
+type EventReview struct {
+	ID      uint `gorm:"primaryKey" json:"id"`
+	EventID uint `gorm:"uniqueIndex;not null" json:"eventId"`
+	// Status draft 草稿 | reviewing 评审中 | archived 已归档（归档后需重新打开才能改）
+	Status string `gorm:"size:16;index;default:draft" json:"status"`
+	// Owner 复盘负责人，默认取事件负责人
+	Owner string `gorm:"size:64;index" json:"owner"`
+
+	// ---------- 时间里程碑，用来算 MTTA / MTTR ----------
+	// HappenedAt 故障实际开始（默认取最早告警的首次出现时间）
+	HappenedAt *time.Time `json:"happenedAt"`
+	// DetectedAt 平台/人发现（默认取最早告警的入库时间）
+	DetectedAt *time.Time `json:"detectedAt"`
+	// RespondedAt 有人开始响应（默认取最早的告警确认时间或事件指派时间）
+	RespondedAt *time.Time `json:"respondedAt"`
+	// MitigatedAt 止血完成（业务恢复可用，可能还没根治），只能人填
+	MitigatedAt *time.Time `json:"mitigatedAt"`
+	// RecoveredAt 完全恢复（默认取事件的解决时间）
+	RecoveredAt *time.Time `json:"recoveredAt"`
+
+	Impact     string `gorm:"type:text" json:"impact"`     // 影响面：谁受影响、影响多久、有没有数据损失
+	RootCause  string `gorm:"type:text" json:"rootCause"`  // 根因
+	Trigger    string `gorm:"type:text" json:"trigger"`    // 诱因：什么变更/事件点了火
+	DetectGap  string `gorm:"type:text" json:"detectGap"`  // 发现环节的问题：为什么没更早发现
+	Mitigation string `gorm:"type:text" json:"mitigation"` // 止血过程：做了哪些动作
+	Lesson     string `gorm:"type:text" json:"lesson"`     // 经验教训
+
+	ArchivedAt *time.Time `json:"archivedAt"`
+	ArchivedBy string     `gorm:"size:64" json:"archivedBy"`
+	CreatedBy  uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
+// EventActionItem 复盘改进项。复盘写完就完的话等于没复盘，所以改进项独立成条目：
+// 有负责人、有截止日期、有状态，逾期会按天给负责人发站内消息催办。
+type EventActionItem struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	ReviewID uint   `gorm:"index;not null" json:"reviewId"`
+	EventID  uint   `gorm:"index;not null" json:"eventId"`
+	Title    string `gorm:"size:200;not null" json:"title"`
+	Detail   string `gorm:"type:text" json:"detail"`
+	// Kind prevent 防复发 | detect 提升发现能力 | mitigate 加快止血 | process 流程改进
+	Kind    string     `gorm:"size:16;default:prevent" json:"kind"`
+	Owner   string     `gorm:"size:64;index" json:"owner"`
+	DueDate *time.Time `gorm:"index" json:"dueDate"`
+	// Status open 待开始 | doing 进行中 | done 已完成 | dropped 不做了
+	Status   string     `gorm:"size:16;index;default:open" json:"status"`
+	DoneAt   *time.Time `json:"doneAt"`
+	DoneNote string     `gorm:"size:255" json:"doneNote"`
+	// LastRemindAt 上次催办时间，用来保证一天最多催一次
+	LastRemindAt *time.Time `json:"lastRemindAt"`
+	CreatedByName string    `gorm:"size:64" json:"createdByName"`
+	CreatedBy     uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
 // Script 脚本库条目：把散落在各人手里的运维命令收拢成可复用、可审阅的资产。
 //
 // 脚本内容在保存时会用「命令规则」跑一遍静态预检，命中拦截规则的脚本不允许下发。

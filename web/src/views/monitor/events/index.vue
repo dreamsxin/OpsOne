@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   addEventNote,
@@ -25,6 +26,7 @@ import Pagination from '@/components/Pagination.vue'
 
 
 const store = useUserStore()
+const router = useRouter()
 
 const loading = ref(false)
 const rows = ref<OpsEvent[]>([])
@@ -60,7 +62,8 @@ const actionText: Record<string, string> = {
   create: '建单',
   assign: '指派',
   note: '处置记录',
-  status: '状态变更'
+  status: '状态变更',
+  review: '复盘'
 }
 
 // 允许的状态流转，和后端保持一致；前端只用来控制按钮显示
@@ -208,7 +211,15 @@ async function changeStatus(target: string) {
   ElMessage.success(
     res.resolvedAlerts ? `已更新状态，并恢复 ${res.resolvedAlerts} 条告警` : '已更新状态'
   )
+  if (res.reviewCreated) {
+    ElMessage.info('已自动创建复盘草稿，可在「事件复盘」里补齐根因与改进项')
+  }
   refreshDetail()
+}
+
+/** 跳到复盘页并直接打开这条事件的复盘 */
+function gotoReview(id: number) {
+  router.push({ path: '/monitor/reviews', query: { event: String(id) } })
 }
 
 async function remove(row: OpsEvent) {
@@ -290,9 +301,17 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="lastActivityAt" label="最近活动" min-width="180" />
-        <el-table-column label="操作" width="130" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+            <el-button
+              v-if="row.status === 'resolved' || row.status === 'closed'"
+              link
+              type="warning"
+              @click="gotoReview(row.id)"
+            >
+              复盘
+            </el-button>
             <el-button v-perm="'event:manage'" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -381,6 +400,8 @@ onMounted(async () => {
           >
             标记{{ statusMeta[target]?.text }}
           </el-button>
+          <el-divider direction="vertical" />
+          <el-button type="primary" plain @click="gotoReview(detail.event.id)">去复盘</el-button>
         </div>
 
         <el-tabs>

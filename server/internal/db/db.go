@@ -44,6 +44,7 @@ func Migrate(g *gorm.DB) error {
 		&model.DBQueryLog{},
 		&model.ExecGuardLog{},
 		&model.Event{}, &model.EventLog{},
+		&model.EventReview{}, &model.EventActionItem{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
@@ -206,6 +207,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 429, ParentID: 416, Title: "维护值班表", Type: "button", AuthCode: "oncall:manage", Sort: 1},
 		{ID: 417, ParentID: 400, Name: "AlertSilence", Title: "静默与维护窗口", Path: "/monitor/silences", Component: "/monitor/silences/index", Icon: "MuteNotification", Sort: 17},
 		{ID: 434, ParentID: 417, Title: "维护静默窗口", Type: "button", AuthCode: "silence:manage", Sort: 1},
+		{ID: 418, ParentID: 400, Name: "EventReview", Title: "事件复盘", Path: "/monitor/reviews", Component: "/monitor/reviews/index", Icon: "Notebook", Sort: 18},
+		{ID: 435, ParentID: 418, Title: "维护复盘与改进项", Type: "button", AuthCode: "review:manage", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},

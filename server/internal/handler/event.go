@@ -558,7 +558,17 @@ func (h *Handler) UpdateEventStatus(c *gin.Context) {
 	}
 	h.appendEventLog(event.ID, "status", content, operator)
 
-	response.OK(c, gin.H{"status": req.Status, "resolvedAlerts": resolvedAlerts})
+	// 标记已解决时自动建复盘草稿：复盘要是靠人记得去建，就永远不会发生
+	reviewCreated := false
+	if req.Status == "resolved" {
+		event.Status = req.Status
+		event.ResolvedAt, event.ResolvedBy = &now, operator
+		reviewCreated = h.ensureReviewDraft(event, operator)
+	}
+
+	response.OK(c, gin.H{
+		"status": req.Status, "resolvedAlerts": resolvedAlerts, "reviewCreated": reviewCreated,
+	})
 }
 
 func (h *Handler) DeleteEvent(c *gin.Context) {
@@ -567,8 +577,10 @@ func (h *Handler) DeleteEvent(c *gin.Context) {
 		response.NotFound(c, "事件不存在")
 		return
 	}
-	// 时间线跟着事件删掉；关联告警不动
+	// 时间线、复盘与改进项跟着事件删掉；关联告警不动
 	h.DB.Where("event_id = ?", event.ID).Delete(&model.EventLog{})
+	h.DB.Where("event_id = ?", event.ID).Delete(&model.EventActionItem{})
+	h.DB.Where("event_id = ?", event.ID).Delete(&model.EventReview{})
 	if err := h.DB.Delete(&model.Event{}, event.ID).Error; err != nil {
 		response.Error(c, "删除失败")
 		return

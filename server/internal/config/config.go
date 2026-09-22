@@ -112,6 +112,10 @@ type Config struct {
 	//（必修项仍然可用，只是逾期不会有人被提醒，完成率靠人去翻）。
 	AwarenessSpec string
 
+	// ReviewSpec 复盘改进项逾期催办的 cron 表达式。留空表示不自动催办
+	//（改进项仍然可以跟踪，只是逾期不会有人被提醒，等于复盘写完就烂在系统里）。
+	ReviewSpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -215,6 +219,7 @@ func Load() (*Config, error) {
 		OnCallSpec:         strings.TrimSpace(env("OPS_ONCALL_SPEC", "* * * * *")),
 		ExposureSpec:       strings.TrimSpace(env("OPS_EXPOSURE_SPEC", "20 4 * * *")),
 		AwarenessSpec:      strings.TrimSpace(env("OPS_AWARENESS_SPEC", "0 9 * * *")),
+		ReviewSpec:         strings.TrimSpace(env("OPS_REVIEW_SPEC", "10 9 * * *")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

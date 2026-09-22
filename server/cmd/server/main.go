@@ -155,6 +155,14 @@ func main() {
 	} else {
 		log.Println("[awareness] 逾期提醒未启用（OPS_AWARENESS_SPEC 为空），逾期未完成的必修项不会自动催办")
 	}
+	if cfg.ReviewSpec != "" {
+		if err := sched.AddFixed(cfg.ReviewSpec, h.RemindOverdueActionItems); err != nil {
+			log.Fatalf("复盘改进项催办 cron 表达式无效(%s): %v", cfg.ReviewSpec, err)
+		}
+		log.Printf("[review] 改进项逾期催办已启用: %s", cfg.ReviewSpec)
+	} else {
+		log.Println("[review] 改进项逾期催办未启用（OPS_REVIEW_SPEC 为空），逾期的改进项不会有人被提醒")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -876,6 +884,21 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/events/:id/note", middleware.RequirePerm("event:manage"), h.AddEventNote)
 		auth.POST("/monitor/events/:id/status", middleware.RequirePerm("event:manage"), h.UpdateEventStatus)
 		auth.DELETE("/monitor/events/:id", middleware.RequirePerm("event:manage"), h.DeleteEvent)
+
+		// 事件复盘：复盘本体、证据汇聚、改进项跟踪
+		auth.GET("/monitor/events/:id/review", h.GetEventReview)
+		auth.GET("/monitor/events/:id/review/export", h.ExportEventReview)
+		auth.GET("/monitor/events/:id/evidence", h.GetEventEvidence)
+		auth.POST("/monitor/events/:id/review", middleware.RequirePerm("review:manage"), h.SaveEventReview)
+		auth.POST("/monitor/events/:id/review/archive", middleware.RequirePerm("review:manage"), h.ArchiveEventReview)
+		auth.POST("/monitor/events/:id/review/reopen", middleware.RequirePerm("review:manage"), h.ReopenEventReview)
+		auth.POST("/monitor/events/:id/action-items", middleware.RequirePerm("review:manage"), h.CreateActionItem)
+		auth.GET("/monitor/reviews", h.ListReviews)
+		auth.GET("/monitor/reviews/stats", h.ReviewStats)
+		auth.GET("/monitor/action-items", h.ListActionItems)
+		auth.PUT("/monitor/action-items/:id", middleware.RequirePerm("review:manage"), h.UpdateActionItem)
+		auth.POST("/monitor/action-items/:id/done", middleware.RequirePerm("review:manage"), h.FinishActionItem)
+		auth.DELETE("/monitor/action-items/:id", middleware.RequirePerm("review:manage"), h.DeleteActionItem)
 
 		auth.GET("/exec/scripts", h.ListScripts)
 		auth.GET("/exec/scripts/categories", h.ListScriptCategories)
