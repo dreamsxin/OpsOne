@@ -137,6 +137,12 @@ type Config struct {
 	// 只读本地库、按 ID 水位推进，跑得密一点也不贵。
 	SecEventSpec string
 
+	// CloudSyncSpec 云资源同步的 cron 表达式。**默认留空 = 不自动同步**，
+	// 与其它巡检项不同 —— 这一项会真的出网调阿里云 OpenAPI，
+	// 默认就开等于替用户决定了「这台机器可以访问公网、也愿意消耗云 API 配额」。
+	// 页面上随时能手动「立即同步」，要自动就显式配一个（建议 0 */6 * * *）。
+	CloudSyncSpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -245,6 +251,7 @@ func Load() (*Config, error) {
 		ConfigSpec:         strings.TrimSpace(env("OPS_CONFIG_SPEC", "*/30 * * * *")),
 		SLASpec:            strings.TrimSpace(env("OPS_SLA_SPEC", "*/2 * * * *")),
 		SecEventSpec:       strings.TrimSpace(env("OPS_SECEVENT_SPEC", "*/5 * * * *")),
+		CloudSyncSpec:      strings.TrimSpace(env("OPS_CLOUD_SYNC_SPEC", "")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

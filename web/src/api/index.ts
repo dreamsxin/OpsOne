@@ -4668,6 +4668,88 @@ export const listSecurityMutes = (params?: Record<string, any>) =>
 export const deleteSecurityMute = (id: number) =>
   request<{ revoked: string; blockedHits: number }>({ url: `/security/event-mutes/${id}`, method: 'DELETE' })
 
+/* ---------------- 云资源同步 ---------------- */
+
+export interface CloudResource {
+  id: number
+  cloudAccountId: number
+  provider: string
+  resourceType: string
+  resourceId: string
+  name: string
+  regionId: string
+  zoneId: string
+  status: string
+  gone: boolean
+  privateIps: string
+  publicIps: string
+  spec: string
+  osName: string
+  chargeType: string
+  expiredAt: string | null
+  matchedHostId: number
+  matchBy: string
+  extra: string
+  firstSeenAt: string
+  lastSyncAt: string
+}
+
+export interface CloudSyncRun {
+  id: number
+  cloudAccountId: number
+  accountName: string
+  provider: string
+  resourceType: string
+  regionId: string
+  status: string
+  trigger: string
+  operator: string
+  totalCount: number
+  createdCount: number
+  updatedCount: number
+  goneCount: number
+  matchedCount: number
+  message: string
+  startedAt: string
+  finishedAt: string | null
+  durationMs: number
+}
+
+export interface CloudDriftItem {
+  side: 'cloud_only' | 'host_only' | 'gone'
+  resourceId: string
+  name: string
+  address: string
+  status: string
+  provider: string
+  cloudResId: number
+  hostId: number
+  lastSyncAt: string
+}
+
+export interface CloudDrift {
+  syncedOnce: boolean
+  cloudOnly: number
+  hostOnly: number
+  gone: number
+  items: CloudDriftItem[]
+  note: string
+}
+
+export const runCloudSync = (id: number, resourceType?: string) =>
+  request<CloudSyncRun[]>({ url: `/cloud-accounts/${id}/sync`, method: 'POST', data: { resourceType } })
+export const listCloudResources = (params?: Record<string, any>) =>
+  request<PageData<CloudResource>>({ url: '/cloud-resources', params })
+export const cloudResourceStats = () =>
+  request<{ resourceType: string; status: string; gone: boolean; count: number }[]>({
+    url: '/cloud-resources/stats'
+  })
+export const cloudDrift = () => request<CloudDrift>({ url: '/cloud-resources/drift' })
+export const adoptCloudResource = (id: number, data: Record<string, any>) =>
+  request<Host>({ url: `/cloud-resources/${id}/adopt`, method: 'POST', data })
+export const listCloudSyncRuns = (params?: Record<string, any>) =>
+  request<PageData<CloudSyncRun>>({ url: '/cloud-sync-runs', params })
+
 
 
 

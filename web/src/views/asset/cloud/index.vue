@@ -139,11 +139,11 @@ onMounted(async () => {
 <template>
   <div class="page">
     <el-card>
-      <el-alert type="warning" :closable="false" style="margin-bottom: 12px">
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px">
         <template #title>
-          这里只做云账号与密钥的<strong>集中登记</strong>，不会去云上拉取资源 ——
-          资源同步需要各厂商 SDK 与出网能力，当前未实现。
-          AccessKeySecret 明文存储，与主机凭据同等对待，请按最小权限申请子账号密钥。
+          这里登记云账号与密钥；阿里云账号可以在<strong>「云资源同步」</strong>页把 ECS 与云解析域名拉进平台
+          （只调只读接口，不做任何云上变更）。腾讯云 / 华为云 / AWS 目前只登记不同步。
+          AccessKeySecret 配了 <code>OPS_SECRET_KEY</code> 时加密落库、接口不回传，请按最小权限申请只读子账号密钥。
         </template>
       </el-alert>
 

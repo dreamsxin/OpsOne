@@ -73,7 +73,7 @@ var secretFields = []secretField{
 	// 以下是「对外系统凭据」这一轮补齐的
 	{Label: "LDAP 服务账号口令", Table: "ldap_servers", Column: "bind_password", Note: "用于搜索目录；域账号登录链路也依赖它"},
 	{Label: "IM 应用密钥", Table: "im_apps", Column: "app_secret", Note: "能读整个通讯录，也是扫码登录的凭据"},
-	{Label: "云账号 AK/SK", Table: "cloud_accounts", Column: "access_key_secret", Note: "目前只登记不使用，仍按凭据对待"},
+	{Label: "云账号 AK/SK", Table: "cloud_accounts", Column: "access_key_secret", Note: "云资源同步会解密后调只读 OpenAPI（ECS/云解析）"},
 	{Label: "Jenkins Token", Table: "build_servers", Column: "token", Note: "能触发构建"},
 	{Label: "模型上游 Key", Table: "model_upstreams", Column: "api_key", Note: "直接对应额度花费"},
 	{Label: "通知渠道签名密钥", Table: "notify_channels", Column: "secret", Note: "钉钉加签 / 飞书签名"},

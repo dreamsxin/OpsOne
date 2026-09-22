@@ -35,7 +35,8 @@ func Migrate(g *gorm.DB) error {
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
-		&model.CloudAccount{}, &model.InventoryBatch{}, &model.InventoryItem{},
+		&model.CloudAccount{}, &model.CloudResource{}, &model.CloudSyncRun{},
+		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
 		&model.Certificate{}, &model.AlertRule{},
@@ -211,6 +212,11 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 125, ParentID: 100, Name: "ConfigFile", Title: "配置文件", Path: "/asset/config-file", Component: "/asset/config-file/index", Icon: "Document", Sort: 9},
 		{ID: 126, ParentID: 125, Title: "登记与编辑配置", Type: "button", AuthCode: "configfile:manage", Sort: 1},
 		{ID: 127, ParentID: 125, Title: "下发与回滚配置", Type: "button", AuthCode: "configfile:apply", Sort: 2},
+		// 云资源同步排在最后（Sort 10）而不是插到「云账号」后面：
+		// 重排会改掉其它条目的 Sort，而菜单的展示字段归管理员，代码不该覆盖
+		{ID: 128, ParentID: 100, Name: "CloudSync", Title: "云资源同步", Path: "/asset/cloud-sync", Component: "/asset/cloud-sync/index", Icon: "Refresh", Sort: 10},
+		{ID: 129, ParentID: 128, Title: "触发同步", Type: "button", AuthCode: "cloud:sync", Sort: 1},
+		{ID: 130, ParentID: 128, Title: "纳管为主机", Type: "button", AuthCode: "cloud:adopt", Sort: 2},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来

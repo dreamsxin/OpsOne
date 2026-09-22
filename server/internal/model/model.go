@@ -997,8 +997,10 @@ type FixedAsset struct {
 
 // CloudAccount 云账号台账。
 //
-// 只做账号与密钥的集中登记，**不做资源同步** —— 同步需要各云厂商 SDK 与出网能力，
-// 目前不在实现范围内，页面上会显式说明，避免误以为能拉到云上资源。
+// 密钥的用途：阿里云账号的 AK/SK 会被「云资源同步」用来调只读的 OpenAPI
+// （ECS DescribeInstances / 云解析 DescribeDomains），拉回来的资源进
+// CloudResource 表并与主机资产做漂移对照。平台不用这份密钥做任何写操作。
+// 腾讯云 / 华为云 / AWS 目前只登记不同步 —— 各家签名方式不同，逐家接。
 type CloudAccount struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	Name            string    `gorm:"size:64;not null" json:"name"`
@@ -1013,6 +1015,77 @@ type CloudAccount struct {
 	Remark          string    `gorm:"size:255" json:"remark"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+// CloudResource 从云上同步回来的资源清单。
+//
+// 这张表是「云上事实」的镜像，不是台账：同步时按 (账号, 类型, 资源 ID) 覆盖写，
+// 云上已经查不到的记录标 Gone 而不是直接删 —— 机器被谁释放了、什么时候消失的，
+// 是对账时最需要的那条线索。
+//
+// 与 Host 的关系：MatchedHostID 是同步时按 IP 自动匹配出来的，只说明「看起来是同一台」，
+// 不代表纳管关系。真要纳管得在页面上点「纳管为主机」，那一步需要人补登录凭据。
+type CloudResource struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// CloudAccountID 来源云账号
+	CloudAccountID uint   `gorm:"index;not null" json:"cloudAccountId"`
+	Provider       string `gorm:"size:16;index" json:"provider"`
+	// ResourceType ecs（云服务器）| domain（云解析托管域名）
+	ResourceType string `gorm:"size:16;index" json:"resourceType"`
+	// ResourceID 云上唯一标识：ECS 是 InstanceId，域名是 DomainName
+	ResourceID string `gorm:"size:128;index" json:"resourceId"`
+	Name       string `gorm:"size:128" json:"name"`
+	RegionID   string `gorm:"size:64;index" json:"regionId"`
+	ZoneID     string `gorm:"size:64" json:"zoneId"`
+	// Status 云上状态原文（Running / Stopped …）；域名固定为 hosted
+	Status string `gorm:"size:32;index" json:"status"`
+	// Gone 云上已经查不到这条资源了。为真时 Status 保留最后一次看到的值
+	Gone       bool   `gorm:"index;default:false" json:"gone"`
+	PrivateIPs string `gorm:"size:255" json:"privateIps"` // 逗号分隔
+	PublicIPs  string `gorm:"size:255" json:"publicIps"`
+	Spec       string `gorm:"size:128" json:"spec"` // 实例规格 / 域名版本
+	OSName     string `gorm:"size:128" json:"osName"`
+	ChargeType string `gorm:"size:32" json:"chargeType"` // PrePaid | PostPaid
+	// ExpiredAt 包年包月到期时间。按量付费与域名为空 ——
+	// 域名的**注册**到期时间不在云解析接口里，见 cloudapi.DNSDomain 的说明
+	ExpiredAt *time.Time `json:"expiredAt"`
+	// MatchedHostID 按 IP 自动匹配到的纳管主机，0 表示没匹配上
+	MatchedHostID uint   `gorm:"index;default:0" json:"matchedHostId"`
+	MatchBy       string `gorm:"size:16" json:"matchBy"` // private_ip | public_ip
+	// Extra 云端原始字段的精简 JSON，供排查用
+	Extra       string    `gorm:"type:text" json:"extra"`
+	FirstSeenAt time.Time `json:"firstSeenAt"`
+	LastSyncAt  time.Time `json:"lastSyncAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// CloudSyncRun 一次云资源同步的记录。
+//
+// 失败也要落一条：「上次同步是什么时候、为什么没成」比清单本身更常被问到。
+// 清单页上的数字如果来自一次三天前失败后的残留，没有这张表根本看不出来。
+type CloudSyncRun struct {
+	ID             uint   `gorm:"primaryKey" json:"id"`
+	CloudAccountID uint   `gorm:"index;not null" json:"cloudAccountId"`
+	AccountName    string `gorm:"size:64" json:"accountName"`
+	Provider       string `gorm:"size:16" json:"provider"`
+	ResourceType   string `gorm:"size:16;index" json:"resourceType"`
+	RegionID       string `gorm:"size:64" json:"regionId"`
+	// Status success | failed
+	Status string `gorm:"size:16;index" json:"status"`
+	// Trigger manual（页面点的）| cron（定时任务）
+	Trigger      string `gorm:"size:16" json:"trigger"`
+	Operator     string `gorm:"size:64" json:"operator"`
+	TotalCount   int    `json:"totalCount"`
+	CreatedCount int    `json:"createdCount"`
+	UpdatedCount int    `json:"updatedCount"`
+	GoneCount    int    `json:"goneCount"`
+	MatchedCount int    `json:"matchedCount"`
+	// Message 失败原因或成功摘要，照实记云端返回的 Code
+	Message    string     `gorm:"size:512" json:"message"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt"`
+	DurationMS int64      `json:"durationMs"`
 }
 
 // InventoryBatch 资产盘点批次。创建时按范围对固定资产做快照生成明细。

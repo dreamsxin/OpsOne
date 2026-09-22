@@ -198,6 +198,14 @@ func main() {
 	} else {
 		log.Println("[secevent] 安全事件采集未启用（OPS_SECEVENT_SPEC 为空），拦截与暴露面流水不会进研判台")
 	}
+	if cfg.CloudSyncSpec != "" {
+		if err := sched.AddFixed(cfg.CloudSyncSpec, h.SyncCloudForSchedule); err != nil {
+			log.Fatalf("云资源同步 cron 表达式无效(%s): %v", cfg.CloudSyncSpec, err)
+		}
+		log.Printf("[cloud_sync] 云资源同步已启用: %s（会出网调用阿里云 OpenAPI）", cfg.CloudSyncSpec)
+	} else {
+		log.Println("[cloud_sync] 云资源同步未启用（OPS_CLOUD_SYNC_SPEC 为空），只能在页面上手动同步")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -704,6 +712,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/cloud-accounts", middleware.RequirePerm("cloud:manage"), h.CreateCloudAccount)
 		auth.PUT("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.UpdateCloudAccount)
 		auth.DELETE("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.DeleteCloudAccount)
+		auth.POST("/cloud-accounts/:id/sync", middleware.RequirePerm("cloud:sync"), h.RunCloudSync)
+
+		auth.GET("/cloud-resources", h.ListCloudResources)
+		auth.GET("/cloud-resources/stats", h.CloudResourceStats)
+		auth.GET("/cloud-resources/drift", h.CloudDrift)
+		auth.POST("/cloud-resources/:id/adopt", middleware.RequirePerm("cloud:adopt"), h.AdoptCloudResource)
+		auth.GET("/cloud-sync-runs", h.ListCloudSyncRuns)
 
 		auth.GET("/inventory/batches", h.ListInventoryBatches)
 		auth.GET("/inventory/batches/:id", h.GetInventoryBatch)
