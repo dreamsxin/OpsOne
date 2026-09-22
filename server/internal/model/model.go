@@ -1,3 +1,24 @@
+// Package model 是平台的全部数据表定义。
+//
+// # 布尔字段不要加 gorm:"default:true"
+//
+// 这是这个包里唯一一条硬规则，因为它已经被踩了五次（Domain.AlertEnabled、
+// NotifyTemplate.Enabled、AlertRule.Enabled，以及另外两处在代码里写了绕过逻辑的）。
+//
+// GORM 对带 default 标签的字段，在 Create 时会把**零值从 INSERT 语句里省掉**，
+// 让数据库去填默认值。对布尔字段来说零值就是 false，于是：
+//
+//	用户在界面上把开关关掉  →  Enabled=false  →  GORM 不写这一列
+//	                        →  数据库填 default true  →  开关自己弹回去了
+//
+// 表现是「关不掉」，而且不报错。`Select("*")` 不能解决（它管的是 Update），
+// 能解决的只有：**不加 default 标签**，或者插入后再 Updates 一次把意图写回去。
+// 后者是打补丁，所以这里选前者 —— 代价是数据库层面没有默认值，
+// 由建记录的代码负责显式赋值（平台所有 CRUD handler 本来就是这么写的：
+// 先 `enabled := true`，再按请求里的 *bool 覆盖）。
+//
+// 还带着这个标签的字段列在 bool_default_test.go 的 auditedPending 清单里，
+// 每一条都注明了为什么还没动。新增模型如果给布尔字段加了这个标签，那个测试会失败。
 package model
 
 import "time"
@@ -215,7 +236,7 @@ type ExposureTarget struct {
 	Baseline string `gorm:"size:500" json:"baseline"`
 	// TimeoutMs 单个端口的连接超时。公网目标建议放宽到 1500ms 以上
 	TimeoutMs    int  `gorm:"default:800" json:"timeoutMs"`
-	AlertEnabled bool `gorm:"default:true" json:"alertEnabled"`
+	AlertEnabled bool `json:"alertEnabled"`
 
 	// 以下由扫描回填，不接受手工录入
 	LastStatus string `gorm:"size:16;default:unknown" json:"lastStatus"` // unknown | ok | unexpected | failed
@@ -228,7 +249,7 @@ type ExposureTarget struct {
 	LastScanAt     *time.Time `json:"lastScanAt"`
 	TotalScans     int        `json:"totalScans"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -702,11 +723,11 @@ type ApiToken struct {
 	// Scopes 显式授予的权限码，JSON 数组；只读令牌可以为空
 	Scopes string `gorm:"type:text" json:"scopes"`
 	// ReadOnly 只允许 GET/HEAD
-	ReadOnly bool `gorm:"default:true" json:"readOnly"`
+	ReadOnly bool `json:"readOnly"`
 	// AllowIPs 允许的来源，逗号分隔，支持 CIDR；空表示不限制
 	AllowIPs  string     `gorm:"size:255" json:"allowIps"`
 	ExpiresAt *time.Time `json:"expiresAt"`
-	Enabled   bool       `gorm:"default:true" json:"enabled"`
+	Enabled   bool       `json:"enabled"`
 
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 	LastUsedIP string     `gorm:"size:64" json:"lastUsedIp"`
@@ -1717,12 +1738,12 @@ type Certificate struct {
 	LastCheckAt  *time.Time `json:"lastCheckAt"`
 	ErrorMsg     string     `gorm:"size:255" json:"errorMsg"`
 
-	AlertDays    int  `gorm:"default:30" json:"alertDays"`      // 剩余天数低于该值判为 expiring
-	AlertEnabled bool `gorm:"default:true" json:"alertEnabled"` // 是否把巡检结果送进告警通道
+	AlertDays    int  `gorm:"default:30" json:"alertDays"` // 剩余天数低于该值判为 expiring
+	AlertEnabled bool `json:"alertEnabled"`                // 是否把巡检结果送进告警通道
 
 	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"` // 停用后不参与批量巡检
+	Enabled   bool      `json:"enabled"` // 停用后不参与批量巡检
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -1785,7 +1806,7 @@ type Probe struct {
 	// 静默直连会把「代理挂了」表现成「目标正常」
 	ProxyID uint `gorm:"index;default:0" json:"proxyId"`
 
-	AlertEnabled     bool `gorm:"default:true" json:"alertEnabled"`
+	AlertEnabled     bool `json:"alertEnabled"`
 	ConsecutiveFails int  `gorm:"default:1" json:"consecutiveFails"` // 连续失败几次才告警
 	FailStreak       int  `json:"failStreak"`
 
@@ -1797,7 +1818,7 @@ type Probe struct {
 	TotalChecks int        `json:"totalChecks"`
 	FailChecks  int        `json:"failChecks"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -1957,7 +1978,7 @@ type ConfigFile struct {
 	ReloadUnit string `gorm:"size:128" json:"reloadUnit"`
 	// ReloadAction reload | restart，默认 reload
 	ReloadAction string `gorm:"size:16;default:reload" json:"reloadAction"`
-	AlertEnabled bool   `gorm:"default:true" json:"alertEnabled"`
+	AlertEnabled bool   `json:"alertEnabled"`
 	Remark       string `gorm:"size:255" json:"remark"`
 
 	// DesiredVersionID 期望内容对应的版本。0 表示还没定基线
@@ -2052,13 +2073,13 @@ type HostService struct {
 	// ---------- 期望态，由人登记 ----------
 	// ExpectActive 期望这个服务在运行。置 false 表示「这个服务就该是停着的」，
 	// 它在跑反而算漂移（例如被禁用的旧版本服务）
-	ExpectActive bool `gorm:"default:true" json:"expectActive"`
+	ExpectActive bool `json:"expectActive"`
 	// ExpectEnabled 期望开机自启。static / indirect 这类本来就不能 enable 的不算漂移
-	ExpectEnabled bool `gorm:"default:true" json:"expectEnabled"`
+	ExpectEnabled bool `json:"expectEnabled"`
 	// Critical 关键服务：漂移时产 critical 告警，停服务/取消自启需要二次确认
 	Critical     bool   `gorm:"index" json:"critical"`
 	Owner        string `gorm:"size:64;index" json:"owner"`
-	AlertEnabled bool   `gorm:"default:true" json:"alertEnabled"`
+	AlertEnabled bool   `json:"alertEnabled"`
 	Remark       string `gorm:"size:255" json:"remark"`
 
 	// ---------- 实际态，由巡检回填 ----------
@@ -2695,9 +2716,9 @@ type LdapServer struct {
 	AttrEmail    string `gorm:"size:64;default:mail" json:"attrEmail"`
 	TimeoutSec   int    `gorm:"default:8" json:"timeoutSec"`
 
-	Enabled bool `gorm:"default:true" json:"enabled"`
+	Enabled bool `json:"enabled"`
 	// LoginEnabled 关掉之后，已绑定的账号立刻回落到本地口令都登不进来（见 handler 说明）
-	LoginEnabled bool `gorm:"default:true" json:"loginEnabled"`
+	LoginEnabled bool `json:"loginEnabled"`
 	// AutoBind 首次用域口令登录时，若平台已存在同名账号则自动建立绑定。
 	// 不存在的账号一律拒绝——平台永远不按目录自动建号。
 	AutoBind bool `gorm:"default:false" json:"autoBind"`

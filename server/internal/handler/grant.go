@@ -140,12 +140,32 @@ func (h *Handler) DeleteResourceGrant(c *gin.Context) {
 	response.OK(c, nil)
 }
 
+// canDiagnoseUser 诊断自己不需要权限，诊断别人需要对应的管理权限。
+//
+// 加这道判断的原因：这两个诊断接口原来谁都能查任意 userID，
+// 而返回内容是「这个人能进哪些主机 / 哪些集群」—— 那是一份现成的横向移动地图。
+func (h *Handler) canDiagnoseUser(c *gin.Context, targetID uint, managePerm string) bool {
+	if user := middleware.CurrentUser(c); user != nil && user.ID == targetID {
+		return true
+	}
+	perms := middleware.Perms(c)
+	if _, ok := perms[managePerm]; ok {
+		return true
+	}
+	_, ok := perms["*"]
+	return ok
+}
+
 // DiagnoseResourceGrants 诊断某个用户对主机的实际权限：
 // 数据范围内的主机 + 仅靠授权拿到的主机（含动作集合）
 func (h *Handler) DiagnoseResourceGrants(c *gin.Context) {
 	userID := idParam(c)
 	if userID == 0 {
 		userID = middleware.CurrentUser(c).ID
+	}
+	if !h.canDiagnoseUser(c, userID, "grant:manage") {
+		response.Forbidden(c, "只能诊断自己的权限；要看别人的需要「维护授权」权限")
+		return
 	}
 
 	var user model.User

@@ -433,6 +433,36 @@ func TestKubeGrantCreateValidation(t *testing.T) {
 	}
 }
 
+// 诊断接口只能查自己，查别人要「维护授权」权限。
+//
+// 这两个诊断接口（K8s 与主机资源）原来谁都能查任意 userID，而返回内容是
+// 「这个人能进哪些集群 / 哪些主机」—— 那是一份现成的横向移动地图。
+func TestKubeGrantDiagnosePermission(t *testing.T) {
+	h, engine := newKubeGrantTestHandler(t)
+	seedKubeFixtures(t, h)
+	h.DB.Create(&model.User{Username: "lisi", Status: 1})
+
+	// 当前登录的是 id=1，查自己允许
+	if code, _, raw := grantJSON(t, engine, http.MethodGet, "/kube/grants/diagnose/1", ""); code != 200 {
+		t.Fatalf("查自己应该允许: %d %s", code, raw)
+	}
+	code, parsed, _ := grantJSON(t, engine, http.MethodGet, "/kube/grants/diagnose/2", "")
+	if code != 403 {
+		t.Fatalf("没有权限查别人应该 403，实际 %d", code)
+	}
+	if msg, _ := parsed["msg"].(string); !strings.Contains(msg, "自己") {
+		t.Fatalf("错误信息要说清只能查自己: %v", msg)
+	}
+
+	// 有权限的人可以查别人
+	h2, engineAdmin := newKubeGrantTestHandler(t, "kubegrant:manage")
+	seedKubeFixtures(t, h2)
+	h2.DB.Create(&model.User{Username: "lisi", Status: 1})
+	if code, _, raw := grantJSON(t, engineAdmin, http.MethodGet, "/kube/grants/diagnose/2", ""); code != 200 {
+		t.Fatalf("有权限时应该允许查别人: %d %s", code, raw)
+	}
+}
+
 // 诊断：把开关、管理员豁免、授权三件事叠起来的结果直接算给人看
 func TestKubeGrantDiagnose(t *testing.T) {
 	h, engine := newKubeGrantTestHandler(t)

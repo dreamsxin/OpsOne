@@ -751,7 +751,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		auth.GET("/system/data-permission/diagnose/:id", h.DiagnoseDataScope)
 
-		auth.GET("/resource-grants", h.ListResourceGrants)
+		// 授权表本身是一份「谁能进哪些机器」的地图，列表要权限；
+		// 诊断接口允许查自己（handler 里判断），查别人才要权限
+		auth.GET("/resource-grants", middleware.RequirePerm("grant:manage"), h.ListResourceGrants)
 		auth.POST("/resource-grants", middleware.RequirePerm("grant:manage"), h.CreateResourceGrant)
 		auth.PUT("/resource-grants/:id", middleware.RequirePerm("grant:manage"), h.UpdateResourceGrant)
 		auth.DELETE("/resource-grants/:id", middleware.RequirePerm("grant:manage"), h.DeleteResourceGrant)
@@ -919,7 +921,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		// 容器平台授权：一条授权同时限定集群 + 命名空间 + 资源类型，
 		// 闸门在 requireKubeCluster 一处。默认不生效（配置项 kube.grant_enforce）
 		auth.GET("/kube/grant-state", h.GetKubeGrantState)
-		auth.GET("/kube/grants", h.ListKubeGrants)
+		auth.GET("/kube/grants", middleware.RequirePerm("kubegrant:manage"), h.ListKubeGrants)
 		auth.POST("/kube/grants", middleware.RequirePerm("kubegrant:manage"), h.CreateKubeGrant)
 		auth.PUT("/kube/grants/:id", middleware.RequirePerm("kubegrant:manage"), h.UpdateKubeGrant)
 		auth.DELETE("/kube/grants/:id", middleware.RequirePerm("kubegrant:manage"), h.DeleteKubeGrant)

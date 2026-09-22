@@ -453,6 +453,10 @@ func (h *Handler) DeleteKubeGrant(c *gin.Context) {
 // 这个接口存在的理由：授权是并集 + 有效期 + 管理员豁免 + 总开关四件事叠起来的结果，
 // 靠人对着列表推演一定会算错。
 func (h *Handler) DiagnoseKubeGrant(c *gin.Context) {
+	if !h.canDiagnoseUser(c, idParam(c), "kubegrant:manage") {
+		response.Forbidden(c, "只能诊断自己的可见范围；要看别人的需要「维护授权」权限")
+		return
+	}
 	var user model.User
 	if err := h.DB.Preload("Roles").First(&user, idParam(c)).Error; err != nil {
 		response.NotFound(c, "用户不存在")

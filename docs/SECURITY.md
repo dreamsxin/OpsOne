@@ -1009,6 +1009,52 @@
   报告快照留存（现算不落库：存下来只会多一份会过期的副本）、
   以及所有需要 agent 才能拿到的东西。
 
+## 46. 两个诊断接口的越权读取，以及「开关关不掉」这个 bug 类
+
+这一节记的是两处**修掉的既有问题**，都属于「一直存在但没人发现」那一类。
+
+### 46.1 授权诊断接口原来谁都能查任意用户
+
+`GET /resource-grants/diagnose/:id` 与本轮新增的 `GET /kube/grants/diagnose/:id`
+返回的是「这个人能进哪些主机 / 哪些集群，带哪些动作」。原来前者**没有任何权限校验**，
+任何登录用户都能传别人的 userID 去查 —— 那是一份现成的横向移动地图：
+先看谁能进核心库那台机器，再去针对那个人。
+
+改成：**查自己永远允许**（这是这个接口最常用的场景，也帮人自查"我为什么看不到那台机器"），
+查别人需要对应的 `grant:manage` / `kubegrant:manage`。同时给
+`GET /resource-grants` 与 `GET /kube/grants` 加上权限码 —— 授权表本身就是同一份地图。
+
+副作用要说清：**有菜单但没有「维护授权」按钮权限的角色，打开这两页会看到 403**。
+这是刻意的收紧，不是回归。
+
+### 46.2 布尔字段的 gorm:"default:true"：安静地把开关弹回去
+
+这是一个被踩了五次的 bug 类，这一轮把它变成**可见且有测试守着**的东西。
+
+GORM 对带 `default` 标签的字段，Create 时会把零值从 INSERT 里省掉让数据库填默认值。
+布尔字段的零值就是 `false`，于是「用户在界面上把开关关掉」变成「数据库把它填回 true」——
+表现是关不掉，而且不报错。安全相关的例子：
+
+- `LdapServer.LoginEnabled = false`（管理员想关掉域账号登录入口）被翻回 true，
+  **登录入口仍然开着**；
+- `ApiToken.ReadOnly` 反方向：用户要一个可写令牌，结果拿到只读的（这个方向是 fail-safe，
+  但同样让人一头雾水）；
+- `Certificate.AlertEnabled` / `Probe.AlertEnabled` 关不掉 → 噪音告警关不掉，
+  最后整类告警被人忽略。
+
+处置：
+- 逐个确认建记录路径之后，去掉了 7 个模型共 14 个字段的标签
+  （ExposureTarget / ApiToken / Certificate / Probe / ConfigFile / HostService / LdapServer），
+  并删掉了 ldap / api_token / probe 三处「插完再 Updates 一次」的补丁；
+- **没有一次性全扫**：剩下 29 个字段列在 `internal/model/bool_default_test.go`
+  的 `auditedPending` 里，每条写明是什么。原因是去掉标签之后，任何**没有显式赋值**
+  的建记录路径会插进 `false` —— 那就从「关不掉」变成「新建出来就是停用的」，
+  同样安静、同样难查。逐个确认再动，比一次改 43 个然后祈祷更稳；
+- 两道测试守着：`internal/model` 里用 go/ast 解析模型源码，出现清单之外的字段就失败
+  （新模型再踩同一个坑会被当场拦住），清单过期也失败；`internal/handler` 里走真实创建接口，
+  建完直接读库断言那一列真的是 false，同时断言不传该字段时仍然默认开启。
+
+
 
 
 

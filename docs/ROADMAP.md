@@ -1406,6 +1406,62 @@ RBAC 对象（那要写集群，与「K8s 只读」定位冲突）、报告导�
 多主机报告对比，以及所有需要常驻 agent 才能拿到的东西。
 
 
+## 已落地：把踩了五次的坑变成有测试守着的债
+
+第 9 项「安全组页」核对后发现**已经做完了** —— model、handler（列表 / 保存 / 删除 /
+铺到成员）、路由、API 封装、以及「按主机 / 安全组」两个视图切换的完整界面都在
+`security/firewall/index.vue` 里。这是第二次出现「计划里说缺的东西其实已经有了」
+（第一次是导航大盘），说明当初那份差距清单本身有误。所以这一轮转去做一件更该做的事。
+
+### 布尔默认值陷阱
+
+这个 bug 被踩了五次：Domain.AlertEnabled、NotifyTemplate.Enabled、AlertRule.Enabled
+各被一条测试逮到过一次，另外 ldap / api_token / probe / config_file / host_service /
+script / runbook 七处则在代码里各写了一遍绕过补丁。
+
+机制：GORM 对带 `default` 标签的字段，Create 时把零值从 INSERT 里省掉让数据库填默认值。
+布尔零值是 `false`，于是
+
+```
+用户把开关关掉 → Enabled=false → GORM 不写这一列 → 数据库填 default true → 开关弹回去
+```
+
+表现是「关不掉」且不报错。`Select("*")` 不管用（它管的是 Update）。
+
+**修了 14 个，剩下 29 个列成清单而不是一次扫完**。理由是去掉标签之后，任何没有显式赋值
+的建记录路径会插进 `false` —— 那就从「关不掉」变成「新建出来就是停用的」，同样安静。
+一次改 43 个然后祈祷，不如逐个确认建记录路径。这一轮动的是七个模型
+（ExposureTarget / ApiToken / Certificate / Probe / ConfigFile / HostService / LdapServer），
+每个都确认过它的 CRUD handler 本来就显式赋值，顺手删掉了 ldap / api_token / probe
+三处补丁。
+
+**两道测试**：
+
+- `internal/model/bool_default_test.go` 用 go/ast 解析模型源码（不用反射：这个包没有
+  模型注册表，反射拿不到"一共有哪些模型"），把带标签的字段与清单比对。
+  出现清单之外的 → 失败，新模型再踩同一个坑会被当场拦住；清单里的字段已经不带标签了
+  → 也失败，逼着清单跟代码走，不让它烂成一份没人信的过期文档。
+- `internal/handler/bool_default_test.go` 走真实创建接口，建完直接读库断言那一列真的是
+  false；同时断言**不传该字段时仍然默认开启** —— 去掉标签不能把默认值也弄丢。
+  LDAP 那条是安全相关的：`loginEnabled=false` 被翻回 true 意味着域账号登录入口还开着。
+
+### 两个诊断接口的越权读取
+
+`GET /resource-grants/diagnose/:id`（既有）与 `GET /kube/grants/diagnose/:id`（上一轮新增）
+返回「这个人能进哪些主机 / 哪些集群」。前者原来**没有任何权限校验**，任何登录用户都能
+传别人的 userID 去查 —— 那是一份现成的横向移动地图。改成查自己永远允许（自查"我为什么
+看不到那台机器"是这个接口最常用的场景），查别人要 `grant:manage` / `kubegrant:manage`；
+两个列表接口也加上了权限码，因为授权表本身就是同一份地图。
+
+副作用照实说：**有菜单但没有「维护授权」按钮权限的角色，打开这两页会看到 403**。
+
+**验证**：新增 9 条测试（模型 3 + 创建行为 5 + 诊断权限 1）。
+全量 `go test` / `go vet` / `gofmt` 干净。这一轮没有改前端。
+
+**仍然没有的**：剩下 29 个字段的逐条确认（清单在测试文件里，可数可查）、
+把「建记录时布尔必须显式赋值」做成编译期约束（Go 没有好办法，只能靠那两道测试）。
+
+
 
 
 

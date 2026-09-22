@@ -221,11 +221,8 @@ func (h *Handler) CreateApiToken(c *gin.Context) {
 		response.Error(c, "保存令牌失败")
 		return
 	}
-	// ReadOnly / Enabled 带 default，Create 时 false 会被当零值忽略，回写一次
-	if item.ReadOnly != readOnly || item.Enabled != enabled {
-		h.DB.Model(&item).Updates(map[string]any{"read_only": readOnly, "enabled": enabled})
-		item.ReadOnly, item.Enabled = readOnly, enabled
-	}
+	// ReadOnly / Enabled 都不带 gorm default（见 model 包注释），Create 原样写入，
+	// 「用户要一个可写令牌」不会被数据库默认值悄悄改回只读
 
 	// 这里是明文唯一一次露面
 	response.OK(c, gin.H{

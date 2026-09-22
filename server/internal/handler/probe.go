@@ -317,17 +317,12 @@ func (h *Handler) CreateProbe(c *gin.Context) {
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled
 	}
-	// GORM 的坑：带 default 的字段在 Create 后会被回填成库默认值，
-	// 所以用户关掉的 false 会在 Create 之后变回 true。先记住意图，插完再显式写回。
-	wantAlert, wantEnabled := item.AlertEnabled, item.Enabled
+	// AlertEnabled / Enabled 都不带 gorm default（见 model 包注释），
+	// 用户关掉的开关会原样写进 INSERT，不用建完再回写一次
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "创建失败")
 		return
 	}
-	item.AlertEnabled, item.Enabled = wantAlert, wantEnabled
-	h.DB.Model(&model.Probe{}).Where("id = ?", item.ID).Updates(map[string]any{
-		"alert_enabled": wantAlert, "enabled": wantEnabled,
-	})
 
 	// 建完立刻拨一次，避免列表长期停在「未拨测」
 	h.executeProbe(item, middleware.CurrentUser(c).Username)

@@ -187,7 +187,8 @@ func (h *Handler) CreateLdapServer(c *gin.Context) {
 		AttrNickname: req.AttrNickname, AttrEmail: req.AttrEmail, TimeoutSec: req.TimeoutSec,
 		CreatedBy: middleware.CurrentUser(c).ID,
 	}
-	// 带 default 的布尔在 Create 时会被 GORM 当零值忽略，先记下意图再回写
+	// 三个布尔都不带 gorm default（见 model 包注释），Create 会原样写进去，
+	// 所以这里只按请求组装一次，不用建完再回写
 	enabled, loginEnabled := true, true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -201,12 +202,6 @@ func (h *Handler) CreateLdapServer(c *gin.Context) {
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "保存失败")
 		return
-	}
-	if item.Enabled != enabled || item.LoginEnabled != loginEnabled || item.AutoBind != autoBind {
-		h.DB.Model(&item).Updates(map[string]any{
-			"enabled": enabled, "login_enabled": loginEnabled, "auto_bind": autoBind,
-		})
-		item.Enabled, item.LoginEnabled, item.AutoBind = enabled, loginEnabled, autoBind
 	}
 	response.OK(c, h.toLdapView(item))
 }
