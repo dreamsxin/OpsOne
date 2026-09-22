@@ -333,16 +333,12 @@ func (h *Handler) CreateAggregationPolicy(c *gin.Context) {
 		item.Enabled = *req.Enabled
 	}
 
-	// 同 Probe/Certificate：带 default 的字段在 Create 后会被回填成库默认值
-	wantSuppress, wantEnabled := item.SuppressNotify, item.Enabled
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "创建失败")
 		return
 	}
-	item.SuppressNotify, item.Enabled = wantSuppress, wantEnabled
-	h.DB.Model(&model.AggregationPolicy{}).Where("id = ?", item.ID).Updates(map[string]any{
-		"suppress_notify": wantSuppress, "enabled": wantEnabled,
-	})
+	h.recordVersion(ruleTargetAggregation, item.ID, "created", "新建", middleware.CurrentUser(c).Username)
+	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
 
@@ -363,6 +359,9 @@ func (h *Handler) UpdateAggregationPolicy(c *gin.Context) {
 		return
 	}
 
+	// 版本功能上线前就存在的策略，先把「改之前的样子」补成第一版
+	h.backfillVersion(ruleTargetAggregation, item.ID)
+
 	item.Name, item.Dimensions, item.MatchSeverity = req.Name, req.Dimensions, req.MatchSeverity
 	item.WindowMinutes, item.MinCount = req.WindowMinutes, req.MinCount
 	item.Priority, item.Remark = req.Priority, req.Remark
@@ -376,14 +375,14 @@ func (h *Handler) UpdateAggregationPolicy(c *gin.Context) {
 		response.Error(c, "更新失败")
 		return
 	}
-	// Save 对零值字段同样会被 default 影响，这两个开关显式补写
-	h.DB.Model(&model.AggregationPolicy{}).Where("id = ?", item.ID).Updates(map[string]any{
-		"suppress_notify": item.SuppressNotify, "enabled": item.Enabled,
-	})
+	h.recordVersion(ruleTargetAggregation, item.ID, "edited", "", middleware.CurrentUser(c).Username)
+	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
 
 func (h *Handler) DeleteAggregationPolicy(c *gin.Context) {
+	// 删之前留一版「删掉之前长这样」——留着它，误删才能恢复出来
+	h.recordVersionBeforeDelete(ruleTargetAggregation, idParam(c), middleware.CurrentUser(c).Username)
 	if err := h.DB.Delete(&model.AggregationPolicy{}, idParam(c)).Error; err != nil {
 		response.Error(c, "删除失败")
 		return

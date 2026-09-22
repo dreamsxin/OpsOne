@@ -5426,32 +5426,57 @@ export interface WallboardData {
   notes: string[]
 }
 
-export const listAlertRuleVersions = (params?: Record<string, any>) =>
-  request<{ versions: RuleVersion[]; limit: number; notes: string[] }>({
-    url: '/monitor/alert-rule-versions',
-    params
-  })
-export const getAlertRuleVersion = (id: number) =>
-  request<{ version: RuleVersion; fields: { key: string; label: string; value: string }[] }>({
-    url: `/monitor/alert-rule-versions/${id}`
-  })
-export const diffAlertRuleVersions = (from: number, to: number) =>
+/** 支持版本化的规则类型。后端 rule_version.go 里的注册表决定有哪些 */
+export type RuleVersionTarget = 'alert_rule' | 'detection_rule' | 'aggregation_policy'
+
+export interface RuleVersionTargetSpec {
+  target: RuleVersionTarget
+  label: string
+  fields: { key: string; label: string }[]
+  runtimeNote: string
+}
+
+export const listRuleVersionTargets = () =>
+  request<RuleVersionTargetSpec[]>({ url: '/monitor/rule-version-targets' })
+export const listRuleVersions = (target: RuleVersionTarget, params?: Record<string, any>) =>
   request<{
+    target: string
+    label: string
+    fields: { key: string; label: string }[]
+    versions: RuleVersion[]
+    limit: number
+    notes: string[]
+  }>({ url: '/monitor/rule-versions', params: { ...params, target } })
+export const getRuleVersion = (id: number) =>
+  request<{
+    version: RuleVersion
+    label: string
+    fields: { key: string; label: string; value: string }[]
+  }>({ url: `/monitor/rule-versions/${id}` })
+export const diffRuleVersions = (from: number, to: number) =>
+  request<{
+    target: string
+    label: string
     left: Record<string, any>
     right: Record<string, any>
     same: boolean
     changed: number
     items: RuleDiffItem[]
-  }>({ url: '/monitor/alert-rule-versions/diff', params: { from, to } })
-export const rollbackAlertRule = (id: number, versionId: number, note?: string) =>
+  }>({ url: '/monitor/rule-versions/diff', params: { from, to } })
+export const rollbackRule = (
+  target: RuleVersionTarget,
+  ruleId: number,
+  versionId: number,
+  note?: string
+) =>
   request<{ changed: boolean; note: string }>({
-    url: `/monitor/alert-rules/${id}/rollback`,
+    url: '/monitor/rule-versions/rollback',
     method: 'POST',
-    data: { versionId, note }
+    data: { target, ruleId, versionId, note }
   })
-export const restoreAlertRuleVersion = (id: number) =>
-  request<{ rule: AlertRule; note: string }>({
-    url: `/monitor/alert-rule-versions/${id}/restore`,
+export const restoreRuleVersion = (id: number) =>
+  request<{ target: string; id: number; name: string; rule: Record<string, any>; note: string }>({
+    url: `/monitor/rule-versions/${id}/restore`,
     method: 'POST'
   })
 

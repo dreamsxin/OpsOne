@@ -888,11 +888,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
 		// 告警规则的版本历史 / 字段级差异 / 回滚 / 误删恢复。
 		// 查看只需登录；改回去是写操作，与改规则同一个权限码
-		auth.GET("/monitor/alert-rule-versions", h.ListAlertRuleVersions)
-		auth.GET("/monitor/alert-rule-versions/:id", h.GetAlertRuleVersion)
-		auth.GET("/monitor/alert-rule-versions/diff", h.DiffAlertRuleVersions)
-		auth.POST("/monitor/alert-rules/:id/rollback", middleware.RequirePerm("alertrule:manage"), h.RollbackAlertRule)
-		auth.POST("/monitor/alert-rule-versions/:id/restore", middleware.RequirePerm("alertrule:manage"), h.RestoreAlertRuleVersion)
+		// 规则版本：告警规则 / 检测规则 / 聚合策略共用一套，target 参数区分。
+		// 不做策略审批，做的是改动留痕 + 一键回滚（理由见 rule_version.go 开头）
+		auth.GET("/monitor/rule-version-targets", h.ListRuleVersionTargets)
+		auth.GET("/monitor/rule-versions", h.ListRuleVersions)
+		auth.GET("/monitor/rule-versions/diff", h.DiffRuleVersions)
+		auth.GET("/monitor/rule-versions/:id", h.GetRuleVersion)
+		auth.POST("/monitor/rule-versions/rollback", middleware.RequirePerm("alertrule:manage"), h.RollbackRule)
+		auth.POST("/monitor/rule-versions/:id/restore", middleware.RequirePerm("alertrule:manage"), h.RestoreRuleVersion)
 
 		// 值班大屏：只聚合已有数据
 		auth.GET("/monitor/wallboard", h.Wallboard)

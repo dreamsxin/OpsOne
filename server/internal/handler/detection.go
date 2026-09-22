@@ -428,12 +428,8 @@ func (h *Handler) CreateDetectionRule(c *gin.Context) {
 		response.Error(c, "创建失败")
 		return
 	}
-	// enabled 带 gorm default，Create 后会被回填成 true，显式关掉的要写回去
-	if !wantEnabled {
-		h.DB.Model(&model.DetectionRule{}).Where("id = ?", item.ID).
-			Updates(map[string]any{"enabled": false})
-		item.Enabled = false
-	}
+	h.recordVersion(ruleTargetDetection, item.ID, "created", "新建", middleware.CurrentUser(c).Username)
+	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
 
@@ -454,6 +450,9 @@ func (h *Handler) UpdateDetectionRule(c *gin.Context) {
 	}
 	steps, _ := json.Marshal(req.Steps)
 
+	// 版本功能上线前就存在的规则，先把「改之前的样子」补成第一版
+	h.backfillVersion(ruleTargetDetection, item.ID)
+
 	updates := map[string]any{
 		"name": req.Name, "mode": req.Mode, "steps": string(steps),
 		"join_label": req.JoinLabel, "window_minutes": req.WindowMinutes,
@@ -466,6 +465,7 @@ func (h *Handler) UpdateDetectionRule(c *gin.Context) {
 		response.Error(c, "更新失败")
 		return
 	}
+	h.recordVersion(ruleTargetDetection, item.ID, "edited", "", middleware.CurrentUser(c).Username)
 	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
@@ -476,6 +476,8 @@ func (h *Handler) DeleteDetectionRule(c *gin.Context) {
 		response.NotFound(c, "规则不存在")
 		return
 	}
+	// 删之前留一版「删掉之前长这样」——留着它，误删才能恢复出来
+	h.recordVersionBeforeDelete(ruleTargetDetection, item.ID, middleware.CurrentUser(c).Username)
 	// 和告警规则一致：先把还在触发的关掉，别留下无主告警
 	h.resolveDetectionAlert(item)
 	if err := h.DB.Delete(&model.DetectionRule{}, item.ID).Error; err != nil {

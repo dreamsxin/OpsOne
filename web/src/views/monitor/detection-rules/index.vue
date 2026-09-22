@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import RuleVersionDrawer from '@/components/RuleVersionDrawer.vue'
 import {
   createDetectionRule,
   deleteDetectionRule,
@@ -218,6 +219,16 @@ onMounted(async () => {
     // 候选值拿不到只影响下拉提示，手输同样能用
   }
 })
+
+/* 版本历史：与告警规则共用一套机制与同一个抽屉组件。
+   审计日志不记请求体，改错一条规则的后果是静默的，所以留痕 + 回滚是唯一兜底 */
+const versionVisible = ref(false)
+const versionRow = ref<{ id: number; name: string } | null>(null)
+
+function openVersions(row: { id: number; name: string }) {
+  versionRow.value = row
+  versionVisible.value = true
+}
 </script>
 
 <template>
@@ -283,11 +294,12 @@ onMounted(async () => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button v-perm="'detection:manage'" link type="primary" @click="evaluate(row)">
               试跑
             </el-button>
+            <el-button link type="primary" @click="openVersions(row)">版本</el-button>
             <el-button v-perm="'detection:manage'" link type="primary" @click="openEdit(row)">
               编辑
             </el-button>
@@ -402,6 +414,13 @@ onMounted(async () => {
         <el-button type="primary" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+    <RuleVersionDrawer
+      v-model="versionVisible"
+      target="detection_rule"
+      :target-id="versionRow?.id || 0"
+      :target-name="versionRow?.name"
+      @changed="load"
+    />
   </div>
 </template>
 

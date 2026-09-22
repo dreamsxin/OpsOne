@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import RuleVersionDrawer from '@/components/RuleVersionDrawer.vue'
 import {
   createAggregationPolicy,
   createEventFromBucket,
@@ -198,6 +199,16 @@ async function remove(row: AggregationPolicy) {
 }
 
 onMounted(load)
+
+/* 版本历史：与告警规则共用一套机制与同一个抽屉组件。
+   审计日志不记请求体，改错一条规则的后果是静默的，所以留痕 + 回滚是唯一兜底 */
+const versionVisible = ref(false)
+const versionRow = ref<{ id: number; name: string } | null>(null)
+
+function openVersions(row: { id: number; name: string }) {
+  versionRow.value = row
+  versionVisible.value = true
+}
 </script>
 
 <template>
@@ -242,9 +253,10 @@ onMounted(load)
             <el-switch v-model="row.enabled" @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openPreview(row)">归桶预览</el-button>
+            <el-button link type="primary" @click="openVersions(row)">版本</el-button>
             <el-button v-perm="'aggregation:manage'" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-perm="'aggregation:manage'" link type="danger" @click="remove(row)">删除</el-button>
           </template>
@@ -365,5 +377,12 @@ onMounted(load)
         <el-table-column prop="sample" label="样例告警" min-width="180" show-overflow-tooltip />
       </el-table>
     </el-drawer>
+    <RuleVersionDrawer
+      v-model="versionVisible"
+      target="aggregation_policy"
+      :target-id="versionRow?.id || 0"
+      :target-name="versionRow?.name"
+      @changed="load"
+    />
   </div>
 </template>

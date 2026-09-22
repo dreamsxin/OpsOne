@@ -348,7 +348,7 @@ func (h *Handler) CreateAlertRule(c *gin.Context) {
 		response.Error(c, "创建失败")
 		return
 	}
-	h.recordAlertRuleVersion(item, "created", "新建", middleware.CurrentUser(c).Username)
+	h.recordVersion(ruleTargetAlert, item.ID, "created", "新建", middleware.CurrentUser(c).Username)
 	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
@@ -372,13 +372,8 @@ func (h *Handler) UpdateAlertRule(c *gin.Context) {
 
 	// 这条规则还没有任何版本（在版本功能上线之前就存在的规则）→ 先把「改之前的样子」
 	// 存成第一版。否则第一次改动之后历史里只有改完的结果，diff 不出改了什么
-	var versionCount int64
-	h.DB.Model(&model.RuleVersion{}).
-		Where("target = ? AND target_id = ?", ruleTargetAlert, item.ID).Count(&versionCount)
-	if versionCount == 0 {
-		h.recordAlertRuleVersion(item, "created", "版本功能上线前的既有配置", "system")
-		h.DB.First(&item, item.ID) // 取回被推进的 version_seq
-	}
+	h.backfillVersion(ruleTargetAlert, item.ID)
+	h.DB.First(&item, item.ID) // 取回可能被推进的 version_seq
 
 	item.Name, item.Metric, item.Comparator = req.Name, req.Metric, req.Comparator
 	item.Threshold, item.WindowMinutes = *req.Threshold, req.WindowMinutes
@@ -393,7 +388,7 @@ func (h *Handler) UpdateAlertRule(c *gin.Context) {
 		response.Error(c, "更新失败")
 		return
 	}
-	h.recordAlertRuleVersion(item, "edited", "", middleware.CurrentUser(c).Username)
+	h.recordVersion(ruleTargetAlert, item.ID, "edited", "", middleware.CurrentUser(c).Username)
 	h.DB.First(&item, item.ID)
 	response.OK(c, item)
 }
@@ -406,7 +401,7 @@ func (h *Handler) DeleteAlertRule(c *gin.Context) {
 	}
 	// 删之前留一版「删掉之前长这样」—— 留着它，误删才能恢复出来。
 	// 规则本身是硬删的（没有软删除），这一版快照是唯一的凭据
-	h.recordAlertRuleVersion(item, "deleted", "删除前的最后一版", middleware.CurrentUser(c).Username)
+	h.recordVersionBeforeDelete(ruleTargetAlert, item.ID, middleware.CurrentUser(c).Username)
 	// 规则删除后它产生的告警不跟着删，先把还在触发中的关掉，避免留下无主告警
 	h.resolveRuleAlert(item)
 	if err := h.DB.Delete(&model.AlertRule{}, item.ID).Error; err != nil {

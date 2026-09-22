@@ -26,7 +26,8 @@ func newRuleVersionTestHandler(t *testing.T) (*Handler, *gin.Engine) {
 		t.Fatalf("打开测试库失败: %v", err)
 	}
 	if err := g.AutoMigrate(
-		&model.AlertRule{}, &model.RuleVersion{}, &model.Alert{}, &model.AlertSource{},
+		&model.AlertRule{}, &model.DetectionRule{}, &model.AggregationPolicy{},
+		&model.RuleVersion{}, &model.Alert{}, &model.AlertSource{},
 		&model.User{}, &model.SysConfig{},
 	); err != nil {
 		t.Fatalf("建表失败: %v", err)
@@ -46,11 +47,18 @@ func newRuleVersionTestHandler(t *testing.T) (*Handler, *gin.Engine) {
 	engine.POST("/monitor/alert-rules", h.CreateAlertRule)
 	engine.PUT("/monitor/alert-rules/:id", h.UpdateAlertRule)
 	engine.DELETE("/monitor/alert-rules/:id", h.DeleteAlertRule)
-	engine.GET("/monitor/alert-rule-versions", h.ListAlertRuleVersions)
-	engine.GET("/monitor/alert-rule-versions/:id", h.GetAlertRuleVersion)
-	engine.GET("/monitor/alert-rule-versions/diff", h.DiffAlertRuleVersions)
-	engine.POST("/monitor/alert-rules/:id/rollback", h.RollbackAlertRule)
-	engine.POST("/monitor/alert-rule-versions/:id/restore", h.RestoreAlertRuleVersion)
+	engine.POST("/monitor/detections", h.CreateDetectionRule)
+	engine.PUT("/monitor/detections/:id", h.UpdateDetectionRule)
+	engine.DELETE("/monitor/detections/:id", h.DeleteDetectionRule)
+	engine.POST("/monitor/aggregations", h.CreateAggregationPolicy)
+	engine.PUT("/monitor/aggregations/:id", h.UpdateAggregationPolicy)
+	engine.DELETE("/monitor/aggregations/:id", h.DeleteAggregationPolicy)
+	engine.GET("/monitor/rule-version-targets", h.ListRuleVersionTargets)
+	engine.GET("/monitor/rule-versions", h.ListRuleVersions)
+	engine.GET("/monitor/rule-versions/diff", h.DiffRuleVersions)
+	engine.GET("/monitor/rule-versions/:id", h.GetRuleVersion)
+	engine.POST("/monitor/rule-versions/rollback", h.RollbackRule)
+	engine.POST("/monitor/rule-versions/:id/restore", h.RestoreRuleVersion)
 	return h, engine
 }
 
@@ -113,7 +121,7 @@ func TestRuleVersionCreateAndEdit(t *testing.T) {
 
 	// 字段级差异
 	code, resp := ruleJSON(t, engine, http.MethodGet,
-		"/monitor/alert-rule-versions/diff?from=1&to=2", "")
+		"/monitor/rule-versions/diff?from=1&to=2", "")
 	if code != http.StatusOK {
 		t.Fatalf("diff 失败 %d: %v", code, resp)
 	}
@@ -175,7 +183,7 @@ func TestRuleVersionIgnoresRuntimeFields(t *testing.T) {
 	})
 	var rule model.AlertRule
 	h.DB.First(&rule, 1)
-	if h.recordAlertRuleVersion(rule, "edited", "", "system") {
+	if h.recordVersion(ruleTargetAlert, rule.ID, "edited", "", "system") {
 		t.Fatal("只有运行态变了，不该产生新版本")
 	}
 	var count int64
@@ -230,7 +238,7 @@ func TestRuleRollback(t *testing.T) {
 	h.DB.Model(&model.AlertRule{}).Where("id = 1").Update("hit_streak", 5)
 
 	code, resp := ruleJSON(t, engine, http.MethodPost,
-		"/monitor/alert-rules/1/rollback", `{"versionId":1}`)
+		"/monitor/rule-versions/rollback", `{"target":"alert_rule","ruleId":1,"versionId":1}`)
 	if code != http.StatusOK {
 		t.Fatalf("回滚失败 %d: %v", code, resp)
 	}
@@ -263,7 +271,7 @@ func TestRuleRollback(t *testing.T) {
 
 	// 再回滚到同一版 → 无改动
 	_, resp = ruleJSON(t, engine, http.MethodPost,
-		"/monitor/alert-rules/1/rollback", `{"versionId":1}`)
+		"/monitor/rule-versions/rollback", `{"target":"alert_rule","ruleId":1,"versionId":1}`)
 	if resp["data"].(map[string]any)["changed"] != false {
 		t.Error("配置已经一样了，应当报无改动而不是再记一版")
 	}
@@ -279,13 +287,13 @@ func TestRuleRollbackRejectsForeignVersion(t *testing.T) {
 
 	// 规则 1 用规则 2 的版本回滚
 	code, resp := ruleJSON(t, engine, http.MethodPost,
-		"/monitor/alert-rules/1/rollback", `{"versionId":2}`)
+		"/monitor/rule-versions/rollback", `{"target":"alert_rule","ruleId":1,"versionId":2}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("跨规则回滚应当被拒, got %d: %v", code, resp)
 	}
 	// 跨规则 diff 也要被拒
 	code, _ = ruleJSON(t, engine, http.MethodGet,
-		"/monitor/alert-rule-versions/diff?from=1&to=2", "")
+		"/monitor/rule-versions/diff?from=1&to=2", "")
 	if code != http.StatusBadRequest {
 		t.Errorf("跨规则 diff 应当被拒, got %d", code)
 	}
@@ -313,7 +321,7 @@ func TestRuleDeleteThenRestore(t *testing.T) {
 	}
 
 	// 版本列表要标出「规则已经不在了」
-	_, resp = ruleJSON(t, engine, http.MethodGet, "/monitor/alert-rule-versions", "")
+	_, resp = ruleJSON(t, engine, http.MethodGet, "/monitor/rule-versions?target=alert_rule", "")
 	list := resp["data"].(map[string]any)["versions"].([]any)
 	if list[0].(map[string]any)["targetAlive"] != false {
 		t.Error("规则已删，targetAlive 应当是 false")
@@ -321,13 +329,13 @@ func TestRuleDeleteThenRestore(t *testing.T) {
 
 	// 恢复
 	code, resp = ruleJSON(t, engine, http.MethodPost,
-		"/monitor/alert-rule-versions/2/restore", "")
+		"/monitor/rule-versions/2/restore", "")
 	if code != http.StatusOK {
 		t.Fatalf("恢复失败 %d: %v", code, resp)
 	}
 	data := resp["data"].(map[string]any)
 	restored := data["rule"].(map[string]any)
-	if uint(restored["id"].(float64)) == 1 {
+	if uint(data["id"].(float64)) == 1 {
 		t.Error("恢复出来的应当是一条新规则（新 ID），不是原地复活")
 	}
 	// 默认停用：误删之后直接开始评估等于在没人确认的情况下恢复了一条可能不适用的策略
@@ -348,7 +356,7 @@ func TestRuleRestoreRejectsAliveRule(t *testing.T) {
 	ruleJSON(t, engine, http.MethodPost, "/monitor/alert-rules", ruleBody80)
 
 	code, resp := ruleJSON(t, engine, http.MethodPost,
-		"/monitor/alert-rule-versions/1/restore", "")
+		"/monitor/rule-versions/1/restore", "")
 	if code != http.StatusBadRequest {
 		t.Fatalf("规则还在时不该允许恢复, got %d", code)
 	}
@@ -380,15 +388,71 @@ func TestFormatRuleValueReadable(t *testing.T) {
 
 // TestSnapshotHashIsStable 同样的配置必须算出同样的 hash（否则去重会失效）。
 // 这一条守的是「不能直接 Marshal map」——map 的遍历顺序是随机的。
+// 三种目标都过一遍：字段清单是各自定义的，任何一份写错顺序都会在这里暴露。
 func TestSnapshotHashIsStable(t *testing.T) {
-	rule := model.AlertRule{
+	h, _ := newRuleVersionTestHandler(t)
+	h.DB.Create(&model.AlertRule{
 		Name: "x", Metric: "m", Comparator: "gt", Threshold: 1,
 		WindowMinutes: 5, ConsecutiveTimes: 1, Severity: "info", Enabled: true,
+	})
+	h.DB.Create(&model.DetectionRule{
+		Name: "d", Mode: "concurrent", Steps: `[{"name":"a"},{"name":"b"}]`,
+		WindowMinutes: 30, Severity: "warning", Enabled: true,
+	})
+	h.DB.Create(&model.AggregationPolicy{
+		Name: "g", Dimensions: "source,severity", WindowMinutes: 60, MinCount: 2,
+		Priority: 100, Enabled: true,
+	})
+
+	for _, spec := range ruleTargetSpecs {
+		row, ok := spec.Load(h, 1)
+		if !ok {
+			t.Fatalf("%s 读不到测试数据", spec.Target)
+		}
+		_, first := marshalSnapshot(row.Snapshot, spec.Fields)
+		for i := 0; i < 20; i++ {
+			again, hash := marshalSnapshot(row.Snapshot, spec.Fields)
+			if hash != first {
+				t.Fatalf("%s 同样的配置算出了不同的 hash: %s vs %s", spec.Target, first, hash)
+			}
+			if !strings.HasPrefix(again, `{"name":`) {
+				t.Fatalf("%s 的第一个字段应该是 name（顺序固定）: %s", spec.Target, again)
+			}
+		}
 	}
-	_, first := marshalSnapshot(alertRuleSnapshot(rule), alertRuleFields)
-	for i := 0; i < 20; i++ {
-		if _, again := marshalSnapshot(alertRuleSnapshot(rule), alertRuleFields); again != first {
-			t.Fatalf("同样的配置算出了不同的 hash: %s vs %s", first, again)
+}
+
+// TestRuleTargetSpecsAreComplete 三种目标的定义不能缺件。
+//
+// 这一条是给「以后再接第四种规则」的人看的：少写一个闭包不会编译失败，
+// 但会在运行时表现成「版本记下来了却回滚不了」这种很难查的半残状态。
+func TestRuleTargetSpecsAreComplete(t *testing.T) {
+	if len(ruleTargetSpecs) != 3 {
+		t.Fatalf("目前应该有 3 种可版本化的规则，实际 %d", len(ruleTargetSpecs))
+	}
+	for _, spec := range ruleTargetSpecs {
+		if spec.Target == "" || spec.Label == "" || len(spec.Fields) == 0 {
+			t.Fatalf("%+v 缺少基本信息", spec.Target)
+		}
+		if spec.RuntimeNote == "" {
+			t.Errorf("%s 没有说明哪些运行态不进快照", spec.Target)
+		}
+		if spec.Load == nil || spec.AliveIDs == nil || spec.BumpSeq == nil ||
+			spec.ToUpdates == nil || spec.Apply == nil || spec.Create == nil {
+			t.Fatalf("%s 缺少必需的闭包 —— 会表现成「能记版本但不能回滚 / 不能恢复」", spec.Target)
+		}
+		// 字段里必须有 name：列表、留痕、错误信息都靠它指认是哪一条
+		hasName := false
+		for _, field := range spec.Fields {
+			if field.Key == "name" {
+				hasName = true
+			}
+			if field.Label == "" {
+				t.Errorf("%s 的字段 %s 没有中文名，差异页会显示成英文键", spec.Target, field.Key)
+			}
+		}
+		if !hasName {
+			t.Errorf("%s 的字段清单里没有 name", spec.Target)
 		}
 	}
 }

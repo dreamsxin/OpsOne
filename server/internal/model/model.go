@@ -965,12 +965,14 @@ type AggregationPolicy struct {
 	// SuppressNotify 同一桶内窗口期只通知首条，其余仅入库
 	SuppressNotify bool `gorm:"default:false" json:"suppressNotify"`
 	// Priority 越小越先匹配，一条告警只会被第一条命中的策略处理
-	Priority  int       `gorm:"default:100" json:"priority"`
-	Enabled   bool      `json:"enabled"`
-	Remark    string    `gorm:"size:255" json:"remark"`
-	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Priority int `gorm:"default:100" json:"priority"`
+	// VersionSeq 已经产生过多少个配置版本，下一版 = 这个数 +1（见 RuleVersion）
+	VersionSeq int       `gorm:"default:0" json:"versionSeq"`
+	Enabled    bool      `json:"enabled"`
+	Remark     string    `gorm:"size:255" json:"remark"`
+	CreatedBy  uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // NotifyChannel 通知渠道。webhook 走 HTTP POST，email 走 SMTP，silent 只落记录不外发。
@@ -2327,6 +2329,9 @@ type DetectionRule struct {
 	LastDetail string     `gorm:"size:500" json:"lastDetail"`
 	LastEvalAt *time.Time `json:"lastEvalAt"`
 	LastFireAt *time.Time `json:"lastFireAt"`
+
+	// VersionSeq 已经产生过多少个配置版本，下一版 = 这个数 +1（见 RuleVersion）
+	VersionSeq int `gorm:"default:0" json:"versionSeq"`
 
 	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`

@@ -1528,6 +1528,80 @@ seed 数据也都显式写了 `Enabled: true`。脚本报出来的 14 个「疑�
 图表页还没加这条线）。
 
 
+## 已落地：检测规则与聚合策略也能回滚了
+
+版本机制第一版只接了告警规则，`RuleVersion` 表当时就做成了多态（`target` + `target_id`），
+这一轮把另外两种接上：**检测规则**与**聚合策略**。
+
+### 抽注册表，不复制三份
+
+没有把 `rule_version.go` 复制三份，而是抽出 `ruleTargetSpec`：每种目标只描述
+「有哪些配置字段、怎么读一行、怎么把快照写回去、回滚时哪些运行态要归零、
+恢复时怎么建新记录」，列表 / 正文 / 差异 / 回滚 / 恢复五个接口是同一份代码。
+
+```go
+type ruleTargetSpec struct {
+	Target, Label string
+	Fields        []ruleField
+	RuntimeNote   string
+	Load          func(h *Handler, id uint) (ruleSnapshotRow, bool)
+	AliveIDs      func(h *Handler) []uint
+	BumpSeq       func(h *Handler, id uint, version int)
+	ToUpdates     func(snapshot map[string]any) (map[string]any, error)
+	ResetOnRollback map[string]any
+	Apply         func(h *Handler, id uint, updates map[string]any) error
+	Create        func(h *Handler, updates map[string]any, userID uint) (uint, error)
+}
+```
+
+复制三份的代价不是行数，是**口径会漂**：比如「删除即使内容没变也要存一版」这条规则，
+改了一处忘了另两处，就会出现「有的规则删了能恢复、有的不能」，而这种不一致
+要等到真的误删了才会发现。前端同理 —— 版本抽屉抽成了
+`web/src/components/RuleVersionDrawer.vue`，三页共用一个。
+
+### 接口收敛（有破坏性变更）
+
+`/monitor/alert-rule-versions*` 与 `/monitor/alert-rules/:id/rollback` **已下线**，
+换成带 `target` 参数的一套：
+
+- `GET /monitor/rule-version-targets` —— 有哪些可版本化的规则（含字段清单与口径）
+- `GET /monitor/rule-versions?target=&targetId=&source=`
+- `GET /monitor/rule-versions/:id`、`GET /monitor/rule-versions/diff?from=&to=`
+- `POST /monitor/rule-versions/rollback`（body 带 target / ruleId / versionId）
+- `POST /monitor/rule-versions/:id/restore`
+
+取正文、比差异、恢复这三个**不需要传 target**：从版本行自己的 `target` 字段读。
+只有列表和回滚要显式传，而且**刻意不给默认值** —— 默认成告警规则的话，
+前端少传一个参数就会安静地查错一张表，返回别人的版本历史而页面上看不出异常。
+
+### 各自的口径差异
+
+- **检测规则**：没有连续命中计数，回滚不需要归零任何运行态。步骤定义是 JSON 原文，
+  恢复时会解一遍并要求至少两步 —— 步骤坏掉的检测规则每轮评估都报错，
+  这种东西不该因为「恢复」被放回库里（有测试守着）。
+- **聚合策略**：没有运行态字段，快照就是它的全部配置。布尔在差异页上说人话
+  （「抑制重复通知: 关闭 → 开启」而不是 false → true）。
+- 三种共享的仍然是：内容没变不记版本、删除必留一版、恢复出来是**新记录且默认停用**、
+  回滚本身也记一版、跨目标的版本不能互相比较或覆盖。
+
+顺带删掉了 detection / aggregation 两处「插完再 Updates 一次」的布尔补丁
+（上一轮清了 `default:true` 之后它们已经是死代码）。
+
+**验证**：新增 7 条测试（必须显式传 target、多态表按 target 隔离、检测规则完整链路、
+聚合策略布尔与数值回滚、坏快照拒绝恢复、目标清单接口、注册表完整性），
+原有 10 条改路由后全绿；`TestRuleTargetSpecsAreComplete` 是给「以后接第四种规则」的人写的 ——
+少写一个闭包不会编译失败，但会表现成「能记版本却回滚不了」这种半残状态。
+全量 `go test` / `go vet` / `gofmt` / `vue-tsc` / `vite build` 干净。真后端跑通：
+检测规则改 4 个字段 → 差异逐条说人话（`关联方式: concurrent → join`、`对齐标签: （空）→ host`）
+→ 回滚生效 → 删除留痕第 4 版 → 恢复成新 ID 且 `enabled=false`；
+聚合策略差异 `成桶阈值: 2 → 5`、`抑制重复通知: 关闭 → 开启`；
+非法 target 被拒、旧接口 404。
+
+**仍然没有的**：通知路由与静默规则的版本化（同一套机制再加两项 spec 即可，
+但那两张表的改动频率低，先不加）、版本内容的全文搜索、
+把某一版直接导出成可导入的 JSON。
+
+
 
 
 
