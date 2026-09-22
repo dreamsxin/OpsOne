@@ -2372,6 +2372,141 @@ export const operateHostService = (id: number, data: Record<string, any>) =>
 export const listHostServiceActions = (params: Record<string, any>) =>
   request<PageData<HostServiceAction>>({ url: '/host-services/actions', params })
 
+// ---------- 配置文件 ----------
+
+export interface ConfigFile {
+  id: number
+  hostId: number
+  hostName: string
+  path: string
+  name: string
+  category: string
+  owner: string
+  critical: boolean
+  reloadUnit: string
+  reloadAction: string
+  alertEnabled: boolean
+  remark: string
+  desiredVersionId: number
+  desiredVersion: number
+  desiredHash?: string
+  desiredSize?: number
+  versionSeq: number
+  actualHash: string
+  actualSize: number
+  actualMode: string
+  actualMtime: string | null
+  diffLines: number
+  drift: string
+  driftLabel: string
+  driftDetail: string
+  lastCheckAt: string | null
+  lastError: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConfigVersion {
+  id: number
+  fileId: number
+  version: number
+  source: string
+  content?: string
+  hash: string
+  size: number
+  mode: string
+  note: string
+  operator: string
+  createdAt: string
+}
+
+export interface ConfigApply {
+  id: number
+  fileId: number
+  hostId: number
+  hostName: string
+  path: string
+  action: string
+  fromVersionId: number
+  toVersionId: number
+  status: string
+  backupPath: string
+  verifyHash: string
+  reloadStatus: string
+  reloadDetail: string
+  detail: string
+  execJobId: number
+  operator: string
+  clientIp: string
+  createdAt: string
+}
+
+export interface ConfigStats {
+  total: number
+  hosts: number
+  versions: number
+  ok: number
+  drift: number
+  missing: number
+  noDesired: number
+  error: number
+  unknown: number
+  critical: number
+  criticalDrift: number
+  noReload: number
+}
+
+export interface ConfigDiff {
+  mode: string
+  left: { label: string; hash: string }
+  right: { label: string; hash: string; mode?: string; size?: number }
+  same: boolean
+  diffLines: number
+  diff: string
+  note?: string
+}
+
+export const listConfigFiles = (params: Record<string, any>) =>
+  request<PageData<ConfigFile>>({ url: '/config-files', params })
+export const getConfigStats = () => request<ConfigStats>({ url: '/config-files/stats' })
+export const getConfigFile = (id: number) =>
+  request<{ file: ConfigFile; versions: ConfigVersion[]; applies: ConfigApply[] }>({
+    url: `/config-files/${id}`
+  })
+export const getConfigVersion = (id: number) =>
+  request<ConfigVersion>({ url: `/config-versions/${id}` })
+export const createConfigFile = (data: Record<string, any>) =>
+  request<Record<string, any>>({ url: '/config-files', method: 'POST', data })
+export const updateConfigFile = (id: number, data: Record<string, any>) =>
+  request({ url: `/config-files/${id}`, method: 'PUT', data })
+export const deleteConfigFile = (id: number, force = false) =>
+  request({ url: `/config-files/${id}${force ? '?force=1' : ''}`, method: 'DELETE' })
+export const captureConfigFile = (id: number, setDesired: boolean) =>
+  request<{ version: number; versionId: number; hash: string; setDesired: boolean; drift: string }>({
+    url: `/config-files/${id}/capture${setDesired ? '?setDesired=1' : ''}`,
+    method: 'POST'
+  })
+export const editConfigVersion = (id: number, data: Record<string, any>) =>
+  request<{ version: number; versionId: number; hash: string; setDesired: boolean; note: string }>({
+    url: `/config-files/${id}/edit`,
+    method: 'POST',
+    data
+  })
+export const diffConfigFile = (id: number, params?: { from?: number; to?: number }) =>
+  request<ConfigDiff>({ url: `/config-files/${id}/diff`, params })
+export const checkConfigFiles = (hostId?: number) =>
+  request<{ total: number; drifted: number; note?: string }>({
+    url: `/config-files/check${hostId ? '?hostId=' + hostId : ''}`,
+    method: 'POST'
+  })
+export const applyConfigFile = (id: number, data: Record<string, any>) =>
+  request<Record<string, any>>({ url: `/config-files/${id}/apply`, method: 'POST', data })
+export const rollbackConfigFile = (id: number, data: Record<string, any>) =>
+  request<Record<string, any>>({ url: `/config-files/${id}/rollback`, method: 'POST', data })
+export const listConfigApplies = (params: Record<string, any>) =>
+  request<PageData<ConfigApply>>({ url: '/config-files/applies', params })
+
+
 
 
 

@@ -121,6 +121,11 @@ type Config struct {
 	// 每次巡检会对有纳管服务的主机各开一次 SSH，节奏不宜太密。
 	ServiceSpec string
 
+	// ConfigSpec 配置文件巡检的 cron 表达式。留空表示不自动巡检
+	//（仍能手动巡检，只是「配置被人改了」不会自动被发现）。
+	// 每个文件一次 SFTP 读取，节奏不宜太密。
+	ConfigSpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -226,6 +231,7 @@ func Load() (*Config, error) {
 		AwarenessSpec:      strings.TrimSpace(env("OPS_AWARENESS_SPEC", "0 9 * * *")),
 		ReviewSpec:         strings.TrimSpace(env("OPS_REVIEW_SPEC", "10 9 * * *")),
 		ServiceSpec:        strings.TrimSpace(env("OPS_SERVICE_SPEC", "*/10 * * * *")),
+		ConfigSpec:         strings.TrimSpace(env("OPS_CONFIG_SPEC", "*/30 * * * *")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

@@ -1356,6 +1356,104 @@ type EventActionItem struct {
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
+// ConfigFile 被管配置文件：登记「哪台机器的哪个路径，内容该是什么」。
+//
+// 和防火墙那套「期望态 vs 真机现读 + 收敛」是同一个思路，只是对象从规则集换成文件内容：
+//   - 期望内容是一个版本号（指向 ConfigVersion），不是自由文本，所以能回滚、能比对；
+//   - 基线不让人从零写，而是从真机抓一份下来当第一版 —— 从零写出来的基线第一次下发
+//     就会把机器打坏；
+//   - 巡检现读真机内容算 sha256 对比期望版本，不一致就是漂移；
+//   - 下发前必须先把真机现状存成一版（那就是回滚点），再备份、原子替换、回读校验。
+type ConfigFile struct {
+	ID     uint `gorm:"primaryKey" json:"id"`
+	HostID uint `gorm:"not null;uniqueIndex:idx_config_host_path" json:"hostId"`
+	// Path 绝对路径
+	Path     string `gorm:"size:255;not null;uniqueIndex:idx_config_host_path" json:"path"`
+	Name     string `gorm:"size:64" json:"name"`
+	Category string `gorm:"size:32;index" json:"category"`
+	Owner    string `gorm:"size:64;index" json:"owner"`
+	// Critical 关键配置：漂移产 critical 告警，下发/回滚要抄路径确认
+	Critical bool `gorm:"index" json:"critical"`
+	// ReloadUnit 改完要 reload 哪个服务才生效。空表示改完即生效（或需要人自己处理）。
+	// 「改了配置但没 reload」是最常见的「改了却没生效」，所以把它登记进来。
+	ReloadUnit string `gorm:"size:128" json:"reloadUnit"`
+	// ReloadAction reload | restart，默认 reload
+	ReloadAction string `gorm:"size:16;default:reload" json:"reloadAction"`
+	AlertEnabled bool   `gorm:"default:true" json:"alertEnabled"`
+	Remark       string `gorm:"size:255" json:"remark"`
+
+	// DesiredVersionID 期望内容对应的版本。0 表示还没定基线
+	DesiredVersionID uint `gorm:"index;default:0" json:"desiredVersionId"`
+	// VersionSeq 该文件已有多少版，新版本号 = VersionSeq + 1
+	VersionSeq int `gorm:"default:0" json:"versionSeq"`
+
+	// ---------- 实际态，由巡检回填 ----------
+	ActualHash  string     `gorm:"size:64" json:"actualHash"`
+	ActualSize  int64      `json:"actualSize"`
+	ActualMode  string     `gorm:"size:16" json:"actualMode"`
+	ActualMtime *time.Time `json:"actualMtime"`
+	// DiffLines 与期望内容差多少行（新增+删除），-1 表示算不出来
+	DiffLines int `gorm:"default:-1" json:"diffLines"`
+
+	// Drift ok 一致 | drift 内容不一致 | missing 文件不存在 | no-desired 还没定基线
+	//     | too-large 文件超出可管大小 | binary 不是文本 | error 读取失败 | unknown 未巡检
+	Drift       string     `gorm:"size:16;index;default:unknown" json:"drift"`
+	DriftDetail string     `gorm:"size:255" json:"driftDetail"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	LastError   string     `gorm:"size:255" json:"lastError"`
+
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ConfigVersion 一份配置内容快照。只追加不修改 —— 它是回滚的唯一依据。
+type ConfigVersion struct {
+	ID      uint `gorm:"primaryKey" json:"id"`
+	FileID  uint `gorm:"index;not null" json:"fileId"`
+	Version int  `gorm:"index" json:"version"`
+	// Source captured 从真机抓的 | edited 人在平台上编辑的 | pre-apply 下发前的真机现状
+	//      | applied 下发后回读的
+	Source string `gorm:"size:16" json:"source"`
+	// Content 原文。存原文而不是 diff：解析器会变，原文不会（与防火墙快照同一理由）
+	Content string `gorm:"type:text" json:"content"`
+	Hash    string `gorm:"size:64;index" json:"hash"`
+	Size    int64  `json:"size"`
+	Mode    string `gorm:"size:16" json:"mode"`
+	Note    string `gorm:"size:255" json:"note"`
+	// Operator 抓取/编辑的人，pre-apply 与 applied 记的是触发下发的人
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// ConfigApply 一次下发 / 回滚 / 抓取留痕。只追加不修改。
+type ConfigApply struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	FileID   uint   `gorm:"index;not null" json:"fileId"`
+	HostID   uint   `gorm:"index" json:"hostId"`
+	HostName string `gorm:"size:64" json:"hostName"`
+	Path     string `gorm:"size:255" json:"path"`
+	// Action capture 抓基线 | apply 下发期望版本 | rollback 回滚到历史版本
+	Action string `gorm:"size:16;index" json:"action"`
+	// FromVersionID 动作前真机内容对应的版本（下发/回滚时即回滚点）
+	FromVersionID uint `gorm:"default:0" json:"fromVersionId"`
+	ToVersionID   uint `gorm:"default:0" json:"toVersionId"`
+	// Status success | failed | blocked（被下发闸门或二次确认拦下）
+	Status string `gorm:"size:16;index" json:"status"`
+	// BackupPath 远端备份文件路径，出事了可以直接在机器上拷回去
+	BackupPath string `gorm:"size:255" json:"backupPath"`
+	// VerifyHash 下发后回读的 hash，与目标版本一致才算成功
+	VerifyHash string `gorm:"size:64" json:"verifyHash"`
+	// ReloadStatus 关联服务的 reload 结果：skipped | success | failed
+	ReloadStatus string `gorm:"size:16" json:"reloadStatus"`
+	ReloadDetail string `gorm:"size:255" json:"reloadDetail"`
+	Detail       string `gorm:"size:500" json:"detail"`
+	ExecJobID    uint   `gorm:"index;default:0" json:"execJobId"`
+	Operator     string `gorm:"size:64" json:"operator"`
+	ClientIP     string `gorm:"size:64" json:"clientIp"`
+	CreatedAt    time.Time `gorm:"index" json:"createdAt"`
+}
+
 // HostService 主机上的一个被纳管服务（systemd unit）。
 //
 // 平台不把机器上几百个 unit 全部落库 —— 那是噪音。这里只存「人说了算的那几个」：

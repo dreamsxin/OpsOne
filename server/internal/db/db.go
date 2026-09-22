@@ -48,6 +48,7 @@ func Migrate(g *gorm.DB) error {
 		&model.EventReview{}, &model.EventActionItem{},
 		&model.Runbook{}, &model.RunbookUse{},
 		&model.HostService{}, &model.HostServiceAction{},
+		&model.ConfigFile{}, &model.ConfigVersion{}, &model.ConfigApply{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
@@ -141,6 +142,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 122, ParentID: 100, Name: "HostService", Title: "主机服务", Path: "/asset/service", Component: "/asset/service/index", Icon: "SetUp", Sort: 8},
 		{ID: 123, ParentID: 122, Title: "纳管与维护服务", Type: "button", AuthCode: "service:manage", Sort: 1},
 		{ID: 124, ParentID: 122, Title: "启停服务", Type: "button", AuthCode: "service:control", Sort: 2},
+		{ID: 125, ParentID: 100, Name: "ConfigFile", Title: "配置文件", Path: "/asset/config-file", Component: "/asset/config-file/index", Icon: "Document", Sort: 9},
+		{ID: 126, ParentID: 125, Title: "登记与编辑配置", Type: "button", AuthCode: "configfile:manage", Sort: 1},
+		{ID: 127, ParentID: 125, Title: "下发与回滚配置", Type: "button", AuthCode: "configfile:apply", Sort: 2},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来

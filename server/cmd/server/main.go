@@ -173,6 +173,14 @@ func main() {
 	} else {
 		log.Println("[service] 服务巡检未启用（OPS_SERVICE_SPEC 为空），纳管服务只能手动巡检")
 	}
+	if cfg.ConfigSpec != "" {
+		if err := sched.AddFixed(cfg.ConfigSpec, h.CheckConfigsForSchedule); err != nil {
+			log.Fatalf("配置文件巡检 cron 表达式无效(%s): %v", cfg.ConfigSpec, err)
+		}
+		log.Printf("[config] 配置巡检已启用: %s", cfg.ConfigSpec)
+	} else {
+		log.Println("[config] 配置巡检未启用（OPS_CONFIG_SPEC 为空），配置被改了不会自动被发现")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -442,6 +450,22 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/host-services/:id", middleware.RequirePerm("service:manage"), h.DeleteHostService)
 		auth.POST("/host-services/:id/operate", middleware.RequirePerm("service:control"), h.OperateHostService)
 		auth.GET("/hosts/:id/services/discover", middleware.RequirePerm("service:manage"), h.DiscoverHostServices)
+
+		// 配置文件：登记 → 抓基线 → 巡检漂移 → 编辑 → diff → 下发（备份+原子替换+回读）→ 回滚
+		auth.GET("/config-files", h.ListConfigFiles)
+		auth.GET("/config-files/stats", h.ConfigStats)
+		auth.GET("/config-files/applies", h.ListConfigApplies)
+		auth.GET("/config-files/:id", h.GetConfigFile)
+		auth.GET("/config-files/:id/diff", h.DiffConfigFile)
+		auth.GET("/config-versions/:id", h.GetConfigVersion)
+		auth.POST("/config-files", middleware.RequirePerm("configfile:manage"), h.CreateConfigFile)
+		auth.PUT("/config-files/:id", middleware.RequirePerm("configfile:manage"), h.UpdateConfigFile)
+		auth.DELETE("/config-files/:id", middleware.RequirePerm("configfile:manage"), h.DeleteConfigFile)
+		auth.POST("/config-files/:id/capture", middleware.RequirePerm("configfile:manage"), h.CaptureConfigFile)
+		auth.POST("/config-files/:id/edit", middleware.RequirePerm("configfile:manage"), h.EditConfigVersion)
+		auth.POST("/config-files/check", middleware.RequirePerm("configfile:manage"), h.CheckConfigFiles)
+		auth.POST("/config-files/:id/apply", middleware.RequirePerm("configfile:apply"), h.ApplyConfigFile)
+		auth.POST("/config-files/:id/rollback", middleware.RequirePerm("configfile:apply"), h.RollbackConfigFile)
 
 		// 凭证库：共享登录凭据。密钥永不出接口，轮换一次即对所有引用主机生效
 		auth.GET("/credentials", h.ListCredentials)
