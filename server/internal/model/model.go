@@ -913,13 +913,103 @@ type NotifyChannel struct {
 	MentionList string `gorm:"size:255" json:"mentionList"`
 	MentionAll  bool   `gorm:"default:false" json:"mentionAll"`
 
+	// MailAccountID 用哪个发件邮箱发（仅 email 类型）。0 表示用默认发件邮箱，
+	// 一个都没登记时回落到系统配置里那套全局 SMTP
+	MailAccountID uint `gorm:"index;default:0" json:"mailAccountId"`
+
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// NotifyRoute 通知路由：按告警级别与标签匹配，命中后投递到指定渠道。
+// MailAccount 发件邮箱。
+//
+// 在这之前全平台只有一套 SMTP（系统配置里的 6 个键），所有邮件都从同一个地址发出去。
+// 一套不够用的场景很具体：告警想从 alert@ 发、值班呼叫想从 oncall@ 发，
+// 或者不同部门用各自的邮箱以便收件人做规则过滤。
+//
+// 全局那套配置**没有被废弃**：没登记任何发件邮箱时仍然走它，这样既有部署不用动。
+type MailAccount struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	Host string `gorm:"size:128;not null" json:"host"`
+	Port int    `gorm:"default:465" json:"port"`
+	// Username SMTP 认证账号，留空表示不认证（内网中继常见）
+	Username string `gorm:"size:128" json:"username"`
+	// Password 加密落库，不出接口；更新时留空表示不修改
+	Password string `gorm:"type:text" json:"-"`
+	// From 发件人地址，留空则用 Username
+	From string `gorm:"size:128" json:"from"`
+	// FromName 发件人显示名。之前的实现只能发裸地址，收件箱里看到的是一串邮箱
+	FromName string `gorm:"size:64" json:"fromName"`
+	// TLSMode ssl（465 直连 TLS）| starttls（587/25 先明文再升级）| plain（完全不加密）。
+	// 之前只有一个 smtp.tls 布尔开关，starttls 靠标准库「服务端 advertise 就升级」
+	// 的默认行为被动发生 —— 那意味着中继不 advertise 时会**静默降级成明文**，
+	// 而配置上看不出来。显式三选一之后 starttls 失败就是失败
+	TLSMode string `gorm:"size:16;default:ssl" json:"tlsMode"`
+	// SkipVerify 跳过证书校验。内网自签证书的 SMTP 之前根本连不上，
+	// 但这是一次真实的降级，界面上必须标出来
+	SkipVerify bool `gorm:"default:false" json:"skipVerify"`
+	// IsDefault 默认发件邮箱，全局最多一个。渠道没指定邮箱时用它
+	IsDefault bool `gorm:"index;default:false" json:"isDefault"`
+	// Enabled 刻意不加 gorm default:true，见 Domain.AlertEnabled 上的说明
+	Enabled bool   `json:"enabled"`
+	Remark  string `gorm:"size:255" json:"remark"`
+
+	// ---------- 试发痕迹 ----------
+
+	LastTestAt *time.Time `json:"lastTestAt"`
+	// LastTestOK 最近一次试发是否成功。三态：nil 从没试过 / true / false
+	LastTestOK  *bool  `json:"lastTestOk"`
+	LastTestErr string `gorm:"size:255" json:"lastTestErr"`
+	LastTestTo  string `gorm:"size:128" json:"lastTestTo"`
+
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// EgressProxy 出口代理。
+//
+// 登记它有两个用处，缺一个这一页就是装饰：
+//  1. **检测**：真的通过它发一次请求，把「直连通不通」和「走代理通不通」摆在一起对比 ——
+//     这是判断「是网络不通还是代理坏了」唯一靠得住的方式；
+//  2. **被用**：HTTP 拨测可以指定走某个代理。除此之外平台其它出网点
+//     （云 API、IM、Webhook、指标 / 日志 / 链路数据源）**目前都不走代理**，
+//     这一点写在页面上，不让人误以为登记了就全局生效。
+type EgressProxy struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	// Scheme http | https | socks5。三者都由标准库 http.Transport.Proxy 直接支持
+	Scheme string `gorm:"size:16;default:http" json:"scheme"`
+	Host   string `gorm:"size:128;not null" json:"host"`
+	Port   int    `gorm:"default:3128" json:"port"`
+	// Username / Password 代理认证，留空表示不认证。Password 加密落库
+	Username string `gorm:"size:64" json:"username"`
+	Password string `gorm:"type:text" json:"-"`
+	// TestURL 检测时请求的地址，留空用全局默认（配置项 proxy.test_url）
+	TestURL string `gorm:"size:255" json:"testUrl"`
+	// Enabled 刻意不加 gorm default:true
+	Enabled bool   `json:"enabled"`
+	Remark  string `gorm:"size:255" json:"remark"`
+
+	// ---------- 检测痕迹 ----------
+
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+	// LastStatus unknown | ok | fail
+	LastStatus string `gorm:"size:16;default:unknown" json:"lastStatus"`
+	LastCostMs int64  `json:"lastCostMs"`
+	LastError  string `gorm:"size:255" json:"lastError"`
+	// ExitIP 检测时对端看到的出口 IP。只有测试地址会回显 IP 时才有值，
+	// 否则显示「测试地址不回显 IP，无法判断出口」而不是留空让人猜
+	ExitIP string `gorm:"size:64" json:"exitIp"`
+
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // 按 Priority 升序取第一条命中的路由；都没命中时用 IsDefault 的兜底路由。
 type NotifyRoute struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
@@ -1645,6 +1735,10 @@ type Probe struct {
 	ExpectStatus  int    `gorm:"default:200" json:"expectStatus"` // 0 表示只要 2xx/3xx 就算通
 	ExpectKeyword string `gorm:"size:128" json:"expectKeyword"`   // 响应体必须包含，空表示不校验
 	TimeoutSec    int    `gorm:"default:10" json:"timeoutSec"`
+	// ProxyID 走哪个出口代理（仅 http 类型）。0 表示直连。
+	// 代理被停用或删除时这条拨测**直接失败并点名原因**，不静默改成直连 ——
+	// 静默直连会把「代理挂了」表现成「目标正常」
+	ProxyID uint `gorm:"index;default:0" json:"proxyId"`
 
 	AlertEnabled     bool `gorm:"default:true" json:"alertEnabled"`
 	ConsecutiveFails int  `gorm:"default:1" json:"consecutiveFails"` // 连续失败几次才告警

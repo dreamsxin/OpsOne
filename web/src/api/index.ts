@@ -194,6 +194,8 @@ export interface NotifyChannel {
   /** 群机器人 @ 名单：企业微信填 userid、钉钉填手机号；飞书只支持 @所有人 */
   mentionList: string
   mentionAll: boolean
+  /** 用哪个发件邮箱发（仅 email）。0 = 用默认发件邮箱 */
+  mailAccountId: number
   enabled: boolean
   remark: string
 }
@@ -1350,6 +1352,8 @@ export interface Probe {
   timeoutSec: number
   alertEnabled: boolean
   consecutiveFails: number
+  /** 走哪个出口代理（仅 http）。0 = 直连 */
+  proxyId: number
   failStreak: number
   lastStatus: string
   lastCode: number
@@ -4543,6 +4547,133 @@ export const checkCredential = (id: number, hostId: number) =>
     usernameMatch: boolean
     credUsername: string
   }>({ url: `/credentials/${id}/check`, method: 'POST', data: { hostId } })
+
+/* ---------------- 发件邮箱 / 出口代理 ---------------- */
+
+export interface MailAccount {
+  id: number
+  name: string
+  host: string
+  port: number
+  username: string
+  from: string
+  fromName: string
+  /** ssl | starttls | plain */
+  tlsMode: string
+  skipVerify: boolean
+  isDefault: boolean
+  enabled: boolean
+  remark: string
+  lastTestAt: string | null
+  /** null 表示从没试发过 */
+  lastTestOk: boolean | null
+  lastTestErr: string
+  lastTestTo: string
+  createdAt: string
+  updatedAt: string
+  storage: string
+  hasPassword: boolean
+  effectiveFrom: string
+  channelCount: number
+}
+
+export interface MailState {
+  total: number
+  enabled: number
+  tlsModes: { code: string; label: string; note: string }[]
+  globalHost: string
+  globalConfigured: boolean
+  /** 当前实际会用哪套配置发信 */
+  activeSender?: string
+  activeFrom?: string
+  activeSource?: string
+  activeTLSMode?: string
+  activeError?: string
+  notes: string[]
+}
+
+export const getMailState = () => request<MailState>({ url: '/notify/mail-state' })
+export const listMailAccounts = () => request<MailAccount[]>({ url: '/notify/mail-accounts' })
+export const saveMailAccount = (id: number, data: Record<string, any>) =>
+  id
+    ? request<MailAccount>({ url: `/notify/mail-accounts/${id}`, method: 'PUT', data })
+    : request<MailAccount>({ url: '/notify/mail-accounts', method: 'POST', data })
+export const deleteMailAccount = (id: number) =>
+  request<null>({ url: `/notify/mail-accounts/${id}`, method: 'DELETE' })
+export const setDefaultMailAccount = (id: number) =>
+  request<{ id: number; isDefault: boolean }>({
+    url: `/notify/mail-accounts/${id}/default`,
+    method: 'POST'
+  })
+export const testMailAccount = (id: number, to: string) =>
+  request<{ ok: boolean; detail: string; costMs: number }>({
+    url: `/notify/mail-accounts/${id}/test`,
+    method: 'POST',
+    data: { to }
+  })
+export const importGlobalSMTP = () =>
+  request<MailAccount>({ url: '/notify/mail-accounts/import-global', method: 'POST' })
+
+export interface EgressProxy {
+  id: number
+  name: string
+  scheme: string
+  host: string
+  port: number
+  username: string
+  testUrl: string
+  enabled: boolean
+  remark: string
+  lastCheckAt: string | null
+  /** unknown | ok | fail */
+  lastStatus: string
+  lastCostMs: number
+  lastError: string
+  exitIp: string
+  createdAt: string
+  updatedAt: string
+  storage: string
+  hasPassword: boolean
+  endpoint: string
+  probeCount: number
+}
+
+export interface ProxyAttempt {
+  ok: boolean
+  code: number
+  costMs: number
+  error: string
+  exitIp: string
+}
+
+export interface ProxyCheckResult {
+  target: string
+  direct: ProxyAttempt
+  viaProxy: ProxyAttempt
+  verdict: string
+  status: string
+  exitIPNote?: string
+}
+
+export const listEgressProxies = () =>
+  request<{
+    list: EgressProxy[]
+    schemes: { code: string; label: string }[]
+    testUrl: string
+    notes: string[]
+  }>({ url: '/network/proxies' })
+export const saveEgressProxy = (id: number, data: Record<string, any>) =>
+  id
+    ? request<EgressProxy>({ url: `/network/proxies/${id}`, method: 'PUT', data })
+    : request<EgressProxy>({ url: '/network/proxies', method: 'POST', data })
+export const deleteEgressProxy = (id: number) =>
+  request<null>({ url: `/network/proxies/${id}`, method: 'DELETE' })
+export const checkEgressProxy = (id: number, testUrl?: string) =>
+  request<ProxyCheckResult>({
+    url: `/network/proxies/${id}/check`,
+    method: 'POST',
+    data: { testUrl: testUrl || '' }
+  })
 
 /* ---------------- 账号密码库 / 2FA 验证码库 ---------------- */
 

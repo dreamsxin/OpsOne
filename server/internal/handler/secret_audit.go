@@ -88,6 +88,10 @@ var secretFields = []secretField{
 	// 所以加密只防「库文件被拷走」，防不了「有权限的人取明文」——后者靠取用留痕
 	{Label: "账号密码库口令", Table: "vault_accounts", Column: "secret", Note: "人工登录用的账号口令，取明文会留痕"},
 	{Label: "2FA 托管种子", Table: "vault_totps", Column: "secret", Note: "共享账号的 TOTP 种子，等同于第二因子本身"},
+
+	// 发件邮箱与出口代理这一轮加的
+	{Label: "发件邮箱口令", Table: "mail_accounts", Column: "password", Note: "SMTP 认证口令；全局那套仍在 sys_configs 里"},
+	{Label: "出口代理口令", Table: "egress_proxies", Column: "password", Note: "代理认证口令"},
 }
 
 // pendingSecretFields 仍是明文、这一轮刻意没动的字段。

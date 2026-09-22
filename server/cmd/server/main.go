@@ -659,6 +659,24 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/system/audit-logs/operators", h.AuditOperators)
 		auth.GET("/system/audit-logs/export", h.ExportAuditLogs)
 
+		// 发件邮箱：把「用哪个邮箱发」从全局单例变成可选列表，
+		// 一个都没登记时仍走系统配置里那套（既有部署不受影响）
+		auth.GET("/notify/mail-state", h.GetMailState)
+		auth.GET("/notify/mail-accounts", h.ListMailAccounts)
+		auth.POST("/notify/mail-accounts", middleware.RequirePerm("mail:manage"), h.CreateMailAccount)
+		auth.PUT("/notify/mail-accounts/:id", middleware.RequirePerm("mail:manage"), h.UpdateMailAccount)
+		auth.DELETE("/notify/mail-accounts/:id", middleware.RequirePerm("mail:manage"), h.DeleteMailAccount)
+		auth.POST("/notify/mail-accounts/:id/default", middleware.RequirePerm("mail:manage"), h.SetDefaultMailAccount)
+		auth.POST("/notify/mail-accounts/:id/test", middleware.RequirePerm("mail:manage"), h.TestMailAccount)
+		auth.POST("/notify/mail-accounts/import-global", middleware.RequirePerm("mail:manage"), h.ImportGlobalSMTP)
+
+		// 出口代理：检测是直连 + 走代理各一次的对比；目前只有 HTTP 拨测会真的走它
+		auth.GET("/network/proxies", h.ListEgressProxies)
+		auth.POST("/network/proxies", middleware.RequirePerm("proxy:manage"), h.CreateEgressProxy)
+		auth.PUT("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.UpdateEgressProxy)
+		auth.DELETE("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.DeleteEgressProxy)
+		auth.POST("/network/proxies/:id/check", middleware.RequirePerm("proxy:manage"), h.CheckEgressProxy)
+
 		auth.GET("/site-links", h.ListSiteLinks)
 		auth.POST("/site-links", middleware.RequirePerm("config:manage"), h.CreateSiteLink)
 		auth.PUT("/site-links/:id", middleware.RequirePerm("config:manage"), h.UpdateSiteLink)

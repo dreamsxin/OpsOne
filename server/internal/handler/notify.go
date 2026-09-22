@@ -257,11 +257,13 @@ type channelReq struct {
 	HeaderValue  string `json:"headerValue"`
 	Recipients   string `json:"recipients"`
 	TemplateCode string `json:"templateCode"`
-	Secret       string `json:"secret"`
-	MentionList  string `json:"mentionList"`
-	MentionAll   *bool  `json:"mentionAll"`
-	Remark       string `json:"remark"`
-	Enabled      *bool  `json:"enabled"`
+	// MailAccountID 用哪个发件邮箱发（仅 email）。0 = 用默认发件邮箱
+	MailAccountID uint   `json:"mailAccountId"`
+	Secret        string `json:"secret"`
+	MentionList   string `json:"mentionList"`
+	MentionAll    *bool  `json:"mentionAll"`
+	Remark        string `json:"remark"`
+	Enabled       *bool  `json:"enabled"`
 }
 
 // validateChannel 类型相关的必填校验。
@@ -316,7 +318,8 @@ func (h *Handler) CreateNotifyChannel(c *gin.Context) {
 		Name: req.Name, Type: channelType, URL: req.URL,
 		HeaderKey: req.HeaderKey, HeaderValue: h.sealSecret(req.HeaderValue),
 		Recipients: req.Recipients, TemplateCode: req.TemplateCode,
-		Secret: h.sealSecret(req.Secret), MentionList: req.MentionList,
+		MailAccountID: req.MailAccountID,
+		Secret:        h.sealSecret(req.Secret), MentionList: req.MentionList,
 		Remark: req.Remark, Enabled: true,
 	}
 	if req.MentionAll != nil {
@@ -353,6 +356,7 @@ func (h *Handler) UpdateNotifyChannel(c *gin.Context) {
 	channel.Name, channel.Type = req.Name, channelType
 	channel.URL, channel.HeaderKey, channel.Remark = req.URL, req.HeaderKey, req.Remark
 	channel.Recipients, channel.TemplateCode = req.Recipients, req.TemplateCode
+	channel.MailAccountID = req.MailAccountID
 	channel.MentionList = req.MentionList
 	if req.HeaderValue != "" {
 		channel.HeaderValue = h.sealSecret(req.HeaderValue) // 留空表示不修改

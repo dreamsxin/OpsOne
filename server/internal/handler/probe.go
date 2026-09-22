@@ -39,7 +39,10 @@ type probeResult struct {
 // runProbeOnce 执行一次拨测。判定标准：
 //   - tcp：能在超时内建立连接即为通
 //   - http：能拿到响应 + 状态码符合期望 + 响应体包含关键字（若配置）
-func runProbeOnce(probe model.Probe) probeResult {
+//
+// client 为 nil 时用直连。传进来而不是在函数里构造，是为了让「走代理」
+// 这件事只在一个地方实现（proxy.go 的 proxyClient）。
+func runProbeOnce(probe model.Probe, client *http.Client) probeResult {
 	timeout := time.Duration(probe.TimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -47,6 +50,8 @@ func runProbeOnce(probe model.Probe) probeResult {
 	start := time.Now()
 
 	if probe.Type == "tcp" {
+		// tcp 拨测不走代理：HTTP 代理只能代理 HTTP(S)，
+		// 拿 CONNECT 去测一个任意端口通不通，测到的是代理的策略而不是目标
 		conn, err := net.DialTimeout("tcp", probe.Target, timeout)
 		cost := time.Since(start).Milliseconds()
 		if err != nil {
@@ -66,7 +71,9 @@ func runProbeOnce(probe model.Probe) probeResult {
 	}
 	req.Header.Set("User-Agent", "OpsOne-Probe/1.0")
 
-	client := &http.Client{Timeout: timeout}
+	if client == nil {
+		client = &http.Client{Timeout: timeout}
+	}
 	resp, err := client.Do(req)
 	cost := time.Since(start).Milliseconds()
 	if err != nil {
@@ -99,10 +106,33 @@ func runProbeOnce(probe model.Probe) probeResult {
 	return result
 }
 
+// runProbeWithProxy 按拨测上登记的代理跑一次。
+//
+// 代理不可用（被删 / 被停用 / 口令解不开）时这次拨测**直接失败并点名原因**，
+// 不退回直连：退回直连会让「代理挂了」表现成「目标一切正常」。
+func (h *Handler) runProbeWithProxy(probe model.Probe) probeResult {
+	if probe.ProxyID == 0 || probe.Type == "tcp" {
+		return runProbeOnce(probe, nil)
+	}
+	proxy, err := h.proxyForProbe(probe.ProxyID)
+	if err != nil {
+		return probeResult{Status: "down", ErrorMsg: truncate(err.Error(), 240)}
+	}
+	timeout := time.Duration(probe.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client, err := h.proxyClient(*proxy, timeout)
+	if err != nil {
+		return probeResult{Status: "down", ErrorMsg: truncate(err.Error(), 240)}
+	}
+	return runProbeOnce(probe, client)
+}
+
 // executeProbe 拨测一次并落库：更新拨测状态、写入历史记录、处理告警。
 // 返回本次结果与更新后的连续失败次数。
 func (h *Handler) executeProbe(probe model.Probe, operator string) (probeResult, int) {
-	result := runProbeOnce(probe)
+	result := h.runProbeWithProxy(probe)
 	now := time.Now()
 
 	streak := 0
@@ -181,6 +211,7 @@ type probeReq struct {
 	TimeoutSec       int    `json:"timeoutSec"`
 	AlertEnabled     *bool  `json:"alertEnabled"`
 	ConsecutiveFails int    `json:"consecutiveFails"`
+	ProxyID          uint   `json:"proxyId"`
 	Enabled          *bool  `json:"enabled"`
 	Remark           string `json:"remark"`
 }
@@ -229,6 +260,11 @@ func (req *probeReq) normalize() error {
 	if req.ExpectStatus != nil && (*req.ExpectStatus < 0 || *req.ExpectStatus > 599) {
 		return fmt.Errorf("期望状态码需在 0-599 之间，0 表示只要不是 4xx/5xx 就算通")
 	}
+	// TCP 拨测不接代理：HTTP 代理只能代理 HTTP(S)，用 CONNECT 去测任意端口
+	// 测到的是代理的放行策略而不是目标的可用性
+	if req.Type == "tcp" {
+		req.ProxyID = 0
+	}
 	return nil
 }
 
@@ -259,9 +295,15 @@ func (h *Handler) CreateProbe(c *gin.Context) {
 	item := model.Probe{
 		Name: req.Name, Type: req.Type, Target: req.Target, Method: req.Method,
 		ExpectStatus: 200, ExpectKeyword: req.ExpectKeyword, TimeoutSec: req.TimeoutSec,
-		AlertEnabled: true, ConsecutiveFails: req.ConsecutiveFails,
+		AlertEnabled: true, ConsecutiveFails: req.ConsecutiveFails, ProxyID: req.ProxyID,
 		LastStatus: "unknown", Enabled: true, Remark: req.Remark,
 		CreatedBy: middleware.CurrentUser(c).ID,
+	}
+	if req.ProxyID != 0 {
+		if _, err := h.proxyForProbe(req.ProxyID); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 	if req.Type == "tcp" {
 		item.ExpectStatus = 0
@@ -314,6 +356,13 @@ func (h *Handler) UpdateProbe(c *gin.Context) {
 	item.Name, item.Type, item.Target, item.Method = req.Name, req.Type, req.Target, req.Method
 	item.ExpectKeyword, item.TimeoutSec = req.ExpectKeyword, req.TimeoutSec
 	item.ConsecutiveFails, item.Remark = req.ConsecutiveFails, req.Remark
+	if req.ProxyID != 0 && req.ProxyID != item.ProxyID {
+		if _, err := h.proxyForProbe(req.ProxyID); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+	item.ProxyID = req.ProxyID
 	if req.ExpectStatus != nil {
 		item.ExpectStatus = *req.ExpectStatus
 	}

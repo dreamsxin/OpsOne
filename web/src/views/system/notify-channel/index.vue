@@ -5,16 +5,19 @@ import {
   createNotifyChannel,
   deleteNotifyChannel,
   listEmailTemplates,
+  listMailAccounts,
   listNotifyChannels,
   testNotifyChannel,
   updateNotifyChannel,
   type EmailTemplate,
+  type MailAccount,
   type NotifyChannel
 } from '@/api'
 
 const loading = ref(false)
 const rows = ref<NotifyChannel[]>([])
 const templates = ref<EmailTemplate[]>([])
+const mailAccounts = ref<MailAccount[]>([])
 
 type ChannelType = 'webhook' | 'email' | 'silent' | 'wecom' | 'dingtalk' | 'feishu'
 const imTypes: ChannelType[] = ['wecom', 'dingtalk', 'feishu']
@@ -45,6 +48,7 @@ const form = reactive({
   headerValue: '',
   recipients: '',
   templateCode: '',
+  mailAccountId: 0,
   secret: '',
   mentionList: '',
   mentionAll: false,
@@ -76,6 +80,7 @@ function openCreate() {
     headerValue: '',
     recipients: '',
     templateCode: '',
+    mailAccountId: 0,
     secret: '',
     mentionList: '',
     mentionAll: false,
@@ -95,6 +100,7 @@ function openEdit(row: NotifyChannel) {
     headerValue: '',
     recipients: row.recipients,
     templateCode: row.templateCode,
+    mailAccountId: row.mailAccountId || 0,
     secret: '',
     mentionList: row.mentionList || '',
     mentionAll: row.mentionAll || false,
@@ -145,6 +151,7 @@ async function toggleEnabled(row: NotifyChannel) {
     headerKey: row.headerKey,
     recipients: row.recipients,
     templateCode: row.templateCode,
+    mailAccountId: row.mailAccountId || 0,
     mentionList: row.mentionList,
     mentionAll: row.mentionAll,
     remark: row.remark,
@@ -172,6 +179,7 @@ async function remove(row: NotifyChannel) {
 
 onMounted(async () => {
   templates.value = await listEmailTemplates()
+  mailAccounts.value = await listMailAccounts()
   load()
 })
 
@@ -306,6 +314,20 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item v-if="form.type === 'email'" label="收件人">
           <el-input v-model="form.recipients" placeholder="逗号分隔，如 ops@example.com,sre@example.com" />
+        </el-form-item>
+        <el-form-item v-if="form.type === 'email'" label="发件邮箱">
+          <el-select v-model="form.mailAccountId" style="width: 100%">
+            <el-option :value="0" label="用默认发件邮箱（没登记则用系统配置里的全局 SMTP）" />
+            <el-option
+              v-for="acc in mailAccounts.filter((a) => a.enabled)"
+              :key="acc.id"
+              :value="acc.id"
+              :label="`${acc.name}（${acc.effectiveFrom}）${acc.isDefault ? ' · 默认' : ''}`"
+            />
+          </el-select>
+          <el-text type="info" size="small" style="display: block; margin-top: 4px">
+            在「配置中心 → 发件邮箱」登记。指定的邮箱被删或停用时，这个渠道的邮件会直接失败并点名原因，不会静默换发件人
+          </el-text>
         </el-form-item>
         <el-form-item v-if="form.type === 'email'" label="邮件模板">
           <el-select v-model="form.templateCode" clearable style="width: 100%" placeholder="默认使用内置告警模板">

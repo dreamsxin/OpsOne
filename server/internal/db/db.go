@@ -41,6 +41,7 @@ func Migrate(g *gorm.DB) error {
 		&model.SecuritySuggestionDismissal{},
 		&model.RuleVersion{}, &model.NotifyTemplate{},
 		&model.VaultAccount{}, &model.VaultTOTP{}, &model.VaultAccess{},
+		&model.MailAccount{}, &model.EgressProxy{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -371,6 +372,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 705, ParentID: 702, Title: "维护接入源", Type: "button", AuthCode: "source:manage", Sort: 1},
 		{ID: 703, ParentID: 700, Name: "SiteNavigation", Title: "站点导航", Path: "/config/site-navigation", Component: "/config/site-navigation/index", Icon: "Compass", Sort: 3},
 		{ID: 704, ParentID: 700, Name: "EmailTemplate", Title: "邮件模板", Path: "/config/email-templates", Component: "/config/email-templates/index", Icon: "Message", Sort: 4},
+		{ID: 707, ParentID: 700, Name: "MailAccount", Title: "发件邮箱", Path: "/config/mail-accounts", Component: "/config/mail-accounts/index", Icon: "Promotion", Sort: 5},
+		{ID: 708, ParentID: 707, Title: "维护发件邮箱", Type: "button", AuthCode: "mail:manage", Sort: 1},
+		{ID: 709, ParentID: 700, Name: "EgressProxy", Title: "代理检测", Path: "/config/proxies", Component: "/config/proxies/index", Icon: "Switch", Sort: 6},
+		{ID: 710, ParentID: 709, Title: "维护与检测代理", Type: "button", AuthCode: "proxy:manage", Sort: 1},
 
 		// ---------- 系统管理 ----------
 		{ID: 800, Name: "System", Title: "系统管理", Path: "/system", Icon: "Setting", Sort: 90},
@@ -770,6 +775,8 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "配了 OPS_SECRET_KEY 时加密落库；配置接口不回传取值，留空表示不修改", Builtin: true},
 		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
+		{Group: "proxy", Key: "proxy.test_url", Value: "", Type: "string", Label: "代理检测地址",
+			Remark: "检测出口代理时请求的地址。默认留空——内网不一定有可用的回显服务，平台不替你决定这台机器可以访问公网。填一个会回显来源 IP 的地址才能看出出口 IP", Builtin: true},
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
 		{Group: "retention", Key: "retention.exec_job_days", Value: "90", Type: "int", Label: "执行记录保留天数", Remark: "批量执行/脚本/定时任务的作业与逐台结果；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.probe_record_days", Value: "7", Type: "int", Label: "拨测记录保留天数", Remark: "拨测频率高、增长快，建议保持较短；0 表示永久保留", Builtin: true},

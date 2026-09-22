@@ -4,16 +4,19 @@ import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   createProbe,
   deleteProbe,
+  listEgressProxies,
   listProbeRecords,
   listProbes,
   runProbe,
   updateProbe,
+  type EgressProxy,
   type Probe,
   type ProbeRecord
 } from '@/api'
 
 const loading = ref(false)
 const rows = ref<Probe[]>([])
+const proxies = ref<EgressProxy[]>([])
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -27,6 +30,7 @@ const form = reactive({
   expectKeyword: '',
   timeoutSec: 10,
   consecutiveFails: 1,
+  proxyId: 0,
   alertEnabled: true,
   enabled: true,
   remark: ''
@@ -72,6 +76,7 @@ function openCreate() {
     expectKeyword: '',
     timeoutSec: 10,
     consecutiveFails: 1,
+    proxyId: 0,
     alertEnabled: true,
     enabled: true,
     remark: ''
@@ -90,6 +95,7 @@ function openEdit(row: Probe) {
     expectKeyword: row.expectKeyword,
     timeoutSec: row.timeoutSec,
     consecutiveFails: row.consecutiveFails,
+    proxyId: row.proxyId || 0,
     alertEnabled: row.alertEnabled,
     enabled: row.enabled,
     remark: row.remark
@@ -102,6 +108,8 @@ function onTypeChange() {
   if (form.type === 'tcp') {
     form.expectStatus = 0
     form.expectKeyword = ''
+    // HTTP 代理只能代理 HTTP(S)，TCP 拨测走代理测到的是代理的放行策略
+    form.proxyId = 0
   } else if (form.expectStatus === 0) {
     form.expectStatus = 200
   }
@@ -142,6 +150,7 @@ async function toggleEnabled(row: Probe) {
     expectKeyword: row.expectKeyword,
     timeoutSec: row.timeoutSec,
     consecutiveFails: row.consecutiveFails,
+    proxyId: row.proxyId || 0,
     alertEnabled: row.alertEnabled,
     enabled: row.enabled,
     remark: row.remark
@@ -166,7 +175,10 @@ async function openRecords(row: Probe) {
   recordsVisible.value = true
 }
 
-onMounted(load)
+onMounted(async () => {
+  proxies.value = (await listEgressProxies()).list
+  load()
+})
 </script>
 
 <template>
@@ -274,6 +286,20 @@ onMounted(load)
           </el-form-item>
           <el-form-item label="响应体关键字">
             <el-input v-model="form.expectKeyword" placeholder="留空表示不校验内容" />
+          </el-form-item>
+          <el-form-item label="出口代理">
+            <el-select v-model="form.proxyId" style="width: 100%">
+              <el-option :value="0" label="直连（不走代理）" />
+              <el-option
+                v-for="p in proxies.filter((x) => x.enabled)"
+                :key="p.id"
+                :value="p.id"
+                :label="`${p.name}（${p.endpoint}）`"
+              />
+            </el-select>
+            <span style="color: #6b7280">
+              在「配置中心 → 代理检测」登记。代理被停用或删除时这条拨测会直接失败并点名原因，不会静默改成直连
+            </span>
           </el-form-item>
         </template>
         <el-form-item label="超时">

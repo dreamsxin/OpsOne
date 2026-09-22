@@ -2,9 +2,7 @@ package handler
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
-	"net/smtp"
 	"strings"
 	"text/template"
 	"time"
@@ -195,20 +193,13 @@ func renderTemplate(subject, body string, vars map[string]string) (string, strin
 // ---------- 邮件发送 ----------
 
 // sendMail 按渠道配置发信。返回错误说明供通知流水记录。
+//
+// 发件账号的解析、TLS 与报文组装都在 mail_account.go：这里只管
+// 「谁收、用哪个模板、渲染成什么」。
 func (h *Handler) sendMail(channel model.NotifyChannel, vars map[string]string) error {
-	host := h.configString(CfgSMTPHost, "")
-	if host == "" {
-		return fmt.Errorf("SMTP 服务器未配置，请在系统配置里填写")
-	}
-	port := h.configInt(CfgSMTPPort, 465)
-	username := h.configString(CfgSMTPUser, "")
-	password, err := h.configSecret(CfgSMTPPass)
+	sender, err := h.resolveMailSender(channel)
 	if err != nil {
 		return err
-	}
-	from := h.configString(CfgSMTPFrom, username)
-	if from == "" {
-		return fmt.Errorf("发件人地址未配置")
 	}
 
 	recipients := splitRecipients(channel.Recipients)
@@ -225,18 +216,11 @@ func (h *Handler) sendMail(channel model.NotifyChannel, vars map[string]string) 
 		return fmt.Errorf("模板渲染失败: %w", err)
 	}
 
-	msg := buildMessage(from, recipients, subject, body)
-	addr := fmt.Sprintf("%s:%d", host, port)
-
-	var auth smtp.Auth
-	if username != "" {
-		auth = smtp.PlainAuth("", username, password, host)
+	if err := deliverMail(sender, recipients, subject, body); err != nil {
+		// 点名是哪套配置：「发信失败」不带这个信息基本没法查
+		return fmt.Errorf("%s 发信失败: %w", sender.label(), err)
 	}
-
-	if h.configString(CfgSMTPTLS, "true") == "true" {
-		return sendMailTLS(addr, host, auth, from, recipients, msg)
-	}
-	return smtp.SendMail(addr, auth, from, recipients, msg)
+	return nil
 }
 
 // resolveTemplate 取指定编码的模板，未指定时回落到内置告警模板
@@ -252,61 +236,6 @@ func (h *Handler) resolveTemplate(code string) (*model.EmailTemplate, error) {
 		return nil, fmt.Errorf("内置邮件模板缺失")
 	}
 	return &tpl, nil
-}
-
-// sendMailTLS 465 端口这类直接 TLS 的场景，需要先建 TLS 连接再交给 smtp
-func sendMailTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
-	if err != nil {
-		return fmt.Errorf("TLS 连接失败: %w", err)
-	}
-	defer conn.Close()
-
-	client, err := smtp.NewClient(conn, host)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	if auth != nil {
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("SMTP 认证失败: %w", err)
-		}
-	}
-	if err := client.Mail(from); err != nil {
-		return err
-	}
-	for _, rcpt := range to {
-		if err := client.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("收件人 %s 被拒绝: %w", rcpt, err)
-		}
-	}
-
-	writer, err := client.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := writer.Write(msg); err != nil {
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	return client.Quit()
-}
-
-func buildMessage(from string, to []string, subject, body string) []byte {
-	var sb strings.Builder
-	sb.WriteString("From: " + from + "\r\n")
-	sb.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
-	// 主题可能含中文，按 RFC 2047 用 UTF-8 base64 编码更稳妥，这里交给邮件库处理不便，
-	// 直接声明字符集并保持原文，主流客户端可正常解析
-	sb.WriteString("Subject: " + subject + "\r\n")
-	sb.WriteString("MIME-Version: 1.0\r\n")
-	sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-	sb.WriteString("\r\n")
-	sb.WriteString(body)
-	return []byte(sb.String())
 }
 
 func splitRecipients(raw string) []string {
