@@ -68,6 +68,8 @@ func main() {
 	h := handler.New(gormDB, cfg)
 	// 库里有密文但进程没密钥时提前喊一声，别等到有人点「连接主机」才发现
 	h.WarnSealedWithoutKey()
+	// 内置剧本是 db 层种的，那里拿不到命令规则预检；进程起来补一次
+	h.PrecheckPendingRunbooks()
 	// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
 	h.ResetForwards()
 	// 同理：上一轮没来得及收尾的会话不该一直显示「进行中」
@@ -899,6 +901,19 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/action-items/:id", middleware.RequirePerm("review:manage"), h.UpdateActionItem)
 		auth.POST("/monitor/action-items/:id/done", middleware.RequirePerm("review:manage"), h.FinishActionItem)
 		auth.DELETE("/monitor/action-items/:id", middleware.RequirePerm("review:manage"), h.DeleteActionItem)
+
+		// 处置剧本：按告警/事件推荐、使用留痕、从复盘沉淀草稿
+		auth.GET("/monitor/runbooks", h.ListRunbooks)
+		auth.GET("/monitor/runbooks/stats", h.RunbookStats)
+		auth.GET("/monitor/runbooks/match", h.MatchRunbooks)
+		auth.GET("/monitor/runbooks/:id", h.GetRunbook)
+		auth.POST("/monitor/runbooks", middleware.RequirePerm("runbook:manage"), h.CreateRunbook)
+		auth.PUT("/monitor/runbooks/:id", middleware.RequirePerm("runbook:manage"), h.UpdateRunbook)
+		auth.DELETE("/monitor/runbooks/:id", middleware.RequirePerm("runbook:manage"), h.DeleteRunbook)
+		auth.POST("/monitor/runbooks/recheck", middleware.RequirePerm("runbook:manage"), h.RecheckRunbooks)
+		auth.POST("/monitor/runbooks/:id/use", middleware.RequirePerm("runbook:manage"), h.UseRunbook)
+		auth.GET("/monitor/runbook-uses", h.ListRunbookUses)
+		auth.POST("/monitor/runbooks/draft-from-review", middleware.RequirePerm("runbook:manage"), h.DraftRunbookFromReview)
 
 		auth.GET("/exec/scripts", h.ListScripts)
 		auth.GET("/exec/scripts/categories", h.ListScriptCategories)

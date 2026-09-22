@@ -2137,6 +2137,121 @@ export const finishActionItem = (id: number, note?: string) =>
 export const deleteActionItem = (id: number) =>
   request({ url: `/monitor/action-items/${id}`, method: 'DELETE' })
 
+// ---------- 处置剧本 ----------
+
+export interface RunbookStep {
+  title: string
+  detail: string
+  command: string
+}
+
+export interface Runbook {
+  id: number
+  name: string
+  category: string
+  summary: string
+  matchLabels: Record<string, string>
+  matchKeywords: string
+  matchSeverity: string
+  steps: RunbookStep[]
+  stepCount: number
+  commandSteps: number
+  precheck: string
+  rollback: string
+  riskLevel: string
+  enabled: boolean
+  precheckStatus: string
+  precheckHits: string
+  precheckedAt: string | null
+  version: number
+  useCount: number
+  solveCount: number
+  lastUsedAt: string | null
+  lastUsedBy: string
+  creatorName: string
+  createdAt: string
+  updatedAt: string
+  /** 没有任何匹配条件，只作兜底推荐 */
+  generic: boolean
+}
+
+export interface RunbookUse {
+  id: number
+  runbookId: number
+  runbookName: string
+  version: number
+  eventId: number
+  alertId: number
+  outcome: string
+  outcomeLabel: string
+  doneSteps: number[]
+  note: string
+  operator: string
+  createdAt: string
+}
+
+export interface RunbookMatch {
+  runbook: Runbook
+  score: number
+  reasons: string[]
+}
+
+export interface RunbookMatchResult {
+  target: string
+  input: { labels: Record<string, string>; title: string; severity: string }
+  matches: RunbookMatch[]
+  note: string
+}
+
+export interface RunbookStats {
+  total: number
+  enabled: number
+  blocked: number
+  warn: number
+  generic: number
+  neverUsed: number
+  uses: number
+  solved: number
+}
+
+export const listRunbooks = (params: Record<string, any>) =>
+  request<PageData<Runbook>>({ url: '/monitor/runbooks', params })
+export const getRunbookStats = () => request<RunbookStats>({ url: '/monitor/runbooks/stats' })
+export const getRunbook = (id: number) =>
+  request<{ runbook: Runbook; uses: RunbookUse[] }>({ url: `/monitor/runbooks/${id}` })
+export const createRunbook = (data: Record<string, any>) =>
+  request<{ runbook: Runbook; precheckHits: ExecPrecheckHit[] }>({
+    url: '/monitor/runbooks',
+    method: 'POST',
+    data
+  })
+export const updateRunbook = (id: number, data: Record<string, any>) =>
+  request<{ runbook: Runbook; precheckHits: ExecPrecheckHit[] }>({
+    url: `/monitor/runbooks/${id}`,
+    method: 'PUT',
+    data
+  })
+export const deleteRunbook = (id: number) =>
+  request({ url: `/monitor/runbooks/${id}`, method: 'DELETE' })
+export const recheckRunbooks = () =>
+  request<{ total: number; changed: number; disabled: string[]; note: string }>({
+    url: '/monitor/runbooks/recheck',
+    method: 'POST'
+  })
+export const matchRunbooks = (params: { eventId?: number; alertId?: number }) =>
+  request<RunbookMatchResult>({ url: '/monitor/runbooks/match', params })
+export const useRunbook = (id: number, data: Record<string, any>) =>
+  request<{ id: number }>({ url: `/monitor/runbooks/${id}/use`, method: 'POST', data })
+export const listRunbookUses = (params: Record<string, any>) =>
+  request<PageData<RunbookUse>>({ url: '/monitor/runbook-uses', params })
+export const draftRunbookFromReview = (eventId: number, name?: string) =>
+  request<{ draft: Record<string, any>; note: string }>({
+    url: '/monitor/runbooks/draft-from-review',
+    method: 'POST',
+    data: { eventId, name }
+  })
+
+
 
 // ---------- 数据留存 ----------
 

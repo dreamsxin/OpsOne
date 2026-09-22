@@ -1356,6 +1356,71 @@ type EventActionItem struct {
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
+// Runbook 处置剧本：把「这类告警来了该怎么办」写成可被推荐、可被执行、可被复盘的东西。
+//
+// 剧本不是 wiki 文档：
+//   - 有匹配条件，告警/事件详情里会按条件自动推荐并给出匹配理由；
+//   - 步骤里的命令会过命令规则静态预检，命中拦截规则的剧本不允许启用；
+//   - 每次使用都记一条结果（解决了 / 部分有效 / 没用），用得多但从不解决问题的剧本能被看见。
+type Runbook struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Name     string `gorm:"size:128;not null" json:"name"`
+	Category string `gorm:"size:32;index" json:"category"`
+	// Summary 什么情况下用这本剧本
+	Summary string `gorm:"size:500" json:"summary"`
+
+	// ---------- 匹配条件。三项都为空表示通用剧本，兜底推荐且排在最后 ----------
+	// MatchLabels 告警标签匹配条件，JSON 对象；要求全部命中，值为 * 表示只要求键存在
+	MatchLabels string `gorm:"type:text" json:"matchLabels"`
+	// MatchKeywords 标题关键词，逗号分隔，命中任意一个即算
+	MatchKeywords string `gorm:"size:255" json:"matchKeywords"`
+	// MatchSeverity 告警级别，空表示不限
+	MatchSeverity string `gorm:"size:16" json:"matchSeverity"`
+
+	// Steps 处置步骤，JSON 数组：[{"title":"","detail":"","command":""}]
+	Steps string `gorm:"type:text" json:"steps"`
+	// Precheck 动手之前要先确认什么
+	Precheck string `gorm:"type:text" json:"precheck"`
+	// Rollback 做错了怎么退回来
+	Rollback  string `gorm:"type:text" json:"rollback"`
+	RiskLevel string `gorm:"size:8;default:low" json:"riskLevel"` // low | medium | high
+	Enabled   bool   `gorm:"default:true" json:"enabled"`
+
+	// 以下由命令规则预检回填，与脚本库同一套规则
+	PrecheckStatus string     `gorm:"size:16;default:unknown" json:"precheckStatus"` // unknown | pass | warn | blocked
+	PrecheckHits   string     `gorm:"type:text" json:"precheckHits"`                 // JSON 数组
+	PrecheckedAt   *time.Time `json:"precheckedAt"`
+
+	// Version 内容每改一次 +1，使用记录会记下当时用的是第几版
+	Version     int        `gorm:"default:1" json:"version"`
+	UseCount    int        `json:"useCount"`
+	SolveCount  int        `json:"solveCount"` // 其中被判定「解决了」的次数
+	LastUsedAt  *time.Time `json:"lastUsedAt"`
+	LastUsedBy  string     `gorm:"size:64" json:"lastUsedBy"`
+	CreatorName string     `gorm:"size:64" json:"creatorName"`
+	CreatedBy   uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// RunbookUse 一次剧本使用记录。只追加不修改，是「这次故障按哪本剧本处置的」的凭据。
+type RunbookUse struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	RunbookID   uint   `gorm:"index;not null" json:"runbookId"`
+	RunbookName string `gorm:"size:128" json:"runbookName"`
+	// Version 使用时剧本的版本号，剧本后来被改了也能对上当时看到的内容
+	Version int `gorm:"default:1" json:"version"`
+	EventID uint `gorm:"index;default:0" json:"eventId"`
+	AlertID uint `gorm:"index;default:0" json:"alertId"`
+	// Outcome resolved 解决了 | partial 部分有效 | invalid 没用
+	Outcome string `gorm:"size:16;index" json:"outcome"`
+	// DoneSteps 做了哪几步，JSON 数组存步骤下标
+	DoneSteps string    `gorm:"type:text" json:"doneSteps"`
+	Note      string    `gorm:"size:500" json:"note"`
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // Script 脚本库条目：把散落在各人手里的运维命令收拢成可复用、可审阅的资产。
 //
 // 脚本内容在保存时会用「命令规则」跑一遍静态预检，命中拦截规则的脚本不允许下发。

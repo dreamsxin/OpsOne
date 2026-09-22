@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onActivated, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   listExecJobs,
@@ -23,6 +24,26 @@ const precheck = ref<ExecPrecheckResult | null>(null)
 
 const form = reactive({ name: '', command: '', hostIds: [] as number[], timeout: 60 })
 const jobQuery = reactive({ page: 1, pageSize: 10 })
+
+const route = useRoute()
+// 剧本的「去执行这一步」会带 ?command=&name=&hosts= 跳进来。本页会被页签缓存，
+// 再次带着新命令进来不会重新挂载，所以 activate 时也认一次。
+// 只预填不自动执行：预检与生产确认仍然要人点。
+let appliedCommand = ''
+function applyRouteQuery() {
+  const command = String(route.query.command ?? '')
+  if (!command || command === appliedCommand) return
+  appliedCommand = command
+  form.command = command
+  form.name = String(route.query.name ?? '') || form.name
+  const hosts = String(route.query.hosts ?? '')
+    .split(',')
+    .map((x) => Number(x))
+    .filter((x) => x > 0)
+  if (hosts.length) form.hostIds = hosts
+  precheck.value = null
+  ElMessage.info('命令已预填，确认主机后再执行')
+}
 
 async function loadHosts() {
   const data = await listHosts({ page: 1, pageSize: 200 })
@@ -109,8 +130,12 @@ const statusType: Record<string, 'success' | 'danger' | 'warning'> = {
 }
 
 onMounted(() => {
+  applyRouteQuery()
   loadHosts()
   loadJobs()
+})
+onActivated(() => {
+  applyRouteQuery()
 })
 </script>
 

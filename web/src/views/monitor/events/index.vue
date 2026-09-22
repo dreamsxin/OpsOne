@@ -12,11 +12,15 @@ import {
   listAlerts,
   listEvents,
   listUsers,
+  matchRunbooks,
   updateEventStatus,
+  useRunbook,
   type Alert,
   type EventDetail,
   type EventStats,
   type OpsEvent,
+  type RunbookMatch,
+  type RunbookMatchResult,
   type User
 } from '@/api'
 import { useUserStore } from '@/stores/user'
@@ -63,7 +67,8 @@ const actionText: Record<string, string> = {
   assign: '指派',
   note: '处置记录',
   status: '状态变更',
-  review: '复盘'
+  review: '复盘',
+  runbook: '剧本处置'
 }
 
 // 允许的状态流转，和后端保持一致；前端只用来控制按钮显示
@@ -150,6 +155,66 @@ async function openDetail(row: OpsEvent) {
   noteContent.value = ''
   assignTo.value = detail.value.event.assignee
   detailVisible.value = true
+  loadRunbooks(row.id)
+}
+
+// ---------- 推荐剧本 ----------
+const runbookResult = ref<RunbookMatchResult | null>(null)
+const runbookLoading = ref(false)
+
+async function loadRunbooks(eventId: number) {
+  runbookLoading.value = true
+  runbookResult.value = null
+  try {
+    runbookResult.value = await matchRunbooks({ eventId })
+  } finally {
+    runbookLoading.value = false
+  }
+}
+
+/** 事件关联主机里已纳管的那些，用来给「去执行」预选目标 */
+const contextHostIds = computed<number[]>(() =>
+  (detail.value?.context.hosts || []).map((h) => h.id).filter((id): id is number => !!id)
+)
+
+/** 把某一步的命令带到批量执行页预填。只预填不执行：预检与生产确认还是要人点 */
+function runStep(command: string, bookName: string) {
+  router.push({
+    path: '/execute/batch',
+    query: {
+      command,
+      name: `剧本「${bookName}」`,
+      hosts: contextHostIds.value.join(',')
+    }
+  })
+}
+
+const useDialog = ref(false)
+const usingBook = ref<RunbookMatch | null>(null)
+const useForm = reactive({ outcome: 'resolved', doneSteps: [] as number[], note: '' })
+
+function openUseDialog(match: RunbookMatch) {
+  usingBook.value = match
+  Object.assign(useForm, {
+    outcome: 'resolved',
+    doneSteps: match.runbook.steps.map((_, idx) => idx),
+    note: ''
+  })
+  useDialog.value = true
+}
+
+async function submitUse() {
+  if (!usingBook.value || !detail.value) return
+  await useRunbook(usingBook.value.runbook.id, {
+    eventId: detail.value.event.id,
+    outcome: useForm.outcome,
+    doneSteps: useForm.doneSteps,
+    note: useForm.note
+  })
+  ElMessage.success('已记录，处置时间线里能看到')
+  useDialog.value = false
+  refreshDetail()
+  loadRunbooks(detail.value.event.id)
 }
 
 async function refreshDetail() {
@@ -440,6 +505,109 @@ onMounted(async () => {
             </el-table>
           </el-tab-pane>
 
+          <el-tab-pane :label="`推荐剧本 (${runbookResult?.matches.length ?? 0})`">
+            <div v-loading="runbookLoading">
+              <el-alert
+                v-if="runbookResult"
+                type="info"
+                :closable="false"
+                style="margin-bottom: 12px"
+                :title="`按 ${runbookResult.target} 的标签与标题匹配。${runbookResult.note}`"
+              />
+              <div v-if="runbookResult" style="margin-bottom: 12px; font-size: 12px; color: #6b7280">
+                参与匹配的标签：
+                <el-tag
+                  v-for="(v, k) in runbookResult.input.labels"
+                  :key="k"
+                  size="small"
+                  style="margin-right: 4px"
+                >
+                  {{ k }}={{ v }}
+                </el-tag>
+                <span v-if="!Object.keys(runbookResult.input.labels).length">（关联告警没有标签）</span>
+              </div>
+
+              <el-empty
+                v-if="runbookResult && !runbookResult.matches.length"
+                description="没有匹配的剧本。可以去「处置剧本」建一本，或从这次的复盘沉淀一本"
+                :image-size="70"
+              />
+
+              <el-card
+                v-for="match in runbookResult?.matches || []"
+                :key="match.runbook.id"
+                shadow="never"
+                style="margin-bottom: 12px"
+              >
+                <template #header>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                    <span style="font-weight: 500">{{ match.runbook.name }}</span>
+                    <el-tag size="small">匹配分 {{ match.score }}</el-tag>
+                    <el-tag v-if="match.runbook.generic" size="small" type="info">通用兜底</el-tag>
+                    <el-tag
+                      v-if="match.runbook.useCount >= 3 && match.runbook.solveCount === 0"
+                      size="small"
+                      type="danger"
+                    >
+                      用过 {{ match.runbook.useCount }} 次从未解决问题
+                    </el-tag>
+                    <el-tag v-else-if="match.runbook.useCount" size="small" type="success">
+                      用过 {{ match.runbook.useCount }} 次 · 解决 {{ match.runbook.solveCount }}
+                    </el-tag>
+                    <div style="flex: 1"></div>
+                    <el-button v-perm="'runbook:manage'" size="small" @click="openUseDialog(match)">
+                      记录使用
+                    </el-button>
+                  </div>
+                </template>
+
+                <div style="margin-bottom: 8px; font-size: 12px; color: #6b7280">
+                  为什么推荐它：{{ match.reasons.join('；') }}
+                </div>
+                <div v-if="match.runbook.summary" style="margin-bottom: 8px">{{ match.runbook.summary }}</div>
+                <el-alert
+                  v-if="match.runbook.precheck"
+                  type="warning"
+                  :closable="false"
+                  style="margin-bottom: 8px"
+                  :title="`动手前：${match.runbook.precheck}`"
+                />
+
+                <div
+                  v-for="(step, idx) in match.runbook.steps"
+                  :key="idx"
+                  style="padding: 6px 0; border-top: 1px solid #f3f4f6"
+                >
+                  <div style="display: flex; align-items: center; gap: 8px">
+                    <el-tag size="small">{{ idx + 1 }}</el-tag>
+                    <span style="flex: 1">{{ step.title }}</span>
+                    <el-button
+                      v-if="step.command"
+                      link
+                      type="primary"
+                      size="small"
+                      @click="runStep(step.command, match.runbook.name)"
+                    >
+                      去执行这一步
+                    </el-button>
+                  </div>
+                  <div v-if="step.command" style="margin: 4px 0 0 32px">
+                    <code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 12px">
+                      {{ step.command }}
+                    </code>
+                  </div>
+                  <div v-if="step.detail" style="margin: 2px 0 0 32px; color: #6b7280; font-size: 12px">
+                    {{ step.detail }}
+                  </div>
+                </div>
+
+                <div v-if="match.runbook.rollback" style="margin-top: 8px; color: #b45309; font-size: 12px">
+                  回退办法：{{ match.runbook.rollback }}
+                </div>
+              </el-card>
+            </div>
+          </el-tab-pane>
+
           <el-tab-pane label="诊断上下文">
             <el-alert
               type="info"
@@ -498,5 +666,41 @@ onMounted(async () => {
         </el-tabs>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="useDialog" :title="`记录剧本使用 · ${usingBook?.runbook.name ?? ''}`" width="560px">
+      <el-form label-width="90px">
+        <el-form-item label="处置结果">
+          <el-radio-group v-model="useForm.outcome">
+            <el-radio value="resolved">解决了</el-radio>
+            <el-radio value="partial">部分有效</el-radio>
+            <el-radio value="invalid">没用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="做了哪几步">
+          <el-checkbox-group v-model="useForm.doneSteps">
+            <el-checkbox
+              v-for="(step, idx) in usingBook?.runbook.steps || []"
+              :key="idx"
+              :value="idx"
+              style="display: block"
+            >
+              {{ idx + 1 }}. {{ step.title }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="useForm.note"
+            type="textarea"
+            :rows="3"
+            placeholder="哪一步有效 / 哪一步不对；「没用」的话写清为什么，剧本才能改"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="useDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitUse">记录</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>

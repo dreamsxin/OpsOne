@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   archiveEventReview,
   createActionItem,
   deleteActionItem,
+  draftRunbookFromReview,
   exportEventReview,
   finishActionItem,
   getEventEvidence,
@@ -30,6 +31,7 @@ import FilterChips, { type ChipItem } from '@/components/FilterChips.vue'
 import Pagination from '@/components/Pagination.vue'
 
 const route = useRoute()
+const router = useRouter()
 const store = useUserStore()
 
 const tab = ref<'reviews' | 'items'>('reviews')
@@ -285,6 +287,20 @@ async function loadEvidence() {
 
 function onPaneChange(name: string | number) {
   if (name === 'evidence') loadEvidence()
+}
+
+/** 把这次复盘的内容整理成剧本草稿，带到「处置剧本」页去建 */
+async function draftRunbook() {
+  if (!detail.value) return
+  const res = await draftRunbookFromReview(detail.value.event.id)
+  await ElMessageBox.alert(
+    `${res.note}\n\n将带着以下草稿跳到「处置剧本」页：\n名称：${res.draft.name}\n步骤：${(res.draft.steps as any[]).length} 条`,
+    '沉淀成剧本',
+    { confirmButtonText: '去创建' }
+  )
+  // 草稿通过 sessionStorage 传递：URL 放不下多行步骤
+  sessionStorage.setItem('runbookDraft', JSON.stringify(res.draft))
+  router.push({ path: '/monitor/runbooks', query: { draft: '1' } })
 }
 
 // ---------- 改进项编辑 ----------
@@ -570,6 +586,7 @@ onMounted(async () => {
           <span style="color: #6b7280">事件状态：{{ detail.event.statusLabel }}</span>
           <div style="flex: 1"></div>
           <el-button v-if="detail.review" @click="exportMarkdown">导出 Markdown</el-button>
+          <el-button v-if="detail.review" v-perm="'runbook:manage'" @click="draftRunbook">沉淀成剧本</el-button>
           <template v-if="!archived">
             <el-button v-perm="'review:manage'" @click="submitReview('draft')">存草稿</el-button>
             <el-button v-perm="'review:manage'" type="primary" @click="submitReview('reviewing')">保存并转评审</el-button>

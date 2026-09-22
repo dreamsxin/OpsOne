@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"time"
@@ -45,6 +46,7 @@ func Migrate(g *gorm.DB) error {
 		&model.ExecGuardLog{},
 		&model.Event{}, &model.EventLog{},
 		&model.EventReview{}, &model.EventActionItem{},
+		&model.Runbook{}, &model.RunbookUse{},
 		&model.Script{},
 		&model.Topology{}, &model.TopologyNode{}, &model.TopologyEdge{},
 		&model.DetectionRule{},
@@ -209,6 +211,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 434, ParentID: 417, Title: "维护静默窗口", Type: "button", AuthCode: "silence:manage", Sort: 1},
 		{ID: 418, ParentID: 400, Name: "EventReview", Title: "事件复盘", Path: "/monitor/reviews", Component: "/monitor/reviews/index", Icon: "Notebook", Sort: 18},
 		{ID: 435, ParentID: 418, Title: "维护复盘与改进项", Type: "button", AuthCode: "review:manage", Sort: 1},
+		{ID: 419, ParentID: 400, Name: "Runbook", Title: "处置剧本", Path: "/monitor/runbooks", Component: "/monitor/runbooks/index", Icon: "Reading", Sort: 19},
+		{ID: 436, ParentID: 419, Title: "维护剧本与记录使用", Type: "button", AuthCode: "runbook:manage", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},
@@ -357,10 +361,128 @@ func Seed(g *gorm.DB, adminPwd string) error {
 	if err := seedAwarenessDemo(g); err != nil {
 		return err
 	}
+	if err := seedRunbooks(g); err != nil {
+		return err
+	}
 	if err := seedEmailTemplates(g); err != nil {
 		return err
 	}
 	return seedSysConfigs(g)
+}
+
+// seedRunbooks 内置处置剧本。
+//
+// 只写那些平台自己一定会产的告警（内置指标、拨测、证书巡检），并且步骤里的命令
+// 一律是只读排查命令 —— 内置剧本不替人做决定，止血动作留给人按当时情况填。
+// 按 ID 存在即跳过，管理员改过的内容不会被启动覆盖。
+func seedRunbooks(g *gorm.DB) error {
+	type stepDef struct {
+		Title   string `json:"title"`
+		Detail  string `json:"detail"`
+		Command string `json:"command"`
+	}
+	pack := func(items []stepDef) string {
+		raw, _ := json.Marshal(items)
+		return string(raw)
+	}
+	labels := func(kv map[string]string) string {
+		raw, _ := json.Marshal(kv)
+		return string(raw)
+	}
+
+	books := []model.Runbook{
+		{
+			ID: 1, Name: "磁盘使用率高", Category: "主机", RiskLevel: "medium", Enabled: true, Version: 1,
+			Summary:       "根分区或数据盘快满。先找出谁占的空间，再决定清理还是扩容 —— 不要直接 rm 大文件，先确认没有进程正在写它。",
+			MatchLabels:   labels(map[string]string{"metric": "disk"}),
+			MatchKeywords: "磁盘,disk,使用率",
+			Precheck:      "确认这台机器的角色（数据库 / 日志节点 / 无状态应用），数据库节点的清理要和 DBA 一起做。",
+			Rollback:      "清理是不可逆的。删之前先把要删的清单落到处置记录里；日志类文件优先用 truncate 而不是 rm，避免进程句柄还占着空间。",
+			Steps: pack([]stepDef{
+				{Title: "看各挂载点的使用率，确认是哪个分区", Command: "df -hT"},
+				{Title: "找出占空间最多的前 20 个目录", Detail: "从告警里的挂载点开始往下找", Command: "du -xh --max-depth=2 / 2>/dev/null | sort -rh | head -n 20"},
+				{Title: "确认有没有已删除但句柄未释放的文件", Detail: "这种情况 du 看不到、df 却满着", Command: "lsof +L1 2>/dev/null | head -n 20"},
+				{Title: "检查日志目录与轮转配置", Command: "ls -lhS /var/log | head -n 20"},
+				{Title: "决定处置方式并记录", Detail: "清理 / truncate / 扩容 / 调整轮转。动手前把清单写进事件处置记录。"},
+			}),
+		},
+		{
+			ID: 2, Name: "CPU 或负载持续偏高", Category: "主机", RiskLevel: "low", Enabled: true, Version: 1,
+			Summary:       "先分清是「真忙」还是「等 IO」，再定位到进程。负载数字本身不说明问题，要看是谁在占。",
+			MatchLabels:   labels(map[string]string{"metric": "cpu"}),
+			MatchKeywords: "CPU,负载,load",
+			Precheck:      "先看这是不是预期内的高峰（发布、批处理、压测）。是的话记录下来直接关掉告警，不要为了让曲线好看去杀进程。",
+			Rollback:      "只要不杀进程，这本剧本的步骤都是只读的。",
+			Steps: pack([]stepDef{
+				{Title: "看整体负载与运行/阻塞队列", Command: "uptime"},
+				{Title: "区分用户态、系统态与 iowait", Detail: "iowait 高说明瓶颈在磁盘或网络存储，不是 CPU", Command: "vmstat 1 5"},
+				{Title: "按 CPU 占用排出前 15 个进程", Command: "ps -eo pid,ppid,pcpu,pmem,etime,cmd --sort=-pcpu | head -n 16"},
+				{Title: "确认是不是有大量处于 D 状态的进程", Command: "ps -eo stat,pid,cmd | awk '$1 ~ /D/' | head -n 20"},
+				{Title: "对照监控里的主机指标曲线，判断是突发还是持续"},
+				{Title: "决定处置方式并记录", Detail: "限流 / 扩容 / 回滚发布 / 联系业务。动手前先在事件里写清判断依据。"},
+			}),
+		},
+		{
+			ID: 3, Name: "拨测失败：服务不可达", Category: "服务", RiskLevel: "low", Enabled: true, Version: 1,
+			Summary:       "拨测红了先分清是「服务挂了」还是「路上不通」。平台自己就是一个拨测点，从别的位置再测一次能省很多时间。",
+			MatchLabels:   labels(map[string]string{"module": "probe"}),
+			MatchKeywords: "拨测,probe,不可达,超时",
+			Precheck:      "先看这个目标的其他拨测点、以及同机器上其他服务是否也在报警 —— 一起红通常是网络或机器问题，单个红通常是服务问题。",
+			Rollback:      "全是只读检查，没有需要回滚的动作。",
+			Steps: pack([]stepDef{
+				{Title: "在平台里手动重跑一次这条拨测", Detail: "监控告警 → 拨测探测 → 执行，确认是持续失败还是抖动"},
+				{Title: "从目标机器本地访问一次", Detail: "本地通、远端不通 = 网络或防火墙；本地也不通 = 服务本身", Command: "curl -sS -o /dev/null -w '%{http_code} %{time_total}s\\n' http://127.0.0.1"},
+				{Title: "确认端口在听", Command: "ss -lntp | head -n 30"},
+				{Title: "看服务进程与最近的错误日志", Command: "systemctl status --no-pager"},
+				{Title: "检查平台的暴露面记录，确认端口是否被改过", Detail: "监控告警 → 公网监测，对比基线端口"},
+			}),
+		},
+		{
+			ID: 4, Name: "证书即将到期", Category: "安全", RiskLevel: "medium", Enabled: true, Version: 1,
+			Summary:       "证书到期是少数能提前几十天知道、却经常真的过期的故障。这本剧本的重点是把「谁负责换、换完谁验证」定下来。",
+			MatchKeywords: "证书,cert,到期,过期",
+			Precheck:      "先确认这张证书是谁签发、谁在续（自动续签的只要确认续签任务是否正常，不要重复申请）。平台不签发也不托管私钥。",
+			Rollback:      "换证前备份旧证书与私钥；新证书生效后如果握手失败，把旧文件换回去并 reload（不是 restart）。",
+			Steps: pack([]stepDef{
+				{Title: "确认对端当前实际在用的证书与剩余天数", Detail: "以真实握手为准，不要只看文件", Command: "echo | openssl s_client -servername example.com -connect example.com:443 2>/dev/null | openssl x509 -noout -subject -dates -issuer"},
+				{Title: "在平台里跑一次证书巡检，确认告警不是陈旧数据", Detail: "安全合规 → 证书管理 → 执行巡检"},
+				{Title: "确认所有使用这张证书的位置", Detail: "网关、Nginx、K8s Ingress Secret、CDN 回源都可能各存一份"},
+				{Title: "申请/续签并替换，reload 服务", Detail: "reload 而不是 restart，避免断连"},
+				{Title: "替换后再跑一次巡检确认状态恢复", Detail: "状态没回到 valid 就说明还有一处没换到"},
+			}),
+		},
+		{
+			ID: 5, Name: "告警在响但没人收到通知", Category: "平台", RiskLevel: "low", Enabled: true, Version: 1,
+			Summary:       "「告警明明触发了却没人知道」是最危险的一类问题。平台把通知链路上每个可能吞掉消息的环节都留了痕，按顺序查即可。",
+			MatchKeywords: "未收到,通知,没人,静默",
+			Precheck:      "先确认告警确实进了平台（告警列表里能看到），否则问题在上游而不是通知链路。",
+			Rollback:      "只读排查。若需要临时结束静默，操作会留痕。",
+			Steps: pack([]stepDef{
+				{Title: "看这条告警的通知记录", Detail: "告警列表 → 详情，没有记录说明根本没发出；有记录但 failed 看错误信息"},
+				{Title: "检查是否被静默或维护窗口挡住", Detail: "告警上的「静默来源」字段会写明是哪一条"},
+				{Title: "检查是否被聚合策略抑制", Detail: "告警上的「被抑制」字段会写明策略名"},
+				{Title: "用选路预演确认它应该走哪条路由", Detail: "监控告警 → 通知路由 → 选路预演"},
+				{Title: "试发一次渠道，确认渠道本身可用", Detail: "系统管理 → 通知渠道 → 试发"},
+				{Title: "检查值班表与升级链", Detail: "监控告警 → 值班升级，确认当班人算得出来、叫人记录有没有产生"},
+			}),
+		},
+	}
+
+	for _, book := range books {
+		var exist model.Runbook
+		if err := g.Where("id = ?", book.ID).First(&exist).Error; err == nil {
+			continue
+		}
+		if err := g.Create(&book).Error; err != nil {
+			return err
+		}
+		// 带 default 的布尔列 Create 后会被回填成库默认值，显式写回
+		if err := g.Model(&model.Runbook{}).Where("id = ?", book.ID).
+			Update("enabled", book.Enabled).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedEmailTemplates 内置告警邮件模板，只在编码不存在时写入
