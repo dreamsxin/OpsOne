@@ -4830,6 +4830,133 @@ export const importCloudDomains = () =>
     method: 'POST'
   })
 
+/* ---------------- 主机日志（SSH 直读，不依赖 Loki） ---------------- */
+
+export interface HostLogTarget {
+  id: number
+  name: string
+  hostId: number
+  hostName: string
+  path: string
+  keywords: string
+  ignoreKeywords: string
+  maxBytes: number
+  alertEnabled: boolean
+  lastOffset: number
+  lastInode: string
+  lastSize: number
+  lastStatus: 'unknown' | 'ok' | 'hit' | 'missing' | 'denied' | 'failed'
+  lastHitCount: number
+  lastSample: string
+  lastRotated: boolean
+  lastCostMs: number
+  lastError: string
+  lastScanAt: string | null
+  totalScans: number
+  deptId: number
+  enabled: boolean
+  remark: string
+}
+
+export interface HostLogScan {
+  id: number
+  targetId: number
+  hostId: number
+  status: string
+  hitCount: number
+  newBytes: number
+  fileSize: number
+  rotated: boolean
+  sample: string
+  costMs: number
+  errorMsg: string
+  operator: string
+  createdAt: string
+}
+
+export interface HostLogTopEntry {
+  path: string
+  sizeKb: number
+}
+
+export interface HostLogUsageRow {
+  id: number
+  hostId: number
+  hostName: string
+  dir: string
+  totalKb: number
+  topIsDir: boolean
+  status: string
+  errorMsg: string
+  costMs: number
+  createdAt: string
+  top: HostLogTopEntry[]
+}
+
+export interface HostLogMeta {
+  pathPrefixes: string[]
+  usageDir: string
+  viewMaxBytes: number
+  viewMaxLines: number
+  scanMaxBytes: number
+  note: string
+}
+
+export interface HostLogViewResult {
+  hostId: number
+  hostName: string
+  path: string
+  mode: 'tail' | 'grep'
+  lines: number
+  rows: string[]
+  fileSize: number
+  truncated: boolean
+  costMs: number
+  precheck: string
+  precheckHits: { pattern: string; action: string; description: string }[]
+  note: string
+}
+
+export interface HostLogScanSummary {
+  checked: number
+  ok: number
+  hit: number
+  hitLines: number
+  missing: number
+  denied: number
+  failed: number
+}
+
+export const hostLogMeta = () => request<HostLogMeta>({ url: '/monitor/host-logs/meta' })
+export const viewHostLog = (data: {
+  hostId: number
+  path: string
+  lines?: number
+  keyword?: string
+  ignoreCase?: boolean
+}) => request<HostLogViewResult>({ url: '/monitor/host-logs/view', method: 'POST', data })
+export const listHostLogTargets = (params?: Record<string, any>) =>
+  request<PageData<HostLogTarget>>({ url: '/monitor/host-log-targets', params })
+export const createHostLogTarget = (data: Record<string, any>) =>
+  request<HostLogTarget>({ url: '/monitor/host-log-targets', method: 'POST', data })
+export const updateHostLogTarget = (id: number, data: Record<string, any>) =>
+  request<HostLogTarget>({ url: `/monitor/host-log-targets/${id}`, method: 'PUT', data })
+export const deleteHostLogTarget = (id: number) =>
+  request({ url: `/monitor/host-log-targets/${id}`, method: 'DELETE' })
+export const scanHostLogTarget = (id: number) =>
+  request<HostLogTarget>({ url: `/monitor/host-log-targets/${id}/scan`, method: 'POST' })
+export const scanAllHostLogTargets = () =>
+  request<HostLogScanSummary>({ url: '/monitor/host-log-targets/scan-all', method: 'POST' })
+export const listHostLogScans = (params?: Record<string, any>) =>
+  request<PageData<HostLogScan>>({ url: '/monitor/host-log-scans', params })
+export const listLogUsage = () =>
+  request<{ dir: string; rows: HostLogUsageRow[]; note: string }>({ url: '/monitor/log-usage' })
+export const collectLogUsage = () =>
+  request<{ dir: string; ok: number; failed: number }>({
+    url: '/monitor/log-usage/collect',
+    method: 'POST'
+  })
+
 
 
 

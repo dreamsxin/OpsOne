@@ -155,6 +155,19 @@ type Config struct {
 	// 内网视角，跟外部用户看到的不是一回事。想核对「外面看到的解析」就指一个公共 DNS。
 	DNSServer string
 
+	// HostLogSpec 主机日志巡检（关键字扫描 + 日志目录占用采集）的 cron 表达式。
+	// 留空表示不做定时巡检，只能在界面上手动触发 —— 那样日志里新冒出来的 ERROR
+	// 和「日志目录快把盘写满了」都只能靠人想起来去点一下。
+	// 每个监控点一次 SSH，节奏不宜太密。
+	HostLogSpec string
+
+	// LogPathPrefixes 允许读取的日志目录前缀，逗号分隔，默认 `/var/log`。
+	//
+	// 这是「主机日志」模块唯一真正的安全边界：路径由人在界面上填，
+	// 没有这道白名单，有这个页面权限的人就能读主机上任意文件 ——
+	// 包括 /etc/shadow 与主机私钥。放开新目录时想清楚这一点。
+	LogPathPrefixes string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -266,6 +279,8 @@ func Load() (*Config, error) {
 		CloudSyncSpec:      strings.TrimSpace(env("OPS_CLOUD_SYNC_SPEC", "")),
 		DomainSpec:         strings.TrimSpace(env("OPS_DOMAIN_SPEC", "0 8 * * *")),
 		DNSServer:          strings.TrimSpace(env("OPS_DNS_SERVER", "")),
+		HostLogSpec:        strings.TrimSpace(env("OPS_HOST_LOG_SPEC", "*/15 * * * *")),
+		LogPathPrefixes:    strings.TrimSpace(env("OPS_LOG_PATH_PREFIXES", "/var/log")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

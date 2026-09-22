@@ -37,6 +37,7 @@ func Migrate(g *gorm.DB) error {
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
 		&model.CloudAccount{}, &model.CloudResource{}, &model.CloudSyncRun{},
 		&model.Domain{},
+		&model.HostLogTarget{}, &model.HostLogScan{}, &model.HostLogUsage{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -278,6 +279,11 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 431, ParentID: 408, Title: "维护数据源与常用查询", Type: "button", AuthCode: "metric:manage", Sort: 1},
 		{ID: 409, ParentID: 400, Name: "LogQuery", Title: "日志查询", Path: "/monitor/logs", Component: "/monitor/logs/index", Icon: "Document", Sort: 9},
 		{ID: 432, ParentID: 409, Title: "维护日志数据源", Type: "button", AuthCode: "log:manage", Sort: 1},
+		// 主机日志排在「日志查询」（Loki 代理）后面：两者是两条独立的路，
+		// 没部署 Loki 的环境里只有这一条能看到日志。Sort 取末尾，不动已有条目
+		{ID: 442, ParentID: 400, Name: "HostLog", Title: "主机日志", Path: "/monitor/host-logs", Component: "/monitor/host-logs/index", Icon: "Tickets", Sort: 20},
+		{ID: 443, ParentID: 442, Title: "查看日志内容", Type: "button", AuthCode: "hostlog:view", Sort: 1},
+		{ID: 444, ParentID: 442, Title: "维护监控点与巡检", Type: "button", AuthCode: "hostlog:manage", Sort: 2},
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: "/monitor/traces/index", Icon: "Share", Sort: 10},
 		{ID: 433, ParentID: 410, Title: "维护链路数据源", Type: "button", AuthCode: "trace:manage", Sort: 1},
 		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: "/monitor/probe/index", Icon: "Position", Sort: 11},

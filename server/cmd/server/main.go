@@ -218,6 +218,15 @@ func main() {
 	} else {
 		log.Println("[domain] 域名巡检未启用（OPS_DOMAIN_SPEC 为空），解析漂移与注册到期只能手动巡检")
 	}
+	if cfg.HostLogSpec != "" {
+		if err := sched.AddFixed(cfg.HostLogSpec, h.ScanHostLogsForSchedule); err != nil {
+			log.Fatalf("主机日志巡检 cron 表达式无效(%s): %v", cfg.HostLogSpec, err)
+		}
+		log.Printf("[hostlog] 主机日志巡检已启用: %s（允许读取的目录: %s）",
+			cfg.HostLogSpec, cfg.LogPathPrefixes)
+	} else {
+		log.Println("[hostlog] 主机日志巡检未启用（OPS_HOST_LOG_SPEC 为空），日志里新冒出来的错误与日志目录占用只能手动巡检")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -953,6 +962,19 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/monitor/traces/services", h.ListTraceServices)
 		auth.GET("/monitor/traces/search", h.SearchTraces)
 		auth.GET("/monitor/traces/detail/:traceId", h.GetTrace)
+
+		// 主机日志：不依赖 Loki，直接 SSH 读主机上的文件。全部是只读命令。
+		auth.GET("/monitor/host-logs/meta", h.HostLogMeta)
+		auth.POST("/monitor/host-logs/view", middleware.RequirePerm("hostlog:view"), h.ViewHostLog)
+		auth.GET("/monitor/host-log-targets", h.ListHostLogTargets)
+		auth.POST("/monitor/host-log-targets", middleware.RequirePerm("hostlog:manage"), h.CreateHostLogTarget)
+		auth.PUT("/monitor/host-log-targets/:id", middleware.RequirePerm("hostlog:manage"), h.UpdateHostLogTarget)
+		auth.DELETE("/monitor/host-log-targets/:id", middleware.RequirePerm("hostlog:manage"), h.DeleteHostLogTarget)
+		auth.POST("/monitor/host-log-targets/:id/scan", middleware.RequirePerm("hostlog:manage"), h.ScanHostLogTarget)
+		auth.POST("/monitor/host-log-targets/scan-all", middleware.RequirePerm("hostlog:manage"), h.ScanAllHostLogTargets)
+		auth.GET("/monitor/host-log-scans", h.ListHostLogScans)
+		auth.GET("/monitor/log-usage", h.ListLogUsage)
+		auth.POST("/monitor/log-usage/collect", middleware.RequirePerm("hostlog:manage"), h.CollectLogUsage)
 
 		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
 		auth.GET("/monitor/aggregation/overlaps", h.DetectAggregationOverlaps)

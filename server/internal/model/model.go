@@ -1172,6 +1172,113 @@ type Domain struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// HostLogTarget 登记「哪台主机上的哪个日志文件要盯着」。
+//
+// 与 LogSource（Loki）的分工：LogSource 是查询入口，平台不存日志；
+// 这张表走的是另一条路 —— **直接 SSH 读主机上的日志文件**，不依赖任何日志系统。
+// 没有部署 Loki 的环境里，这是唯一能看到日志的路径。
+//
+// 平台**不复制日志内容**：只存「命中了几条」与命中的第一行样本（截断）。
+// 把日志搬进平台的库既贵又没人查，而且会让日志的保留策略变成两处维护。
+type HostLogTarget struct {
+	ID     uint   `gorm:"primaryKey" json:"id"`
+	Name   string `gorm:"size:64;not null" json:"name"`
+	HostID uint   `gorm:"index;not null" json:"hostId"`
+	// HostName 冗余一份主机名，列表页少一次 join；主机改名后由巡检回填
+	HostName string `gorm:"size:64" json:"hostName"`
+	// Path 日志文件绝对路径。必须落在允许的目录前缀下（OPS_LOG_PATH_PREFIXES），
+	// 这是这个模块唯一真正的安全边界 —— 路径来自人输入
+	Path string `gorm:"size:255;not null" json:"path"`
+
+	// ---------- 关键字规则（人填） ----------
+	// Keywords 命中即算异常的关键字，逗号分隔，**固定字符串、不区分大小写**。
+	// 刻意不做正则：让人在界面上填正则，迟早会有一条灾难性回溯把巡检卡死
+	Keywords string `gorm:"size:255" json:"keywords"`
+	// IgnoreKeywords 命中这些的行直接跳过，用来压掉已知噪音。先判 ignore 再判 keyword
+	IgnoreKeywords string `gorm:"size:255" json:"ignoreKeywords"`
+
+	// ---------- 采集参数 ----------
+	// MaxBytes 单次最多从文件里读多少字节的新增内容，默认 256KB。
+	// 这个上限是必需的：sshx.Run 对输出没有大小限制，一个突然暴涨的日志能把服务端内存吃掉
+	MaxBytes     int  `gorm:"default:262144" json:"maxBytes"`
+	AlertEnabled bool `json:"alertEnabled"` // 不加 gorm default，见 Domain.AlertEnabled 的说明
+
+	// ---------- 增量水位（巡检回填） ----------
+	// LastOffset 上次读到的字节位置，下次从这里往后读
+	LastOffset int64 `json:"lastOffset"`
+	// LastInode 上次看到的 inode。inode 变了说明文件被轮转/重建过，水位要归零 ——
+	// 只比大小判不出「轮转后的新文件恰好更大」这种情况
+	LastInode string `gorm:"size:32" json:"lastInode"`
+	// LastSize 上次看到的文件大小，供界面展示与判断被 truncate
+	LastSize int64 `json:"lastSize"`
+
+	// ---------- 结果（巡检回填，不接受手工录入） ----------
+	// LastStatus unknown（没巡检过）| ok | hit（命中关键字）| missing（文件不在）
+	//	| denied（读不了，通常是权限）| failed（SSH 或命令失败）
+	LastStatus string `gorm:"size:16;default:unknown;index" json:"lastStatus"`
+	// LastHitCount 上一轮在新增内容里命中了多少行
+	LastHitCount int `json:"lastHitCount"`
+	// LastSample 命中的第一行原文（截断）。只留一行：留多了这张表就变成日志副本了
+	LastSample  string     `gorm:"size:512" json:"lastSample"`
+	LastRotated bool       `json:"lastRotated"`
+	LastCostMs  int64      `json:"lastCostMs"`
+	LastError   string     `gorm:"size:255" json:"lastError"`
+	LastScanAt  *time.Time `json:"lastScanAt"`
+	TotalScans  int        `json:"totalScans"`
+
+	DeptID    uint      `gorm:"index;default:0" json:"deptId"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	Enabled   bool      `json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// HostLogScan 一次日志巡检的历史行。与 ExposureScan 同一性质：
+// 目标表只留最后一次状态，要回答「什么时候开始报的」得靠这张流水。
+type HostLogScan struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	TargetID uint   `gorm:"index;not null" json:"targetId"`
+	HostID   uint   `gorm:"index" json:"hostId"`
+	Status   string `gorm:"size:16;index" json:"status"`
+	HitCount int    `json:"hitCount"`
+	// NewBytes 这一轮读到的新增字节数。0 且 status=ok 表示「这段时间没有新日志」
+	NewBytes int64  `json:"newBytes"`
+	FileSize int64  `json:"fileSize"`
+	Rotated  bool   `json:"rotated"`
+	Sample   string `gorm:"size:512" json:"sample"`
+	CostMs   int64  `json:"costMs"`
+	// ErrorMsg 失败原因，或本轮的说明（比如首次巡检只对齐水位）
+	ErrorMsg string `gorm:"size:255" json:"errorMsg"`
+	// Operator 手动巡检记用户名，定时记 scheduler
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// HostLogUsage 一台主机上日志目录的占用快照。
+//
+// 存在的理由：磁盘被日志写满是最常见的一类故障，而它在「主机指标」里只表现为
+// 根分区使用率上升，看不出是谁写的。这张表回答「哪台机器的日志目录多大、
+// 里面最大的几个文件是谁」。
+type HostLogUsage struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	HostID   uint   `gorm:"index;not null" json:"hostId"`
+	HostName string `gorm:"size:64" json:"hostName"`
+	Dir      string `gorm:"size:128" json:"dir"`
+	// TotalKB 目录总占用（du -sk）
+	TotalKB int64 `json:"totalKb"`
+	// TopFiles 占用最大的若干条目，JSON 数组 [{"path":..,"sizeKb":..}]
+	TopFiles string `gorm:"type:text" json:"topFiles"`
+	// TopIsDir 为真表示本机的 find 不支持 -printf，退回 du -a，
+	// TopFiles 里**混有目录**。如实标注，不假装是纯文件清单
+	TopIsDir bool   `json:"topIsDir"`
+	Status   string `gorm:"size:16;index" json:"status"` // ok | failed
+	ErrorMsg string `gorm:"size:255" json:"errorMsg"`
+	CostMs   int64  `json:"costMs"`
+
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // InventoryBatch 资产盘点批次。创建时按范围对固定资产做快照生成明细。
 type InventoryBatch struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
