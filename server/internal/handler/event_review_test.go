@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -74,19 +75,43 @@ func TestSuggestMilestonesFallsBackWhenNoAck(t *testing.T) {
 	h := newReviewTestHandler(t)
 	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
 	assigned := base.Add(8 * time.Minute)
-	event := model.Event{Title: "无确认记录", Status: "open", CreatedAt: base,
-		Assignee: "zhang", AssignedAt: &assigned}
+	handled := base.Add(20 * time.Minute)
+	event := model.Event{Title: "无确认记录", Status: "processing", CreatedAt: base,
+		Assignee: "zhang", AssignedAt: &assigned, RespondedAt: &handled}
 
 	hints := h.suggestMilestones(event, nil)
 
-	if !hints["respondedAt"].At.Equal(assigned) {
-		t.Fatalf("没有告警确认时应退到事件指派时间 %v，实际 %v", assigned, hints["respondedAt"].At)
+	// 与 SLA 同口径：指派不算响应。这里必须退到事件真正被处理的时间（20 分钟），
+	// 不能退到指派时间（8 分钟），否则复盘算出来的 MTTA 会比 SLA 宽一截。
+	if !hints["respondedAt"].At.Equal(handled) {
+		t.Fatalf("没有告警确认时应退到事件被处理的时间 %v，实际 %v（%s）",
+			handled, hints["respondedAt"].At, hints["respondedAt"].Source)
 	}
 	if hints["recoveredAt"].At != nil {
 		t.Fatal("事件没解决时不能编一个恢复时间")
 	}
 	if hints["happenedAt"].Source == "" || hints["detectedAt"].Source == "" {
 		t.Fatal("没有告警时也要说明建议值是哪来的")
+	}
+}
+
+func TestSuggestMilestonesNeverTreatsAssignAsRespond(t *testing.T) {
+	h := newReviewTestHandler(t)
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	assigned := base.Add(8 * time.Minute)
+	// 只指派了、没人动手：响应时间只能退到建单时间，并如实说明没人动过手
+	event := model.Event{Title: "只指派没人动", Status: "open", CreatedAt: base,
+		Assignee: "zhang", AssignedAt: &assigned}
+
+	hints := h.suggestMilestones(event, nil)
+	if hints["respondedAt"].At.Equal(assigned) {
+		t.Fatal("指派时间不能当成响应时间，否则来回转单就能刷出好看的 MTTA")
+	}
+	if !hints["respondedAt"].At.Equal(base) {
+		t.Fatalf("应退到建单时间 %v，实际 %v", base, hints["respondedAt"].At)
+	}
+	if !strings.Contains(hints["respondedAt"].Source, "没人在这张单上动过手") {
+		t.Fatalf("来源说明要讲清这是兜底值，实际：%s", hints["respondedAt"].Source)
 	}
 }
 

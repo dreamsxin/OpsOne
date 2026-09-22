@@ -1321,7 +1321,8 @@ type EventReview struct {
 	HappenedAt *time.Time `json:"happenedAt"`
 	// DetectedAt 平台/人发现（默认取最早告警的入库时间）
 	DetectedAt *time.Time `json:"detectedAt"`
-	// RespondedAt 有人开始响应（默认取最早的告警确认时间或事件指派时间）
+	// RespondedAt 有人开始响应（默认取最早的告警确认时间，没有则取 Event.RespondedAt）。
+	// 与 SLA 同口径：指派不算响应。
 	RespondedAt *time.Time `json:"respondedAt"`
 	// MitigatedAt 止血完成（业务恢复可用，可能还没根治），只能人填
 	MitigatedAt *time.Time `json:"mitigatedAt"`

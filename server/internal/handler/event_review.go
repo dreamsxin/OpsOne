@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
@@ -72,16 +71,20 @@ func (h *Handler) suggestMilestones(event model.Event, alerts []model.Alert) map
 		}
 	}
 
-	// 没有任何告警确认记录时，退一步用事件指派时间，再退一步用建单时间
-	if responded == nil && event.AssignedAt != nil {
-		at := *event.AssignedAt
+	// 没有告警确认记录时，退一步用事件自己的响应时间（状态离开待处理 / 第一条处置记录），
+	// 再退一步用建单时间。
+	//
+	// 这里**不能**退到「事件指派时间」：SLA 的口径是指派不算响应（把单子转给别人不等于
+	// 开始处理），复盘里再把指派当响应，同一个词就有了两套算法，MTTA 会比 SLA 宽。
+	if responded == nil && event.RespondedAt != nil {
+		at := *event.RespondedAt
 		responded = &at
-		respondedFrom = "事件指派给 " + event.Assignee
+		respondedFrom = "事件开始被处理（状态离开待处理或写下第一条处置记录）"
 	}
 	if responded == nil {
 		at := event.CreatedAt
 		responded = &at
-		respondedFrom = "事件建单（没有告警确认记录）"
+		respondedFrom = "事件建单（既没有告警确认记录，也没人在这张单上动过手，请按实际改）"
 	}
 	if happened == nil {
 		at := event.CreatedAt
@@ -157,7 +160,7 @@ func actionItemView(item model.EventActionItem) gin.H {
 		"owner": item.Owner, "dueDate": item.DueDate,
 		"status": item.Status, "statusLabel": actionItemStatusLabels[item.Status],
 		"doneAt": item.DoneAt, "doneNote": item.DoneNote, "overdue": overdue,
-		"lastRemindAt": item.LastRemindAt,
+		"lastRemindAt":  item.LastRemindAt,
 		"createdByName": item.CreatedByName, "createdAt": item.CreatedAt,
 	}
 }
