@@ -10,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ops-platform/server/internal/db"
+	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
 )
@@ -354,6 +356,9 @@ func (h *Handler) healthStorage() []healthItem {
 	}
 	items = append(items, dbItem)
 
+	// 结构版本：升级出问题时第一个要问的就是「这个库跑到哪一版了」
+	items = append(items, h.healthSchemaItem())
+
 	// 录像目录
 	recordItem := healthItem{Key: "recordings", Label: "会话录像", Status: "ok"}
 	files, size, err := dirUsage(h.Cfg.RecordDir)
@@ -399,6 +404,46 @@ func (h *Handler) healthStorage() []healthItem {
 	}
 	items = append(items, retentionItem)
 	return items
+}
+
+// healthSchemaItem 表结构版本。
+//
+// 三件事值得摆在这里：跑到第几版、有没有待应用的步骤、有没有 AutoMigrate 留下的陈旧列。
+// 尤其是「待应用」不该出现 —— 启动时就会跑完，还剩就说明启动那次没跑成。
+func (h *Handler) healthSchemaItem() healthItem {
+	item := healthItem{Key: "schema", Label: "表结构版本", Status: "ok"}
+	status, err := migrate.Report(h.DB, db.Models())
+	if err != nil {
+		item.Status = "warn"
+		item.Value = "未知"
+		item.Detail = "读迁移记录失败: " + err.Error()
+		return item
+	}
+
+	item.Value = fmt.Sprintf("v%d", status.Version)
+	details := []string{fmt.Sprintf("程序认到 v%d", status.KnownVersion)}
+	switch {
+	case len(status.Pending) > 0:
+		item.Status = "warn"
+		item.Value = fmt.Sprintf("v%d（待应用 %d）", status.Version, len(status.Pending))
+		details = append(details, fmt.Sprintf("有 %d 个步骤没应用 —— 启动时本该跑完，"+
+			"请看启动日志，或用 `ops migrate status` 查", len(status.Pending)))
+	case status.Version < status.KnownVersion:
+		// 全新库把步骤记成 baseline，版本号照样会到最高，所以这里通常不会出现
+		item.Status = "warn"
+		details = append(details, "库版本低于程序已知版本，用 `ops migrate status` 看差在哪")
+	}
+	switch {
+	case status.DriftError != "":
+		details = append(details, "陈旧列没查成："+status.DriftError)
+	case len(status.Drift) > 0:
+		details = append(details, fmt.Sprintf("库里有 %d 个模型已不再声明的陈旧列"+
+			"（AutoMigrate 只加不减）。不影响运行，平台也不自动删；"+
+			"`ops migrate status` 会打出可执行的 DROP COLUMN 语句", len(status.Drift)))
+	}
+	details = append(details, "迁移没有回滚，回滚路径是 `ops restore` 从升级前的备份恢复")
+	item.Detail = strings.Join(details, "；")
+	return item
 }
 
 func dirUsage(dir string) (files int, size int64, err error) {

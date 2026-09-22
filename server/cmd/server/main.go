@@ -23,6 +23,7 @@ import (
 	"ops-platform/server/internal/db"
 	"ops-platform/server/internal/handler"
 	"ops-platform/server/internal/middleware"
+	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
 	"ops-platform/server/internal/scheduler"
@@ -44,10 +45,13 @@ func main() {
 		case "restore":
 			runRestoreCmd(os.Args[2:])
 			return
+		case "migrate":
+			runMigrateCmd(os.Args[2:])
+			return
 		case "serve":
 			// 显式写 serve 与不带子命令等价
 		default:
-			log.Fatalf("未知子命令 %q，可用: serve / backup / restore / version", os.Args[1])
+			log.Fatalf("未知子命令 %q，可用: serve / backup / restore / migrate / version", os.Args[1])
 		}
 	}
 
@@ -58,7 +62,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
-	if err := db.Migrate(gormDB); err != nil {
+	if err := db.Migrate(gormDB, version); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 	if err := db.Seed(gormDB, cfg.AdminInitPwd); err != nil {
@@ -362,6 +366,112 @@ func runBackupCmd(args []string) {
 	if res.RecordingsPath != "" {
 		fmt.Printf("录像归档: %s\n", res.RecordingsPath)
 	}
+}
+
+// runMigrateCmd `ops migrate status|up [--env-file 配置] [--dsn 库路径]`
+//
+// 单独成一个子命令，是为了让「先迁移、再起服务」成为可能：
+// 升级时先 `ops backup`、再 `ops migrate up` 看清楚跑了哪些步骤，
+// 确认没问题才起服务。启动时仍然会自动迁移（单实例部署下这是合理默认），
+// 但把它摊开成一个能单独跑、能只读查看的命令，出问题时才有回答问题的地方。
+func runMigrateCmd(args []string) {
+	action := "status"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		action = args[0]
+		args = args[1:]
+	}
+	if action != "status" && action != "up" {
+		log.Fatalf("未知动作 %q，可用: status（只看不改）/ up（应用未执行的步骤）", action)
+	}
+
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	envFile := fs.String("env-file", "", "读取配置文件（如 /etc/opsone/opsone.env）")
+	dsn := fs.String("dsn", "", "数据库文件路径，覆盖 OPS_DSN")
+	_ = fs.Parse(args)
+
+	if err := loadEnvFile(*envFile); err != nil {
+		log.Fatalf("%v", err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if *dsn != "" {
+		cfg.DSN = *dsn
+	}
+
+	// 与备份同一道闸：库不存在时 db.Open 会顺手建一个空库，
+	// 那样 status 会显示「一个全新的空库一切正常」，而人真正想看的是现有那个库
+	if _, statErr := os.Stat(cfg.DSN); statErr != nil {
+		log.Fatalf("数据库文件 %s 不存在或不可读（%v）。\n"+
+			"如果是通过 sudo/cron 跑的，环境变量很可能没带进来，请加 --env-file 或 --dsn 指定路径", cfg.DSN, statErr)
+	}
+	gormDB, err := db.Open(cfg.DSN, false)
+	if err != nil {
+		log.Fatalf("数据库连接失败: %v", err)
+	}
+
+	if action == "up" {
+		if err := db.Migrate(gormDB, version); err != nil {
+			log.Fatalf("迁移失败: %v", err)
+		}
+		fmt.Println("迁移完成。")
+	}
+
+	status, err := migrate.Report(gormDB, db.Models())
+	if err != nil {
+		log.Fatalf("读迁移状态失败: %v", err)
+	}
+	printMigrateStatus(cfg.DSN, status)
+}
+
+func printMigrateStatus(dsn string, st *migrate.Status) {
+	fmt.Printf("库文件: %s\n", dsn)
+	fmt.Printf("结构版本: %d（这个二进制认到 %d）\n", st.Version, st.KnownVersion)
+
+	if len(st.Applied) == 0 {
+		fmt.Println("\n已应用: 无 —— 这个库还没被带迁移记录的版本启动过")
+	} else {
+		fmt.Println("\n已应用:")
+		for _, row := range st.Applied {
+			extra := fmt.Sprintf("%dms", row.TookMs)
+			if row.Source == "baseline" {
+				extra = "新装库，跳过未执行"
+			}
+			fmt.Printf("  v%-3d %-32s %s  %s  by %s\n", row.Version, row.Name,
+				row.AppliedAt.Format("2006-01-02 15:04:05"), extra, row.AppliedBy)
+			if row.Note != "" {
+				fmt.Printf("       %s\n", row.Note)
+			}
+		}
+	}
+
+	if len(st.Pending) == 0 {
+		fmt.Println("\n待应用: 无")
+	} else {
+		fmt.Println("\n待应用（下次启动或 `ops migrate up` 时执行）:")
+		for _, step := range st.Pending {
+			fmt.Printf("  v%-3d %s\n       %s\n", step.Version, step.Name, step.Note)
+		}
+	}
+
+	switch {
+	case st.DriftError != "":
+		fmt.Printf("\n陈旧列检查: 没查成 —— %s\n", st.DriftError)
+	case len(st.Drift) == 0:
+		fmt.Println("\n陈旧列: 无（库里的列与模型声明一致）")
+	default:
+		fmt.Printf("\n陈旧列 %d 个 —— 模型里已经没有、但库里还留着（AutoMigrate 只加不减）。\n"+
+			"它们不会让程序出错，但会让人误以为那些字段还在用。\n"+
+			"平台**不自动删**：删列不可逆。确认无用后，**先 `ops backup`**，再执行：\n", len(st.Drift))
+		for _, item := range st.Drift {
+			fmt.Printf("  %s\n", item.SQL)
+		}
+	}
+
+	fmt.Println("\n注意：迁移**没有回滚**。SQLite 下很多变更要重建表，自动生成的回滚往往是错的，")
+	fmt.Println("而一个能跑但把数据弄坏的回滚比没有回滚更危险。回滚路径是 `ops restore` 从升级前的备份恢复，")
+	fmt.Println("所以升级流程里「先备份」不是建议而是前提。")
 }
 
 // runRestoreCmd `ops restore --db 快照 [--recordings 归档] [--env-file 配置]`

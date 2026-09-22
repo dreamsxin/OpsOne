@@ -191,7 +191,9 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 ## 8. 升级
 
-表结构用的是 GORM `AutoMigrate`：**只加不减、没有版本号、没有回滚**。所以升级流程固定是：
+表结构是 **AutoMigrate 负责「加表加列」+ 一套版本化步骤负责「改/删/回填」**。
+已应用的步骤记在 `schema_migrations` 表里，`ops migrate status` 能看到；
+**没有回滚**（见下），所以「先备份」不是建议而是前提。
 
 ```bash
 sudo -u opsone ops backup          # 1. 先备份，这步别省
@@ -199,13 +201,27 @@ sudo systemctl stop opsone         # 2. 停服
 sudo install -m 0755 ops /usr/local/bin/ops     # 3. 换二进制
 sudo rm -rf /var/lib/opsone/web && sudo cp -r web /var/lib/opsone/web   # 4. 换前端
 sudo chown -R opsone:opsone /var/lib/opsone/web
-sudo systemctl start opsone        # 5. 起服（启动时自动迁移）
+sudo -u opsone ops migrate status --env-file /etc/opsone/opsone.env   # 5. 看要跑哪些步骤（只读）
+sudo systemctl start opsone        # 6. 起服（启动时自动迁移）
 ops version && curl -fsS http://127.0.0.1:8080/readyz
 ```
 
-回退：换回旧二进制 + `ops restore` 那份备份。**只换二进制不换库是不安全的**——新版本可能已经加了列。
+想把迁移与起服分开（大库、或者要先确认迁移结果）：第 5 步之后先
+`ops migrate up --env-file ...`，确认输出没问题再起服。
+
+**回退**：换回旧二进制 + `ops restore` 那份备份。只换二进制不换库**会被拒绝启动** ——
+旧程序发现库的结构版本比自己认识的新时直接报错退出，而不是像以前那样看着正常、
+等到访问新字段时才崩。
+
+**没有 down / 回滚**是明确的设计选择：SQLite 下很多变更要重建表，
+自动生成的回滚往往是错的，而一个能跑但把数据弄坏的回滚比没有回滚更危险。
+
+**陈旧列**：AutoMigrate 不删列，所以改过字段名或删过字段的库里会留下旧列。
+`ops migrate status` 会把它们列出来并打印可执行的 `ALTER TABLE ... DROP COLUMN`，
+但**平台不自动删** —— 删列不可逆。确认无用后自己先备份再执行。
 
 Docker 方式：`docker compose exec opsone ops backup` → `docker compose pull/build` → `docker compose up -d`。
+
 
 ---
 

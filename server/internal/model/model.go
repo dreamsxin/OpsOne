@@ -1051,8 +1051,7 @@ type MailAccount struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// DefaultProxyBypass 统一出口代理默认不覆盖的目标（配置项 proxy.bypass 的初始值）。
-//
+// DefaultProxyBypass 统一出口代理默认不覆盖的目标（配置项 proxy.bypass 的初始值）。//
 // 放在 model 里是为了让「seed 的值」和「代码里的兜底默认值」是同一个常量 ——
 // 两处各写一份，改了一处就会出现「库里是旧清单、代码兜底是新清单」这种对不上的状态。
 // 私有网段与本机必须在里面：平台要连的内网服务远多于公网服务，
@@ -3004,4 +3003,31 @@ type SecuritySuggestionDismissal struct {
 	Reason    string    `gorm:"size:255" json:"reason"`
 	Operator  string    `gorm:"size:64" json:"operator"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// SchemaMigration 一条已应用的结构/数据迁移记录。
+//
+// 在这张表出现之前，表结构完全靠 AutoMigrate（只加不减、无版本号、无顺序），
+// 数据回填靠在 sys_configs 里写一个键当标记 —— 也就是说「这个库跑过哪些变更」
+// 这个问题答不出来，而它恰恰是升级出问题时第一个要问的问题。
+//
+// Source 的两个取值是刻意分开的：
+//   - applied：真的执行了这一步
+//   - baseline：新装库，结构由 AutoMigrate 一次建到位、回填面对的也是空表，
+//     所以记为跳过。排查时「跑过」和「因为是新库而跳过」不是一回事
+//
+// 没有 down / 回滚字段：SQLite 下很多变更要重建表，自动生成的回滚往往是错的，
+// 而一个能跑但把数据弄坏的回滚比没有回滚更危险。回滚路径是 `ops restore`。
+type SchemaMigration struct {
+	// Version 由步骤清单给定，不是自增的 —— 让它自增会在忘记赋值时安静地编一个版本号
+	Version int    `gorm:"primaryKey;autoIncrement:false" json:"version"`
+	Name    string `gorm:"size:128;not null" json:"name"`
+	// Source applied | baseline
+	Source string `gorm:"size:16" json:"source"`
+	// Note 当时这一步在做什么，落库是为了让 `ops migrate status` 不用翻代码
+	Note   string `gorm:"size:255" json:"note"`
+	TookMs int64  `json:"tookMs"`
+	// AppliedBy 执行这一步的二进制版本
+	AppliedBy string    `gorm:"size:32" json:"appliedBy"`
+	AppliedAt time.Time `json:"appliedAt"`
 }

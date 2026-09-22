@@ -200,6 +200,8 @@ Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 - 探活分两个：`/healthz` 只看进程，`/readyz` 真查数据库（负载均衡与容器探针该用后者）
 - SIGTERM 会走**优雅退出**：停调度 → 通知并断开 Web 终端 → 关闭转发隧道并落库 → 等在跑的请求收尾 → 收尾会话状态
 - 自带**备份与恢复**：`ops backup` / `ops restore`（SQLite `VACUUM INTO` 快照 + 录像 tar.gz），默认每天 03:00 自动备份并早于数据留存清理
+- **版本化迁移**：`AutoMigrate` 负责加表加列，另有一套**有序的版本化步骤**负责改列与数据回填，已应用的记在 `schema_migrations` 表里，`ops migrate status` 能看到跑过哪些、各花了多久、哪个版本的程序跑的。三条关键行为：**用旧二进制起新库直接拒绝启动**（以前是看着正常、等到访问新字段才崩）；**新装库把步骤记为 baseline 而不执行**（空表上跑回填毫无意义，而且「跑过」和「新库跳过」在排查时不是一回事）；**AutoMigrate 留下的陈旧列只报告不自动删**，`ops migrate status` 打印可执行的 `DROP COLUMN` 让人备份后自己决定。**没有 down/回滚**——SQLite 下自动生成的回滚往往是错的，一个能跑但把数据弄坏的回滚比没有回滚更危险，所以回滚路径是 `ops restore`，升级流程里「先备份」不是建议而是前提
+
 - 交付物：`Dockerfile`、`docker-compose.yml`、`deploy/opsone.service`、`deploy/nginx.conf.example`、`deploy/opsone.env.example`、`Makefile`
 
 ## 配置项
@@ -269,7 +271,9 @@ server/
   internal/cloudapi/   云厂商只读 OpenAPI 客户端（阿里云 RPC 签名，仅标准库，无写操作）
   internal/config/     环境变量配置
   internal/dnsx/       DNS 解析封装（带超时、可指定 DNS 服务器，仅标准库）
-  internal/db/         迁移与种子数据（菜单、角色、内置规则）
+  internal/db/         建表与种子数据（菜单、角色、内置规则）
+  internal/migrate/    版本化迁移（schema_migrations、降级拒绝、陈旧列报告）
+
   internal/handler/    HTTP 处理器
   internal/middleware/ 认证、权限、审计
   internal/model/      数据模型

@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
 )
 
@@ -22,8 +23,12 @@ func Open(dsn string, debug bool) (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(level)})
 }
 
-func Migrate(g *gorm.DB) error {
-	if err := g.AutoMigrate(
+// Models 平台自身的全部表。
+//
+// 单独导出是为了让漂移检查（internal/migrate）能拿到同一份清单 ——
+// 两处各维护一份的话，漏掉的那张表在漂移报告里就是「没问题」。
+func Models() []any {
+	return []any{
 		&model.Company{}, &model.Department{},
 		&model.User{}, &model.Role{}, &model.Menu{},
 		&model.Host{}, &model.ExecJob{}, &model.ExecResult{}, &model.AuditLog{},
@@ -72,109 +77,35 @@ func Migrate(g *gorm.DB) error {
 		&model.AwarenessCourse{}, &model.AwarenessQuestion{}, &model.AwarenessRecord{},
 		&model.Signature{},
 		&model.SecurityEvent{}, &model.SecurityEventLog{}, &model.SecurityEventMute{},
-	); err != nil {
-		return err
+		&model.SchemaMigration{},
 	}
-	if err := backfillCronProdConfirmed(g); err != nil {
-		return err
-	}
-	return backfillEventResponded(g)
 }
 
-// cfgEventRespondedBackfill 记录「存量事件的响应时间已回填过」
-const cfgEventRespondedBackfill = "migration.event_responded_backfilled"
-
-// backfillEventResponded 升级兼容：SLA 上线前建的事件没有 responded_at。
+// Migrate 建表并跑到最新的结构版本。
 //
-// 如果留空不管，这些单子在新界面上会一律显示「响应已超时 N 天」——
-// 明明当时有人处理过，只是平台那时候没记这个时间点，等于凭空造出一批违约。
-// 所以从只追加的时间线里把真实时间捞回来：最早一条 status / note 记录就是
-// 「第一次有人动手」；连时间线都没有的已解决事件，退一步用解决时间
-// （解决本身也是一次响应，只是把响应时间算晚了，宁可算晚也不凭空算超时）。
-func backfillEventResponded(g *gorm.DB) error {
-	var exist model.SysConfig
-	err := g.Where("`key` = ?", cfgEventRespondedBackfill).First(&exist).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-
-	var events []model.Event
-	if err := g.Where("responded_at IS NULL").Find(&events).Error; err != nil {
-		return err
-	}
-	fromLog, fromResolved := 0, 0
-	for _, event := range events {
-		var first model.EventLog
-		err := g.Where("event_id = ? AND action IN ?", event.ID, []string{"status", "note"}).
-			Order("id asc").First(&first).Error
-		switch {
-		case err == nil:
-			at := first.CreatedAt
-			if err := g.Model(&model.Event{}).Where("id = ?", event.ID).
-				Update("responded_at", &at).Error; err != nil {
-				return err
-			}
-			fromLog++
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			if event.ResolvedAt == nil {
-				continue // 确实没人动过，留空是实话
-			}
-			if err := g.Model(&model.Event{}).Where("id = ?", event.ID).
-				Update("responded_at", event.ResolvedAt).Error; err != nil {
-				return err
-			}
-			fromResolved++
-		default:
-			return err
-		}
-	}
-	if fromLog > 0 || fromResolved > 0 {
-		log.Printf("[migrate] 事件 SLA 上线：回填响应时间 %d 条（取自时间线）+ %d 条（退回解决时间）",
-			fromLog, fromResolved)
-	}
-	return g.Create(&model.SysConfig{
-		Group: "migration", Key: cfgEventRespondedBackfill, Value: "true", Type: "bool",
-		Label:   "事件响应时间已回填",
-		Remark:  "SLA 上线时从事件时间线回填存量事件的响应时间，只执行一次，请勿手工改动",
-		Builtin: true,
-	}).Error
-}
-
-// cfgCronBackfill 记录「存量定时任务的生产确认已回填过」，避免每次启动都回填
-const cfgCronBackfill = "migration.cron_prod_confirmed_backfilled"
-
-// backfillCronProdConfirmed 升级兼容：下发闸门上线前建的定时任务没有「生产确认」这个概念。
+// 三段顺序是有讲究的，不能换：
 //
-// 如果直接按未确认处理，存量任务会在下一次触发时被闸门拦掉 —— 而定时任务通常在
-// 凌晨触发，没人看着，等于悄悄停掉了一批运维作业。所以这里把存量任务一次性视为
-// 已确认，并落一条内置配置记住做过了；之后新建或编辑任务都要重新显式确认。
-func backfillCronProdConfirmed(g *gorm.DB) error {
-	var exist model.SysConfig
-	err := g.Where("`key` = ?", cfgCronBackfill).First(&exist).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+//  1. `migrate.Prepare` —— 建迁移记录表、**做降级检查**、判断这是新装还是升级。
+//     降级检查必须在 AutoMigrate 之前：否则一个旧二进制会先用旧模型把库
+//     AutoMigrate 一遍，把新版本删掉的列又加回去，而新版本那边已经把对应步骤
+//     记成「已应用」—— 库就此进入谁都没预期的状态。
+//  2. `AutoMigrate` —— 仍然由它负责「加表加列」。这件事它做得对，
+//     换成一万行手写 DDL 只会引入新 bug。
+//  3. `migrate.Finish` —— 按版本顺序补跑没跑过的步骤（改列、删列、数据回填）。
+//
+// binaryVersion 只用于留痕：知道「这一步是哪个版本的程序跑的」在排查时很值钱。
+func Migrate(g *gorm.DB, binaryVersion string) error {
+	state, err := migrate.Prepare(g)
+	if err != nil {
 		return err
 	}
-
-	res := g.Model(&model.CronJob{}).Where("prod_confirmed = ?", false).Update("prod_confirmed", true)
-	if res.Error != nil {
-		return res.Error
+	if err := g.AutoMigrate(Models()...); err != nil {
+		return err
 	}
-	if res.RowsAffected > 0 {
-		log.Printf("[migrate] 下发闸门上线：%d 个存量定时任务按「已确认生产变更」处理，之后编辑需重新确认",
-			res.RowsAffected)
+	if _, err := migrate.Finish(g, state, binaryVersion); err != nil {
+		return err
 	}
-	return g.Create(&model.SysConfig{
-		Group: "migration", Key: cfgCronBackfill, Value: "true", Type: "bool",
-		Label:   "定时任务生产确认已回填",
-		Remark:  "下发闸门上线时把存量定时任务视为已确认，只执行一次，请勿手工改动",
-		Builtin: true,
-	}).Error
+	return nil
 }
 
 // Seed 初始化菜单树、内置角色与管理员账号，可重复执行。
