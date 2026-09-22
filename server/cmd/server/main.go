@@ -206,6 +206,18 @@ func main() {
 	} else {
 		log.Println("[cloud_sync] 云资源同步未启用（OPS_CLOUD_SYNC_SPEC 为空），只能在页面上手动同步")
 	}
+	if cfg.DomainSpec != "" {
+		if err := sched.AddFixed(cfg.DomainSpec, h.CheckAllDomainsForSchedule); err != nil {
+			log.Fatalf("域名巡检 cron 表达式无效(%s): %v", cfg.DomainSpec, err)
+		}
+		dnsFrom := "系统 resolver"
+		if cfg.DNSServer != "" {
+			dnsFrom = cfg.DNSServer
+		}
+		log.Printf("[domain] 域名巡检已启用: %s（DNS 走 %s）", cfg.DomainSpec, dnsFrom)
+	} else {
+		log.Println("[domain] 域名巡检未启用（OPS_DOMAIN_SPEC 为空），解析漂移与注册到期只能手动巡检")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -719,6 +731,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/cloud-resources/drift", h.CloudDrift)
 		auth.POST("/cloud-resources/:id/adopt", middleware.RequirePerm("cloud:adopt"), h.AdoptCloudResource)
 		auth.GET("/cloud-sync-runs", h.ListCloudSyncRuns)
+
+		auth.GET("/domains", h.ListDomains)
+		auth.GET("/domains/stats", h.DomainStats)
+		auth.POST("/domains", middleware.RequirePerm("domain:manage"), h.CreateDomain)
+		auth.PUT("/domains/:id", middleware.RequirePerm("domain:manage"), h.UpdateDomain)
+		auth.DELETE("/domains/:id", middleware.RequirePerm("domain:manage"), h.DeleteDomain)
+		auth.POST("/domains/import-cloud", middleware.RequirePerm("domain:manage"), h.ImportCloudDomains)
+		auth.POST("/domains/:id/check", middleware.RequirePerm("domain:check"), h.CheckDomain)
+		auth.POST("/domains/check-all", middleware.RequirePerm("domain:check"), h.CheckAllDomains)
 
 		auth.GET("/inventory/batches", h.ListInventoryBatches)
 		auth.GET("/inventory/batches/:id", h.GetInventoryBatch)

@@ -36,6 +36,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},
 		&model.CloudAccount{}, &model.CloudResource{}, &model.CloudSyncRun{},
+		&model.Domain{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -217,6 +218,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 128, ParentID: 100, Name: "CloudSync", Title: "云资源同步", Path: "/asset/cloud-sync", Component: "/asset/cloud-sync/index", Icon: "Refresh", Sort: 10},
 		{ID: 129, ParentID: 128, Title: "触发同步", Type: "button", AuthCode: "cloud:sync", Sort: 1},
 		{ID: 130, ParentID: 128, Title: "纳管为主机", Type: "button", AuthCode: "cloud:adopt", Sort: 2},
+		{ID: 131, ParentID: 100, Name: "DomainList", Title: "域名管理", Path: "/asset/domain", Component: "/asset/domain/index", Icon: "Link", Sort: 11},
+		{ID: 132, ParentID: 131, Title: "维护域名", Type: "button", AuthCode: "domain:manage", Sort: 1},
+		{ID: 133, ParentID: 131, Title: "执行巡检", Type: "button", AuthCode: "domain:check", Sort: 2},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来

@@ -1088,6 +1088,90 @@ type CloudSyncRun struct {
 	DurationMS int64      `json:"durationMs"`
 }
 
+// Domain 域名台账 + DNS 解析核对。
+//
+// 这张表分成三块，边界要清楚：
+//  1. **人填的台账**：注册商、注册/到期日、责任人、用途。注册到期日**只能人填** ——
+//     云解析接口是「DNS 托管」视角，给不出注册到期时间（见 cloudapi.DNSDomain），
+//     所以这里没有「自动同步到期日」这回事，界面上会标出哪些域名还没填。
+//  2. **人填的期望值**：期望解析到的地址 / CNAME / NS。留空表示**不核对那一类** ——
+//     不填就判漂移等于每条域名一上来都是红的，那种告警没人会看。
+//  3. **巡检回填的实际值**：真去查一次 DNS 得到的结果，以及与期望的差异说明。
+//
+// 与 Certificate 的关系：按证书的 SAN（`Certificate.DNSNames`）自动反查，
+// 命中数与最早到期天数冗余在这里，方便在一个列表里同时看见「域名快到期」与「证书快到期」。
+// 这个关联是算出来的，不落外键 —— 证书增删改后下一次巡检自然会更新。
+type Domain struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Name 域名本身，统一小写、不带末尾点与协议
+	Name string `gorm:"size:128;not null;uniqueIndex" json:"name"`
+
+	// ---------- 台账（人填） ----------
+	Registrar    string     `gorm:"size:64" json:"registrar"` // 注册商：阿里云 / 腾讯云 / GoDaddy…
+	RegisteredAt *time.Time `json:"registeredAt"`
+	// ExpiresAt 注册到期日。为空表示还没登记 —— 界面上单独标出来催人补，
+	// 不拿「空」当「还很久」
+	ExpiresAt *time.Time `json:"expiresAt"`
+	AutoRenew bool       `gorm:"default:false" json:"autoRenew"`
+	Owner     string     `gorm:"size:64" json:"owner"` // 责任人
+	// Purpose 用途说明。字段名不叫 Usage：USAGE 是 MySQL 保留字，
+	// 拼在 WHERE 里会因为没加反引号直接报语法错
+	Purpose   string `gorm:"size:128" json:"purpose"`
+	DeptID    uint   `gorm:"index;default:0" json:"deptId"`
+	CreatedBy uint   `gorm:"index;default:0" json:"createdBy"`
+
+	// ---------- DNS 期望值（人填，留空=不核对该类） ----------
+	ExpectIPs   string `gorm:"size:255" json:"expectIps"` // 逗号分隔
+	ExpectCNAME string `gorm:"size:128" json:"expectCname"`
+	ExpectNS    string `gorm:"size:255" json:"expectNs"`
+
+	// ---------- DNS 实际值（巡检回填） ----------
+	ResolvedIPs   string `gorm:"size:255" json:"resolvedIps"`
+	ResolvedCNAME string `gorm:"size:128" json:"resolvedCname"`
+	ResolvedNS    string `gorm:"size:255" json:"resolvedNs"`
+	// DNSStatus unknown（没查过）| ok | drift（与期望不符）| unresolved（查不到地址）
+	//	| nocheck（三类期望都没填，只记录了实际值）| error
+	DNSStatus string `gorm:"size:16;default:unknown;index" json:"dnsStatus"`
+	// DNSDetail 差异或错误的人话说明，直接展示
+	DNSDetail string `gorm:"size:512" json:"dnsDetail"`
+	// DNSServer 这次核对实际用的 DNS 服务器，空串表示系统 resolver。
+	// 回显它是为了避免「为什么和我 dig 的不一样」变成查不清的问题
+	DNSServer   string     `gorm:"size:64" json:"dnsServer"`
+	LastCheckAt *time.Time `json:"lastCheckAt"`
+
+	// ---------- 到期状态（巡检回填） ----------
+	// DaysLeft 距注册到期的天数；ExpiresAt 为空时无意义，看 ExpireStatus
+	DaysLeft int `json:"daysLeft"`
+	// ExpireStatus unknown（没填到期日）| valid | expiring | expired
+	ExpireStatus string `gorm:"size:16;default:unknown;index" json:"expireStatus"`
+	AlertDays    int    `gorm:"default:30" json:"alertDays"`
+	// AlertEnabled 是否把巡检结果送进告警通道。
+	//
+	// 刻意**不加** gorm `default:true`：带 default 标签的布尔字段，GORM 会把
+	// 零值（false）从 INSERT 里省掉让数据库填默认值 —— 于是用户在表单里关掉开关，
+	// 落库之后又被翻回「开」，而界面上完全看不出来。默认值由 handler 显式给。
+	AlertEnabled bool `json:"alertEnabled"`
+
+	// ---------- 关联证书（按 SAN 算出来的，不落外键） ----------
+	CertCount int `json:"certCount"`
+	// CertNames 命中的证书名，逗号分隔，只为列表页少查一次
+	CertNames string `gorm:"size:255" json:"certNames"`
+	// CertMinDaysLeft 关联证书里最早到期的剩余天数；CertCount = 0 时为 0
+	CertMinDaysLeft int `json:"certMinDaysLeft"`
+
+	// ---------- 来源 ----------
+	// Source manual（人工登记）| cloud（从云资源同步的托管域名导进来的）
+	Source string `gorm:"size:16;default:manual" json:"source"`
+	// CloudResourceID Source=cloud 时指向 cloud_resources 里那一行
+	CloudResourceID uint `gorm:"index;default:0" json:"cloudResourceId"`
+
+	// Enabled 停用后不参与批量巡检。与 AlertEnabled 同理不加 gorm default
+	Enabled   bool      `json:"enabled"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // InventoryBatch 资产盘点批次。创建时按范围对固定资产做快照生成明细。
 type InventoryBatch struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`

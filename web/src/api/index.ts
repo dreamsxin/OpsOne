@@ -4750,6 +4750,86 @@ export const adoptCloudResource = (id: number, data: Record<string, any>) =>
 export const listCloudSyncRuns = (params?: Record<string, any>) =>
   request<PageData<CloudSyncRun>>({ url: '/cloud-sync-runs', params })
 
+/* ---------------- 域名管理 ---------------- */
+
+export interface DomainRecord {
+  id: number
+  name: string
+  registrar: string
+  registeredAt: string | null
+  expiresAt: string | null
+  autoRenew: boolean
+  owner: string
+  purpose: string
+  deptId: number
+  createdBy: number
+  expectIps: string
+  expectCname: string
+  expectNs: string
+  resolvedIps: string
+  resolvedCname: string
+  resolvedNs: string
+  dnsStatus: 'unknown' | 'ok' | 'drift' | 'unresolved' | 'nocheck' | 'error'
+  dnsDetail: string
+  dnsServer: string
+  lastCheckAt: string | null
+  daysLeft: number
+  expireStatus: 'unknown' | 'valid' | 'expiring' | 'expired'
+  alertDays: number
+  alertEnabled: boolean
+  certCount: number
+  certNames: string
+  certMinDaysLeft: number
+  source: 'manual' | 'cloud'
+  cloudResourceId: number
+  enabled: boolean
+  remark: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DomainStats {
+  total: number
+  dnsOk: number
+  dnsDrift: number
+  dnsUnresolve: number
+  dnsNoCheck: number
+  dnsUnknown: number
+  expiring: number
+  expired: number
+  noExpiry: number
+  note: string
+}
+
+export interface DomainCheckSummary {
+  checked: number
+  dnsOk: number
+  dnsDrift: number
+  dnsBad: number
+  dnsNoCheck: number
+  expiring: number
+  expired: number
+  noExpiry: number
+}
+
+export const listDomains = (params?: Record<string, any>) =>
+  request<PageData<DomainRecord>>({ url: '/domains', params })
+export const domainStats = () => request<DomainStats>({ url: '/domains/stats' })
+export const createDomain = (data: Record<string, any>) =>
+  request<DomainRecord>({ url: '/domains', method: 'POST', data })
+export const updateDomain = (id: number, data: Record<string, any>) =>
+  request<DomainRecord>({ url: `/domains/${id}`, method: 'PUT', data })
+export const deleteDomain = (id: number) => request({ url: `/domains/${id}`, method: 'DELETE' })
+export const checkDomain = (id: number) =>
+  request<DomainRecord>({ url: `/domains/${id}/check`, method: 'POST' })
+export const checkAllDomains = () =>
+  request<DomainCheckSummary>({ url: '/domains/check-all', method: 'POST' })
+export const importCloudDomains = () =>
+  request<{ created: string[]; skipped: string[]; note: string }>({
+    url: '/domains/import-cloud',
+    method: 'POST'
+  })
+
 
 
 

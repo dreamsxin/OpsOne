@@ -143,6 +143,18 @@ type Config struct {
 	// 页面上随时能手动「立即同步」，要自动就显式配一个（建议 0 */6 * * *）。
 	CloudSyncSpec string
 
+	// DomainSpec 域名巡检（DNS 核对 + 注册到期）的 cron 表达式。
+	// 留空表示不做定时巡检，只能在界面上手动触发 —— 那样「解析被人改了」
+	// 和「域名快到期了」都只能靠人想起来去点一下。
+	DomainSpec string
+
+	// DNSServer 域名核对用的 DNS 服务器（如 223.5.5.5 或 8.8.8.8:53）。
+	// 留空表示用系统配置的 resolver。
+	//
+	// 为什么要能指定：内网 DNS 经常把生产域名覆写到测试地址，用它核对出来的是
+	// 内网视角，跟外部用户看到的不是一回事。想核对「外面看到的解析」就指一个公共 DNS。
+	DNSServer string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -252,6 +264,8 @@ func Load() (*Config, error) {
 		SLASpec:            strings.TrimSpace(env("OPS_SLA_SPEC", "*/2 * * * *")),
 		SecEventSpec:       strings.TrimSpace(env("OPS_SECEVENT_SPEC", "*/5 * * * *")),
 		CloudSyncSpec:      strings.TrimSpace(env("OPS_CLOUD_SYNC_SPEC", "")),
+		DomainSpec:         strings.TrimSpace(env("OPS_DOMAIN_SPEC", "0 8 * * *")),
+		DNSServer:          strings.TrimSpace(env("OPS_DNS_SERVER", "")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

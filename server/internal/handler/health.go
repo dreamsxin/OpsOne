@@ -167,6 +167,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_SECEVENT_SPEC 为空，下发拦截/终端拦截/未登记端口/越权被拒这些流水不会自动进研判台"))
 	items = append(items, h.fixedTaskItem("cloud_sync", "云资源同步", h.Cfg.CloudSyncSpec,
 		"OPS_CLOUD_SYNC_SPEC 为空（默认如此，这一项会真的出网调云 OpenAPI），云上新开或释放的机器只能靠页面上手动同步发现"))
+	items = append(items, h.fixedTaskItem("domain", "域名巡检", h.Cfg.DomainSpec,
+		"OPS_DOMAIN_SPEC 为空，域名解析被改了、注册快到期了都不会自动被发现"))
 	items = append(items, h.fixedTaskItem("backup", "自动备份", h.Cfg.BackupSpec,
 		"OPS_BACKUP_SPEC 为空，只能手动执行 `ops backup`；而数据留存清理是真删且不可逆"))
 	return items
