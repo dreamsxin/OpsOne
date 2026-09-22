@@ -878,6 +878,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/kube/clusters/:id/crd-resource", h.KubeCRDResourceDetail)
 		auth.GET("/kube/clusters/:id/gateway-routes", h.KubeGatewayRoutes)
 		auth.GET("/kube/clusters/:id/rbac", h.KubeRBAC)
+		auth.GET("/kube/clusters/:id/node-inventory", h.KubeNodeInventory)
+		auth.GET("/kube/clusters/:id/namespace-inventory", h.KubeNamespaceInventory)
 		auth.POST("/kube/clusters/:id/resource/apply", middleware.RequirePerm("kube:write"), h.ApplyKubeResource)
 		auth.POST("/kube/clusters/:id/resource/scale", middleware.RequirePerm("kube:write"), h.ScaleKubeResource)
 		auth.POST("/kube/clusters/:id/resource/restart", middleware.RequirePerm("kube:write"), h.RestartKubeWorkload)

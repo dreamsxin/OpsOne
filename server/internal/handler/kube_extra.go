@@ -412,6 +412,137 @@ func (h *Handler) KubeRBAC(c *gin.Context) {
 	})
 }
 
+// ---------- 节点与命名空间清点 ----------
+
+// KubeNodeInventory 节点清点：健康、可调度性、版本偏斜。
+//
+// 与「容量与配额」页刻意不重叠：那一页回答「还能不能再塞」（已分配 / limits /
+// 实际用量那本账），这里回答「这些节点自身健康不健康、有没有被什么东西卡住」。
+// 两处各算一遍资源账迟早会对不上，而对不上的数字比没有数字更糟。
+func (h *Handler) KubeNodeInventory(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	// 要读节点 + 全集群 Pod，比单类列表慢，给宽一点的超时
+	ctx, cancel := context.WithTimeout(context.Background(), kubeApplyTimeout)
+	defer cancel()
+
+	inv, err := client.NodeInventoryList(ctx)
+	if err != nil {
+		response.Error(c, "读取节点失败: "+err.Error())
+		return
+	}
+
+	nodes := inv.Nodes
+	if keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword"))); keyword != "" {
+		filtered := nodes[:0:0]
+		for _, item := range nodes {
+			if strings.Contains(strings.ToLower(item.Name), keyword) ||
+				strings.Contains(strings.ToLower(item.InternalIP), keyword) ||
+				strings.Contains(strings.ToLower(strings.Join(item.Roles, ",")), keyword) {
+				filtered = append(filtered, item)
+			}
+		}
+		nodes = filtered
+	}
+	if c.Query("problem") == "1" {
+		filtered := nodes[:0:0]
+		for _, item := range nodes {
+			if len(item.Problems) > 0 {
+				filtered = append(filtered, item)
+			}
+		}
+		nodes = filtered
+	}
+
+	response.OK(c, gin.H{
+		"nodes": nodes, "total": len(inv.Nodes), "shown": len(nodes),
+		"ready": inv.Ready, "notReady": inv.NotReady,
+		"cordoned": inv.Cordoned, "tainted": inv.Tainted,
+		"versions": inv.Versions, "versionSkew": len(inv.Versions) > 1,
+		"podCounted": inv.PodCounted,
+		"notes": []string{
+			"这一页只看节点自身的健康与可调度性。**资源账本（已分配 / limits / 实际用量）在「容量与配额」页** —— " +
+				"两处各算一遍迟早对不上，而对不上的数字比没有数字更糟",
+			"conditions 的判断方向是反的：Ready 应当为 True，DiskPressure / MemoryPressure / " +
+				"PIDPressure / NetworkUnavailable 应当为 False —— 后面这几个是故障的前兆",
+			"Pod 数是全集群列一次 Pod 再按节点归组算的（不是每个节点查一次）；" +
+				"已结束（Succeeded / Failed）的不计入。读不到 Pod 列表时显示「未知」而不是 0",
+			"容量与可分配分开给：调度看的是 allocatable，两者的差值是预留给系统组件的部分",
+			"出现多个 kubelet 版本会单独提示 —— 升级做到一半停下来是很常见的现场",
+			"**只读**：不提供 cordon / uncordon / drain / 打污点 —— 那些会直接影响调度，仍然走 kubectl",
+		},
+	})
+}
+
+// KubeNamespaceInventory 命名空间清点：里面有什么、受什么约束、有没有卡住。
+func (h *Handler) KubeNamespaceInventory(c *gin.Context) {
+	_, client, ok := h.requireKubeCluster(c)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kubeApplyTimeout)
+	defer cancel()
+
+	inv, err := client.NamespaceInventoryList(ctx)
+	if err != nil {
+		response.Error(c, "读取命名空间失败: "+err.Error())
+		return
+	}
+
+	list := inv.Namespaces
+	if keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword"))); keyword != "" {
+		filtered := list[:0:0]
+		for _, item := range list {
+			if strings.Contains(strings.ToLower(item.Name), keyword) {
+				filtered = append(filtered, item)
+			}
+		}
+		list = filtered
+	}
+	switch c.Query("filter") {
+	case "problem":
+		list = filterNamespaces(list, func(n k8s.NamespaceDetail) bool { return len(n.Problems) > 0 })
+	case "terminating":
+		list = filterNamespaces(list, func(n k8s.NamespaceDetail) bool { return n.Terminating })
+	case "noquota":
+		// 只有真读到了配额对象才敢筛这一类
+		if inv.QuotaRead {
+			list = filterNamespaces(list, func(n k8s.NamespaceDetail) bool {
+				return len(n.Quotas) == 0 && !n.HasLimitRange
+			})
+		}
+	case "empty":
+		list = filterNamespaces(list, func(n k8s.NamespaceDetail) bool { return n.PodTotal == 0 })
+	}
+
+	response.OK(c, gin.H{
+		"namespaces": list, "total": inv.Total, "shown": len(list),
+		"terminating": inv.Terminating, "noQuota": inv.NoQuota,
+		"podCounted": inv.PodCounted, "quotaRead": inv.QuotaRead,
+		"notes": []string{
+			"「卡在 Terminating」会连 finalizer 一起列出来 —— 命名空间删不掉几乎总是因为有 finalizer 没清",
+			"「既没有 ResourceQuota 也没有 LimitRange」只在**真的读到了配额对象**之后才判定：" +
+				"没权限看配额和没配配额是两件事，不能混成一个结论",
+			"Pod 分布是全集群列一次 Pod 按命名空间归组算的；读不到时显示「未知」而不是 0",
+			"ResourceQuota 只列 hard 里设了上限的项：status.used 里会带一堆没设上限的零值，全列出来是噪音",
+			"**只读**：不提供命名空间的创建与删除 —— 删一个命名空间等于删掉里面的全部对象",
+		},
+	})
+}
+
+func filterNamespaces(list []k8s.NamespaceDetail,
+	keep func(k8s.NamespaceDetail) bool) []k8s.NamespaceDetail {
+	out := list[:0:0]
+	for _, item := range list {
+		if keep(item) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func filterAccounts(list []k8s.ServiceAccountView,
 	keep func(k8s.ServiceAccountView) bool) []k8s.ServiceAccountView {
 	out := list[:0:0]

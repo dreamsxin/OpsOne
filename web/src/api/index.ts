@@ -3171,6 +3171,93 @@ export const listKubeRBAC = (id: number, params?: Record<string, any>) =>
     stats: Record<string, number>
     notes: string[]
   }>({ url: `/kube/clusters/${id}/rbac`, params })
+
+export interface KubeNodeTaint {
+  key: string
+  value: string
+  effect: string
+}
+
+export interface KubeNodeCondition {
+  type: string
+  status: string
+  reason: string
+  message: string
+  problem: boolean
+}
+
+export interface KubeNodeDetail {
+  name: string
+  ready: boolean
+  roles: string[]
+  version: string
+  osImage: string
+  kernel: string
+  runtime: string
+  internalIP: string
+  capacityCpu: string
+  capacityMemory: string
+  capacityPods: string
+  allocCpu: string
+  allocMemory: string
+  allocPods: string
+  podCount: number
+  podCapacity: number
+  unschedulable: boolean
+  taints: KubeNodeTaint[]
+  conditions: KubeNodeCondition[]
+  problems: string[]
+  createdAt: string
+}
+
+export interface KubeNamespaceQuota {
+  name: string
+  items: string[]
+}
+
+export interface KubeNamespaceDetail {
+  name: string
+  phase: string
+  createdAt: string
+  terminating: boolean
+  finalizers: string[]
+  conditions: string[]
+  labels: Record<string, string>
+  podTotal: number
+  podRunning: number
+  podPending: number
+  podFailed: number
+  quotas: KubeNamespaceQuota[]
+  hasLimitRange: boolean
+  problems: string[]
+}
+
+export const listKubeNodeInventory = (id: number, params?: Record<string, any>) =>
+  request<{
+    nodes: KubeNodeDetail[]
+    total: number
+    shown: number
+    ready: number
+    notReady: number
+    cordoned: number
+    tainted: number
+    versions: string[]
+    versionSkew: boolean
+    podCounted: boolean
+    notes: string[]
+  }>({ url: `/kube/clusters/${id}/node-inventory`, params })
+
+export const listKubeNamespaceInventory = (id: number, params?: Record<string, any>) =>
+  request<{
+    namespaces: KubeNamespaceDetail[]
+    total: number
+    shown: number
+    terminating: number
+    noQuota: number
+    podCounted: boolean
+    quotaRead: boolean
+    notes: string[]
+  }>({ url: `/kube/clusters/${id}/namespace-inventory`, params })
 export const listKubeWorkloads = (id: number, namespace?: string) =>
   request<{ items: KubeWorkload[]; total: number; unhealthy: number; warnings: string[] }>({
     url: `/kube/clusters/${id}/workloads`,

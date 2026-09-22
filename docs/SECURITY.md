@@ -819,6 +819,14 @@
 - **明确的空白**：Helm 的 values / manifest / 历史 diff / 回滚、自定义资源的编辑与删除、
   RBAC 的编辑、Gateway / GatewayClass / TCPRoute / GRPCRoute 的专用解析
   （可在自定义资源页看原文）。
+- **节点与命名空间清点**同样只读，`/kubernetes/node`。两点值得写下来：
+  - 它会**全集群列一次 Pod** 来算分布（不是每个节点查一次）。这要求对 `pods` 有全集群
+    list 权限；没有时如实标「未知」而不是 0 —— **0 会被读成「这台机器上没有 Pod」，
+    结论正好相反**。同理，「既没有 ResourceQuota 也没有 LimitRange」只在真的读到了
+    配额对象之后才判定，否则「没权限看」会被写成「没配」。
+  - **不提供 cordon / uncordon / drain / 打污点**：那些直接改变调度行为，
+    drain 还会驱逐 Pod。也**不提供命名空间的创建与删除** —— 删一个命名空间
+    等于删掉里面的全部对象。这类操作仍然走 kubectl。
 
 
 

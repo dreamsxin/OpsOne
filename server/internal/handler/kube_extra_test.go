@@ -124,6 +124,45 @@ func fakeAPIServer(t *testing.T) *httptest.Server {
       "subjects":[{"kind":"ServiceAccount","name":"deployer","namespace":"ops"}]}]}`)
 	})
 
+	// --- 节点与命名空间清点 ---
+	mux.HandleFunc("/api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[
+      {"metadata":{"name":"cp-1","labels":{"node-role.kubernetes.io/control-plane":""}},
+       "spec":{"taints":[{"key":"node-role.kubernetes.io/control-plane","effect":"NoSchedule"}]},
+       "status":{"capacity":{"cpu":"4","memory":"8Gi","pods":"110"},
+         "allocatable":{"cpu":"3800m","memory":"7Gi","pods":"110"},
+         "conditions":[{"type":"Ready","status":"True"},{"type":"DiskPressure","status":"False"}],
+         "addresses":[{"type":"InternalIP","address":"10.0.0.1"}],
+         "nodeInfo":{"kubeletVersion":"v1.31.2"}}},
+      {"metadata":{"name":"worker-1"},"spec":{"unschedulable":true},
+       "status":{"capacity":{"cpu":"8","memory":"16Gi","pods":"110"},
+         "allocatable":{"cpu":"7800m","memory":"15Gi","pods":"110"},
+         "conditions":[{"type":"Ready","status":"False","reason":"KubeletNotReady"}],
+         "addresses":[{"type":"InternalIP","address":"10.0.0.2"}],
+         "nodeInfo":{"kubeletVersion":"v1.30.1"}}}
+    ]}`)
+	})
+	mux.HandleFunc("/api/v1/pods", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[
+      {"metadata":{"namespace":"ops"},"spec":{"nodeName":"cp-1"},"status":{"phase":"Running"}},
+      {"metadata":{"namespace":"ops"},"spec":{"nodeName":"cp-1"},"status":{"phase":"Succeeded"}},
+      {"metadata":{"namespace":"ops"},"spec":{"nodeName":"worker-1"},"status":{"phase":"Pending"}}
+    ]}`)
+	})
+	mux.HandleFunc("/api/v1/namespaces", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[
+      {"metadata":{"name":"ops"},"status":{"phase":"Active"}},
+      {"metadata":{"name":"stuck"},"spec":{"finalizers":["kubernetes"]},
+       "status":{"phase":"Terminating"}}
+    ]}`)
+	})
+	mux.HandleFunc("/api/v1/resourcequotas", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+	mux.HandleFunc("/api/v1/limitranges", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("假 API Server 收到未预期的请求: %s", r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
@@ -184,6 +223,8 @@ users:
 	engine.GET("/kube/clusters/:id/crd-resource", h.KubeCRDResourceDetail)
 	engine.GET("/kube/clusters/:id/gateway-routes", h.KubeGatewayRoutes)
 	engine.GET("/kube/clusters/:id/rbac", h.KubeRBAC)
+	engine.GET("/kube/clusters/:id/node-inventory", h.KubeNodeInventory)
+	engine.GET("/kube/clusters/:id/namespace-inventory", h.KubeNamespaceInventory)
 	return h, engine
 }
 
@@ -364,9 +405,100 @@ func TestKubeExtraRejectsMissingCluster(t *testing.T) {
 		"/kube/clusters/999/crds",
 		"/kube/clusters/999/rbac",
 		"/kube/clusters/999/gateway-routes",
+		"/kube/clusters/999/node-inventory",
+		"/kube/clusters/999/namespace-inventory",
 	} {
 		if code, _ := kubeJSON(t, engine, path); code != http.StatusNotFound {
 			t.Errorf("%s 应当 404, got %d", path, code)
 		}
+	}
+}
+
+func TestKubeNodeInventoryEndToEnd(t *testing.T) {
+	_, engine := newKubeExtraTestHandler(t)
+	code, resp := kubeJSON(t, engine, "/kube/clusters/1/node-inventory")
+	if code != http.StatusOK {
+		t.Fatalf("返回 %d: %v", code, resp)
+	}
+	data := resp["data"].(map[string]any)
+	if data["total"].(float64) != 2 {
+		t.Errorf("节点数 = %v", data["total"])
+	}
+	if data["ready"].(float64) != 1 || data["notReady"].(float64) != 1 {
+		t.Errorf("就绪统计不对: %v", data)
+	}
+	if data["cordoned"].(float64) != 1 {
+		t.Errorf("cordon 数 = %v", data["cordoned"])
+	}
+	// 两个 kubelet 版本 → 版本偏斜要报出来
+	if data["versionSkew"] != true {
+		t.Error("出现多个 kubelet 版本应当报版本偏斜")
+	}
+	if data["podCounted"] != true {
+		t.Error("读到了 Pod 列表，podCounted 应当为 true")
+	}
+
+	nodes := data["nodes"].([]any)
+	// 有问题的排最前
+	first := nodes[0].(map[string]any)
+	if first["name"] != "worker-1" {
+		t.Errorf("有问题的节点应当排最前, got %v", first["name"])
+	}
+	problems := fmt.Sprint(first["problems"].([]any)...)
+	if !strings.Contains(problems, "KubeletNotReady") || !strings.Contains(problems, "cordon") {
+		t.Errorf("问题描述不对: %s", problems)
+	}
+	// 容量与可分配必须分开给
+	if first["capacityCpu"] != "8" || first["allocCpu"] != "7800m" {
+		t.Errorf("容量/可分配没分开: %v / %v", first["capacityCpu"], first["allocCpu"])
+	}
+
+	// 这一页的口径：资源账本在容量与配额页，这里不重复算
+	notes := fmt.Sprint(data["notes"].([]any)...)
+	if !strings.Contains(notes, "容量与配额") {
+		t.Errorf("notes 要说清与容量页的分工: %s", notes)
+	}
+
+	// 只看有问题的
+	_, resp = kubeJSON(t, engine, "/kube/clusters/1/node-inventory?problem=1")
+	data = resp["data"].(map[string]any)
+	if data["shown"].(float64) != 1 {
+		t.Errorf("按问题筛 shown = %v, want 1", data["shown"])
+	}
+}
+
+func TestKubeNamespaceInventoryEndToEnd(t *testing.T) {
+	_, engine := newKubeExtraTestHandler(t)
+	code, resp := kubeJSON(t, engine, "/kube/clusters/1/namespace-inventory")
+	if code != http.StatusOK {
+		t.Fatalf("返回 %d: %v", code, resp)
+	}
+	data := resp["data"].(map[string]any)
+	if data["total"].(float64) != 2 {
+		t.Errorf("命名空间数 = %v", data["total"])
+	}
+	if data["terminating"].(float64) != 1 {
+		t.Errorf("Terminating 数 = %v", data["terminating"])
+	}
+	if data["quotaRead"] != true {
+		t.Error("配额列表返回了空数组（而不是报错），quotaRead 应当为 true")
+	}
+
+	list := data["namespaces"].([]any)
+	first := list[0].(map[string]any)
+	// 卡在 Terminating 的排最前，且 finalizer 要列出来
+	if first["name"] != "stuck" {
+		t.Errorf("有问题的命名空间应当排最前, got %v", first["name"])
+	}
+	problems := fmt.Sprint(first["problems"].([]any)...)
+	if !strings.Contains(problems, "Terminating") || !strings.Contains(problems, "kubernetes") {
+		t.Errorf("Terminating 结论要带 finalizer: %s", problems)
+	}
+
+	// 按卡住筛
+	_, resp = kubeJSON(t, engine, "/kube/clusters/1/namespace-inventory?filter=terminating")
+	data = resp["data"].(map[string]any)
+	if data["shown"].(float64) != 1 {
+		t.Errorf("按 Terminating 筛 shown = %v, want 1", data["shown"])
 	}
 }

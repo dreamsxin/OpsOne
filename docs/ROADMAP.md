@@ -54,6 +54,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] Helm 应用 `/kubernetes/helm` — release 从集群里 `type=helm.sh/release.v1` 的 Secret 解出来（两层 base64 + gzip + JSON），**不依赖 helm 二进制、不访问 chart 仓库**；给出状态、chart 与应用版本、第几次发布、历史版本数、最近一次操作说明。同名 release 只显示最新 revision。**不做 install / upgrade / rollback / uninstall**（需要真正的 Helm 引擎），**不返回 values 与渲染后的 manifest**，**只认 secret driver**
 - [x] 自定义资源 `/kubernetes/crd` — CRD 清单运行时从集群读出（不是内置白名单）；served 与 storage 版本分开显示、常见组给中文说明、按版本列实例、详情**保留 status**；CRD 未就绪（`Established≠True`）在查实例前就拦下并说明。同页含 **Gateway API 路由**：把 HTTPRoute 的三层嵌套拍平成「什么流量 → 送到哪」，没装 Gateway API 时明说没装并指路 Ingress。**一律只读**，不提供自定义资源的编辑
 - [x] RBAC 账户 `/kubernetes/rbac` — 反查每个 ServiceAccount 的实际权限（binding → role → rules，k8s 里没有这样一个现成对象）；Role 与 Binding **一律全集群读**（命名空间里的 SA 可能被 ClusterRoleBinding 授权）；`cluster-admin` / 通配符 / 无授权 / **孤儿绑定**单独标出并可筛选，危险的排最前。只反查 ServiceAccount（User / Group 由集群外认证系统管）。**只读** —— 改 RBAC 就是改提权路径
+- [x] 节点与命名空间 `/kubernetes/node` — 只看它们自身的健康与约束（**资源账本仍然只在「容量与配额」页算一遍**）。节点：Ready 与各压力条件（判断方向相反）、污点及效果说明、cordon、容量与可分配分开给、节点上活着的 Pod 数与上限、**kubelet 版本偏斜**提示；排序按严重程度而非问题条数。命名空间：Pod 分布、ResourceQuota 已用/上限（只列 hard 里设了上限的项）、有没有 LimitRange、**Terminating 时列出 finalizer**。「既没配额也没 LimitRange」只在真读到配额对象后才判定；Pod 数读不到时显示「未知」而不是 0。**只读**，不提供 cordon / drain / 打污点与命名空间增删
 - [x] 服务转发 `/kubernetes/forward` — 把 Pod / Service 端口映射到平台上的一个 TCP 端口（相当于把 `kubectl port-forward` 挪到平台跑）；走 API Server 的 **WebSocket** 通道（不引 client-go，也不自己实现 SPDY），每条本地连接单开一条 WebSocket；Service 目标每条连接重新解析后端 Pod，Pod 重建/扩缩容后隧道仍可用；实时展示活跃与累计连接、双向流量、剩余时长、拨号失败原因，到期自动关闭并把计数写回档案。约束由环境变量定死（监听地址、端口区间、隧道数、单隧道并发、TTL）。**隧道是进程内的活物，重启即消失**（启动时把残留记录标为已关闭）；**隧道端口不做认证**，见 docs/SECURITY.md 第 16 节；**不做 UDP 转发、不做多端口一条隧道、不做长连接复用（每条连接一条 WebSocket）**
 
 > 实现方式：手写 Kubernetes REST 客户端（`server/internal/k8s`），不引入 client-go —— 只读列表与服务端 apply / scale 都是普通 HTTP 请求（`application/apply-patch+yaml`、`application/merge-patch+json`），不值得为此背上几十兆依赖树。port-forward 也没走 SPDY：kubelet 还支持一套朴素的 WebSocket 通道协议（通道号 + 2 字节端口号前缀），各语言客户端库用的就是它，已在 k3s v1.31 上实测打通。
@@ -1017,6 +1018,44 @@ RBAC 的反查逻辑都是纯数据处理，桩能覆盖；真集群上最可能
 原计划里的 **节点视图** 与 **Namespace 视图** 这一轮没做。它们比上面三个便宜得多
 （`KubeNodes` / `KubeNamespaces` 接口早就有了，缺的是 allocatable / taints / conditions
 与命名空间配额这些字段的补全，以及两个页面），但也确实还没做 —— 不算在这一轮里。
+
+### 补完：节点与命名空间（同一轮的后半段）
+
+上面那句写完之后紧接着做掉了，合并进 `/kubernetes/node` 一个页面两个页签
+（新增 `internal/k8s/inventory.go` + 7 条单测，handler 侧 +2 条端到端测）。
+
+最重要的一条设计是**与「容量与配额」页划清界线**：那一页回答「还能不能再塞」（已分配 /
+limits / 实际用量那本账），这一页回答「这些节点/命名空间自身健康不健康、有没有被什么卡住」。
+资源账**只在一处算**——两处各算一遍迟早会对不上，而对不上的数字比没有数字更糟。
+
+几个刻意的决定：
+
+- **conditions 的判断方向是反的**，这是整块最容易写错的地方：`Ready` 应当为 `True`，
+  而 `DiskPressure` / `MemoryPressure` / `PIDPressure` / `NetworkUnavailable` 应当为 `False`。
+  写错的表现是把健康节点报成异常，或者更糟 —— 把有磁盘压力的节点报成正常。
+  单测把八种组合都钉住了。
+- **Pod 分布全集群列一次再归组**，不是每个节点/命名空间查一次（N 次请求）。
+  已结束（Succeeded / Failed）的 Pod 不计入「这台机器上有多少 Pod」——资源早还回去了。
+- **读不到 Pod 列表时 `PodCounted=false`，界面显示「未知」而不是 0**。
+  0 会被读成「这台机器上没有 Pod」，那是完全相反的结论。同理，拿不到 Pod 数时
+  也不会凭空给出「Pod 数已达上限」这种结论。
+- **「既没有 ResourceQuota 也没有 LimitRange」只在真的读到了配额对象之后才判定**。
+  没权限看配额和没配配额是两件事，混成一个结论会让人去加一个本来就有的配额。
+- **Terminating 时把 finalizer 一起列出来**：命名空间删不掉几乎总是因为有 finalizer 没清，
+  光说「卡在 Terminating」等于没说。
+- **ResourceQuota 只列 hard 里设了上限的项**：`status.used` 里会带一堆没设上限的零值，
+  全列出来是噪音。status 还没算出来时退回 `spec.hard`，至少能看出设了什么上限。
+- **容量与可分配分开给**：调度看的是 `allocatable`，两者的差值是预留给系统组件的部分。
+- **kubelet 版本偏斜单独提示** —— 升级做到一半停下来是很常见的现场。
+
+**单测抓到的一个真问题**：两处排序原本都是「按问题条数降序」，结果一个卡在 Terminating
+的命名空间（1 条问题）被一个「有 Pending Pod + 没配额」的命名空间（2 条问题）压到了后面。
+按条数排是本末倒置，改成先按严重程度：节点 `NotReady` 优先、命名空间 `Terminating` 优先，
+再按条数。这条是写测试时发现的，不是事后想到的。
+
+**仍然是只读**：不提供 cordon / uncordon / drain / 打污点，也不提供命名空间的创建与删除 ——
+前者直接影响调度，后者等于删掉里面的全部对象。
+
 
 
 

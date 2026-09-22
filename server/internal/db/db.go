@@ -264,6 +264,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 309, ParentID: 300, Name: "K8sHelm", Title: "Helm 应用", Path: "/kubernetes/helm", Component: "/kubernetes/helm/index", Icon: "Box", Sort: 6},
 		{ID: 310, ParentID: 300, Name: "K8sCRD", Title: "自定义资源", Path: "/kubernetes/crd", Component: "/kubernetes/crd/index", Icon: "Coin", Sort: 7},
 		{ID: 311, ParentID: 300, Name: "K8sRBAC", Title: "RBAC 账户", Path: "/kubernetes/rbac", Component: "/kubernetes/rbac/index", Icon: "User", Sort: 8},
+		// 节点与命名空间：只看它们自身的健康与约束，资源账本仍然在「容量与配额」页
+		{ID: 312, ParentID: 300, Name: "K8sNode", Title: "节点与命名空间", Path: "/kubernetes/node", Component: "/kubernetes/node/index", Icon: "Cpu", Sort: 9},
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},
