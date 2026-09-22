@@ -450,6 +450,7 @@
 - **域名管理**：`domain:manage` 管台账增删改与「从云资源导入」，`domain:check` 管触发 DNS 核对（会让平台向 DNS 服务器发查询）；列表与概览只需登录。巡检**只查 DNS、不改任何解析记录** —— 这个模块里没有写接口。详见第 37 节
 - **主机日志**：`hostlog:view` 管**读主机上的日志内容**（等同于文件管理的读权限，按这一档审），`hostlog:manage` 管维护监控点、触发巡检与占用采集；列表与历史只需登录。全模块只跑只读命令，但**路径由人输入** —— 唯一的边界是 `OPS_LOG_PATH_PREFIXES` 白名单。详见第 38 节
 - **安全响应**：安全事件的**原始流水视图**与**安全概览**只需登录；升格为事件工单走 `secevent:respond`；学习建议的通过 / 拒绝走 `suggestion:apply` —— 它能改暴露面基线、加误报白名单、把特征提到拦截态（**会让下一次下发真的被拦**），按「能改安全策略」的标准审。详见第 39 节
+- **容器平台的只读专用页**：Helm 应用 / 自定义资源 / Gateway API 路由 / RBAC 账户**都只需登录**（与其它只读容器页一致），但两处敏感度高于其它只读页：Helm 页会读到**未脱敏的 Secret 载荷**（返回字段是白名单式收窄的，不含 values 与 manifest），RBAC 页会摊出**整个集群的提权路径地图**。共享给较多人的部署建议收紧「容器平台」目录的菜单可见性。详见第 40 节
 
 
 
@@ -776,6 +777,48 @@
   让线索从值班视野里消失的状态必须写结论（第 35 节）。
 - **明确的空白**：对外派发（工单 / SOAR）、事件自动处置、处置审批、
   按人或团队的处置绩效统计。
+
+
+## 40. 容器平台的三个只读专用页：Helm / 自定义资源 / RBAC
+
+这一节记两件有安全含量的事：Helm 页**会读到未脱敏的 Secret 载荷**，以及为什么这三页一律只读。
+
+- **Helm 页绕过了 Secret 脱敏，这是刻意的，但返回的东西是收窄的**。
+  平台对 Secret 的一贯口径是「只给键名不给值」（第 5.2 节），而 Helm release 的全部内容
+  就在 `data.release` 这一个键里 —— 脱敏之后什么都解不出来。所以这一页用了一个**不脱敏**的
+  Secret 读取路径。作为补偿，**返回给界面的字段是白名单式的**：release 名、命名空间、状态、
+  chart 与应用版本、revision、历史版本数、最近一次操作说明、Secret 名。
+  **刻意不返回 values 与渲染后的 manifest** —— values 里常有数据库口令与令牌，
+  manifest 是整个渲染结果。审这一页时请按「能看到 Helm 部署元数据」审，
+  而不是「能看到 Secret 的值」—— 后者仍然做不到，但代码层面的边界只有那个字段白名单，
+  改动 `HelmRelease` 结构体时要想到这一点。
+- **三页全部只读，而且是结构上的只读**。`NewReadOnlyKind` 构造出来的资源类型
+  `ReadOnly` 恒为真，而 apply / scale / restart 的入口都会先拒绝只读类型（第 31 节）。
+  也就是说即使以后有人给自定义资源加了写入口，也必须先改掉这个构造函数 —— 不是一句约定。
+  为什么坚持只读：
+  - 自定义资源的语义平台不懂。改一条 Gateway / VirtualService 等于切流量，
+    改一条 ArgoCD Application 等于改部署源。
+  - Helm 的 install / upgrade / rollback 需要真正的 Helm 引擎（模板渲染、钩子、依赖、
+    CRD 处理）。半套实现的表现是「界面说成功了、集群里是另一回事」。
+  - **改 RBAC 就是改提权路径**。这类操作仍然走 kubectl。
+- **RBAC 页会把集群的授权全貌摊出来**，包括「哪个 SA 是 cluster-admin」。
+  这对排查是必需的，但它同时是一份**提权路径地图**：知道哪个 SA 有 cluster-admin，
+  就知道该去抢哪个 Pod 的 token。这一页目前**只需登录**（与其它只读容器页一致），
+  收敛靠菜单 RBAC。在共享给较多人的部署里，建议把「容器平台」整个目录的菜单可见性收紧。
+- **为什么 RBAC 必须全集群读**（也是一条安全判断，不只是实现细节）：
+  只读某个命名空间的 binding 会漏掉 ClusterRoleBinding —— 而那恰好是最危险的一类授权。
+  一个「看起来只有 pod 读权限」的 SA，完全可能被一条 ClusterRoleBinding 绑到了 cluster-admin。
+  代价是这一页需要对 `roles` / `clusterroles` / `rolebindings` / `clusterrolebindings`
+  有全集群 list 权限；给平台的 kubeconfig 权限不足时，错误信息里会写明缺什么。
+- **CRD 与 Helm 的失败信息里写明所需权限**：`apiextensions.k8s.io` 的
+  `customresourcedefinitions` list、`rbac.authorization.k8s.io` 的各类 list。
+  权限不够时表现是 403 而不是空表 —— 这一点在界面上要能区分，否则「没装 CRD」和
+  「没权限看 CRD」会被混成同一件事。
+- **实例数上限 500**：有些 CRD（Argo 的 Workflow）实例能上万，全拉回来会把浏览器卡死。
+  超出时如实标注「已截断」，不假装这就是全部。
+- **明确的空白**：Helm 的 values / manifest / 历史 diff / 回滚、自定义资源的编辑与删除、
+  RBAC 的编辑、Gateway / GatewayClass / TCPRoute / GRPCRoute 的专用解析
+  （可在自定义资源页看原文）。
 
 
 

@@ -51,6 +51,9 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 集群接入 `/kubernetes/source` — 粘贴 kubeconfig 纳管（解析上下文后选用哪个）、连通性与版本检查、节点就绪明细（角色/容量/kubelet/cordon）；不可达或有节点 NotReady 自动写告警并可恢复，定时检查由 `OPS_KUBE_CHECK_SPEC` 控制。**只接受内嵌凭据**，不支持路径式 kubeconfig；**kubeconfig 明文存库**，见 docs/SECURITY.md 第 16 节
 - [x] 工作负载 `/kubernetes/workload` — 按命名空间看 Deployment / StatefulSet / DaemonSet 的副本就绪情况、Pod 状态与容器异常原因、集群事件（可只看 Warning）；Pod 行可直接看**容器日志**（多容器/init 容器切换、行数 200~5000、时间戳、上一个容器、每 5 秒自动刷新、下载，单次 1MB 上限并标注截断）。**不做 follow 流式跟随**、**不提供 exec**；资源改动走「资源管理」
 - [x] 资源管理 `/kubernetes/resource` — 按类型列资源（带类型相关摘要）、看单个对象的可编辑 YAML（自动清掉 status 与 resourceVersion / uid / managedFields 等集群自维护字段）、服务端 apply（`fieldManager=opsone`）并可先 `dryRun=All` 预检、Deployment / StatefulSet 直接改副本数（`/scale`，同样可预检）；字段冲突返回 409 并带出冲突字段，可显式「强制接管」；每次改动（含预检与失败）写 `kube_change_logs` 留痕，记录提交的 YAML 原文与 API Server 原话，写操作绑 `kube:write`。**类型白名单**（Deployment / StatefulSet / DaemonSet / CronJob / Service / ConfigMap / Ingress），**不提供删除**，**不开放 Secret / Namespace / RBAC**，**一次只提交一个对象**（多段 YAML 拒绝），也**不做版本回滚与 diff**
+- [x] Helm 应用 `/kubernetes/helm` — release 从集群里 `type=helm.sh/release.v1` 的 Secret 解出来（两层 base64 + gzip + JSON），**不依赖 helm 二进制、不访问 chart 仓库**；给出状态、chart 与应用版本、第几次发布、历史版本数、最近一次操作说明。同名 release 只显示最新 revision。**不做 install / upgrade / rollback / uninstall**（需要真正的 Helm 引擎），**不返回 values 与渲染后的 manifest**，**只认 secret driver**
+- [x] 自定义资源 `/kubernetes/crd` — CRD 清单运行时从集群读出（不是内置白名单）；served 与 storage 版本分开显示、常见组给中文说明、按版本列实例、详情**保留 status**；CRD 未就绪（`Established≠True`）在查实例前就拦下并说明。同页含 **Gateway API 路由**：把 HTTPRoute 的三层嵌套拍平成「什么流量 → 送到哪」，没装 Gateway API 时明说没装并指路 Ingress。**一律只读**，不提供自定义资源的编辑
+- [x] RBAC 账户 `/kubernetes/rbac` — 反查每个 ServiceAccount 的实际权限（binding → role → rules，k8s 里没有这样一个现成对象）；Role 与 Binding **一律全集群读**（命名空间里的 SA 可能被 ClusterRoleBinding 授权）；`cluster-admin` / 通配符 / 无授权 / **孤儿绑定**单独标出并可筛选，危险的排最前。只反查 ServiceAccount（User / Group 由集群外认证系统管）。**只读** —— 改 RBAC 就是改提权路径
 - [x] 服务转发 `/kubernetes/forward` — 把 Pod / Service 端口映射到平台上的一个 TCP 端口（相当于把 `kubectl port-forward` 挪到平台跑）；走 API Server 的 **WebSocket** 通道（不引 client-go，也不自己实现 SPDY），每条本地连接单开一条 WebSocket；Service 目标每条连接重新解析后端 Pod，Pod 重建/扩缩容后隧道仍可用；实时展示活跃与累计连接、双向流量、剩余时长、拨号失败原因，到期自动关闭并把计数写回档案。约束由环境变量定死（监听地址、端口区间、隧道数、单隧道并发、TTL）。**隧道是进程内的活物，重启即消失**（启动时把残留记录标为已关闭）；**隧道端口不做认证**，见 docs/SECURITY.md 第 16 节；**不做 UDP 转发、不做多端口一条隧道、不做长连接复用（每条连接一条 WebSocket）**
 
 > 实现方式：手写 Kubernetes REST 客户端（`server/internal/k8s`），不引入 client-go —— 只读列表与服务端 apply / scale 都是普通 HTTP 请求（`application/apply-patch+yaml`、`application/merge-patch+json`），不值得为此背上几十兆依赖树。port-forward 也没走 SPDY：kubelet 还支持一套朴素的 WebSocket 通道协议（通道号 + 2 字节端口号前缀），各语言客户端库用的就是它，已在 k3s v1.31 上实测打通。
@@ -910,6 +913,111 @@ SLA 计时与超时提醒。所以「派发」在这里的诚实落法就是升�
 
 **仍然没有的**：处置审批（上面说了为什么）、对外派发到工单 / SOAR 系统、
 事件自动处置、按人/团队的处置绩效统计。
+
+
+## 已落地：容器平台的三个专用页 —— Helm、自定义资源、RBAC 账户
+
+通用「资源管理」页是按白名单 18 种类型的 YAML 浏览器。有三类东西它结构上答不了：
+
+- **Helm release 藏在 Secret 里**，而 Secret 在平台上是脱敏只读的 —— 看得到有 `release` 这个键，
+  看不到值，等于什么都没看到。
+- **CRD 每个集群都不一样**，编译期的白名单列不出来。
+- **「这个 ServiceAccount 能干什么」不是一个字段**，要反查 binding → role → rules。
+
+这一轮补这三块，新增 `internal/k8s/discovery.go`（+ 11 条单测）与 `handler/kube_extra.go`（+ 9 条端到端测）。
+
+### 一个结构上的障碍：ResourceKind 的 apiRoot 是未导出的
+
+白名单表里每条 `ResourceKind` 都带一个小写的 `apiRoot` 字段，包外构造出来的 `ResourceKind`
+那个字段是空串，路径会拼成 `/namespaces/x/foos` 这种查不到任何东西的形状。
+所以先加了一个 `NewReadOnlyKind(apiVersion, resource, kind, group, namespaced)`：
+由 `apiVersion` 推出 `/api/v1` 还是 `/apis/<group>/<version>`，并且**一律 ReadOnly**。
+「一律只读」不是偷懒 —— 平台不懂自定义资源的语义，改错一条 Gateway 可能让整个入口断掉。
+
+### Helm：两层 base64 + gzip
+
+Helm 3 把 release 存成 `type=helm.sh/release.v1` 的 Secret，`data.release` 的解码链是
+k8s 的 base64 → Helm 自己的 base64 → gzip → JSON。第二层 base64 与 gzip 都不是一定有
+（老版本没有），所以实现上是「解不开就当已经是原文」+「按 gzip 魔数判断而不是硬解」。
+单测把四种编码组合都试了一遍。
+
+几个刻意的决定：
+
+- **用 `fieldSelector=type=helm.sh/release.v1` 让 API Server 帮我们筛**，不是把全部 Secret
+  拉回来过滤 —— 后者在大集群里是几十兆的传输。为此把 `ListQuery.FieldSelector`（本来就在
+  k8s 包里、只是 handler 没透出）用上了。
+- **同名 release 只留 revision 最大的那个**，但报出一共有几个历史版本。
+- **不返回 values 与渲染后的 manifest**：values 里常有数据库口令，manifest 动辄几百 KB。
+  列表接口顺手摊出来就是一次数据泄露。
+- **只读**。install / upgrade / rollback 需要真正的 Helm 引擎（模板渲染、钩子、依赖、CRD 处理），
+  半套实现比没有更危险。
+
+### CRD：发现 + 动态 GVR
+
+`served` 与 `storage` 版本分开给：多版本 CRD 很常见，「能查哪些版本」和「实际存的是哪个」
+是两件事，混在一起会让人查错版本。查一个未在服务的版本会被拦下并列出可选项，而不是拼出
+一个 404 的路径。
+
+- **`Established≠True` 的 CRD 在查实例之前就拦下**并说明「那是 CRD 没装好」——
+  否则表现是一个莫名的 404，很容易被当成权限问题查半天。
+- **详情保留 status**（用新加的 `ToFullYAML` 而不是 `ToEditableYAML`）：自定义资源不提供编辑，
+  而它们的 status 往往才是要看的那部分 —— Argo 的同步状态、cert-manager 的签发结果。
+- 认得的 18 个常见组给一句中文说明（Gateway API / cert-manager / Prometheus Operator /
+  Argo / Istio / Flux / Calico / Knative …），**认不出的照样能浏览** —— 不认得不等于不支持。
+
+### Gateway API：折进 CRD 页，但单独解析 HTTPRoute
+
+没有单独做一个 Gateway API 页：装了 Gateway API 之后，它的对象本来就能在自定义资源页浏览。
+真正缺的是「这条 HTTPRoute 把什么流量送到哪」—— 那在 YAML 里嵌三层，得来回翻。
+所以在 CRD 页加了一个页签专门把 HTTPRoute 拍平。四处照实说明：
+
+- 没有 `matches` 的规则按 Gateway API 的默认语义写成「所有请求（未设匹配条件）」，不留空 ——
+  留空会让人以为这条路由没配好。
+- 没有后端的规则写成「不会把流量送到任何地方」。
+- `path` 没写 `type` 时补成默认的 `PathPrefix`。
+- 跨命名空间的后端标出「需 ReferenceGrant」：平台只提示，不代为核对那个 grant 在不在。
+
+集群**没装 Gateway API 时明说没装**并指路去看 Ingress，不给一张空表。
+
+### RBAC：反查，而且必须全集群读
+
+最值得写下来的一条：**即使只看某个命名空间，Role 与 Binding 也一律全集群读**。
+命名空间里的 SA 完全可能被一条 ClusterRoleBinding 绑到 `cluster-admin` 上，
+只读本命名空间的 binding 会**恰好漏掉最危险的那一类**。
+
+- 为什么一次读齐五类对象而不是按需查：binding 的 `subjects` 不是可选择字段，
+  API 层没有「谁绑到了这个 SA」这样的过滤条件，只能全量拉回来在内存里连。
+- **孤儿绑定**（绑了但引用的 Role 不存在）单独数出来：那种配置的表现是「绑了却什么权限都没有」，
+  很容易被当成权限不够去加一个更大的角色。
+- 危险的排最前：`cluster-admin` → 通配符 → 有授权 → 其它。
+- 只反查 ServiceAccount。User / Group 主体由集群外的认证系统管，平台里没有对应对象，
+  造一个假的出来只会误导。
+
+### 验证
+
+`internal/k8s` 11 条 + `internal/handler` 9 条单测全绿，`go vet` / `vue-tsc` / `vite build` 干净。
+
+**handler 那 9 条是端到端的**：起一个**假 API Server**，把集群 kubeconfig（加密落库）指向它，
+再打真实的 HTTP 路由 —— 链路上 gin → handler → 解密 kubeconfig → k8s 客户端 → 解码
+每一段都是真的，只有集群那一端是桩。覆盖：Helm Secret 真的被解出 chart/版本/revision 且
+**fieldSelector 真的带上了**；CRD 清单认出 Gateway API 版本并数出未就绪的那条；
+自定义资源实例按动态 GVR 列出；未就绪 CRD 被拦下且错误信息点名 `Established`；
+详情 YAML 里 `status: Synced` 在；HTTPRoute 拍平出 `api-svc:8080`；
+命名空间里的 SA 被 ClusterRoleBinding 绑到 cluster-admin 被正确标出。
+假 API Server 还对任何未预期的请求路径直接让测试失败 —— 拼错路径不会被静默吞掉。
+
+**没验到的**：真实集群。手上没有可用的 k8s 集群，`internal/k8s` 此前的 port-forward 是在
+k3s v1.31 上实测过的，这一轮的三个能力只在桩上验过。Helm 的解码链、CRD 的路径拼装、
+RBAC 的反查逻辑都是纯数据处理，桩能覆盖；真集群上最可能出问题的是**权限不够**
+（CRD 需要 `apiextensions.k8s.io` 的 list，RBAC 需要 `rbac.authorization.k8s.io` 的 list），
+所以这两处的错误信息里都写明了需要什么权限。
+
+### 这一项还剩什么
+
+原计划里的 **节点视图** 与 **Namespace 视图** 这一轮没做。它们比上面三个便宜得多
+（`KubeNodes` / `KubeNamespaces` 接口早就有了，缺的是 allocatable / taints / conditions
+与命名空间配额这些字段的补全，以及两个页面），但也确实还没做 —— 不算在这一轮里。
+
 
 
 

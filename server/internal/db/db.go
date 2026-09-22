@@ -260,6 +260,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 304, ParentID: 300, Name: "K8sForward", Title: "服务转发", Path: "/kubernetes/forward", Component: "/kubernetes/forward/index", Icon: "Share", Sort: 4},
 		{ID: 307, ParentID: 304, Title: "开关转发隧道", Type: "button", AuthCode: "kube:forward", Sort: 1},
 		{ID: 308, ParentID: 300, Name: "K8sCapacity", Title: "容量与配额", Path: "/kubernetes/capacity", Component: "/kubernetes/capacity/index", Icon: "Odometer", Sort: 5},
+		// 按类型的专用页，全部只读 —— 通用「资源管理」页是白名单 YAML 浏览器，答不了这三类
+		{ID: 309, ParentID: 300, Name: "K8sHelm", Title: "Helm 应用", Path: "/kubernetes/helm", Component: "/kubernetes/helm/index", Icon: "Box", Sort: 6},
+		{ID: 310, ParentID: 300, Name: "K8sCRD", Title: "自定义资源", Path: "/kubernetes/crd", Component: "/kubernetes/crd/index", Icon: "Coin", Sort: 7},
+		{ID: 311, ParentID: 300, Name: "K8sRBAC", Title: "RBAC 账户", Path: "/kubernetes/rbac", Component: "/kubernetes/rbac/index", Icon: "User", Sort: 8},
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},

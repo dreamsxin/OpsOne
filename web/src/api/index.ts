@@ -3031,6 +3031,146 @@ export const checkKubeCluster = (id: number) =>
 export const listKubeNodes = (id: number) => request<KubeNode[]>({ url: `/kube/clusters/${id}/nodes` })
 export const listKubeNamespaces = (id: number) =>
   request<KubeNamespace[]>({ url: `/kube/clusters/${id}/namespaces` })
+
+/* ---- 按类型的专用页：Helm 应用 / 自定义资源 / Gateway API / RBAC 账户（全部只读）---- */
+
+export interface KubeHelmRelease {
+  name: string
+  namespace: string
+  revision: number
+  status: string
+  chart: string
+  chartVersion: string
+  appVersion: string
+  description: string
+  firstDeployedAt: string
+  updatedAt: string
+  revisions: number
+  secretName: string
+  hasNotes: boolean
+}
+
+export interface KubeCRD {
+  name: string
+  group: string
+  kind: string
+  plural: string
+  singular: string
+  shortNames: string[]
+  categories: string[]
+  scope: string
+  namespaced: boolean
+  servedVersions: string[]
+  storageVersion: string
+  createdAt: string
+  established: boolean
+  knownAs: string
+}
+
+export interface KubeGatewayRouteRule {
+  matches: string[]
+  backends: string[]
+}
+
+export interface KubeGatewayRoute {
+  namespace: string
+  name: string
+  gateways: string[]
+  hostnames: string[]
+  rules: KubeGatewayRouteRule[]
+}
+
+export interface KubePolicyRule {
+  apiGroups: string[]
+  resources: string[]
+  verbs: string[]
+  resourceNames?: string[]
+  nonResourceURLs?: string[]
+}
+
+export interface KubeRoleRef {
+  bindingKind: string
+  bindingName: string
+  bindingNamespace: string
+  roleKind: string
+  roleName: string
+  scope: string
+  rules: KubePolicyRule[]
+  missing: boolean
+}
+
+export interface KubeServiceAccount {
+  name: string
+  namespace: string
+  createdAt: string
+  secrets: string[]
+  bindings: KubeRoleRef[]
+  clusterAdmin: boolean
+  wildcard: boolean
+  verbSummary: string[]
+}
+
+export const listKubeHelmReleases = (id: number, params?: Record<string, any>) =>
+  request<{
+    releases: KubeHelmRelease[]
+    byStatus: Record<string, number>
+    total: number
+    notes: string[]
+  }>({ url: `/kube/clusters/${id}/helm-releases`, params })
+
+export const listKubeCRDs = (id: number, params?: Record<string, any>) =>
+  request<{
+    crds: KubeCRD[]
+    groups: string[]
+    groupCounts: Record<string, number>
+    total: number
+    notEstablished: number
+    gatewayAPI: string
+    notes: string[]
+  }>({ url: `/kube/clusters/${id}/crds`, params })
+
+export const listKubeCRDResources = (id: number, params: Record<string, any>) =>
+  request<{
+    items: KubeResourceItem[]
+    total: number
+    shown: number
+    truncated: boolean
+    crd: KubeCRD
+    kind: string
+    apiVersion: string
+    namespaced: boolean
+    note: string
+  }>({ url: `/kube/clusters/${id}/crd-resources`, params })
+
+export const getKubeCRDResource = (id: number, params: Record<string, any>) =>
+  request<{
+    crd: string
+    kind: string
+    apiVersion: string
+    name: string
+    namespace: string
+    yaml: string
+    note: string
+  }>({ url: `/kube/clusters/${id}/crd-resource`, params })
+
+export const listKubeGatewayRoutes = (id: number, params?: Record<string, any>) =>
+  request<{
+    installed: boolean
+    version?: string
+    routes: KubeGatewayRoute[]
+    total?: number
+    note?: string
+    notes?: string[]
+  }>({ url: `/kube/clusters/${id}/gateway-routes`, params })
+
+export const listKubeRBAC = (id: number, params?: Record<string, any>) =>
+  request<{
+    accounts: KubeServiceAccount[]
+    total: number
+    shown: number
+    stats: Record<string, number>
+    notes: string[]
+  }>({ url: `/kube/clusters/${id}/rbac`, params })
 export const listKubeWorkloads = (id: number, namespace?: string) =>
   request<{ items: KubeWorkload[]; total: number; unhealthy: number; warnings: string[] }>({
     url: `/kube/clusters/${id}/workloads`,
