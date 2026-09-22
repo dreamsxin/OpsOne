@@ -92,26 +92,38 @@ const chips = computed<ChipItem[]>(() => {
 
 const activeChipKey = computed<string | null>(() => {
   if (query.rehit === '1') return 'rehit'
-  if (query.status) return `status:${query.status}`
+  // severity 要先判：「严重待办」这个 chip 会同时写 severity 与 status，
+  // 先判 status 的话它算出来是 status:open，跟任何 chip 都对不上，永远不高亮
   if (query.severity) return `severity:${query.severity}`
+  if (query.status) return `status:${query.status}`
   return null
 })
 
 function onChipSelect(key: string) {
   if (key === 'info') return
   const wasActive = activeChipKey.value === key
-  query.status = ''; query.severity = ''; query.rehit = ''
-  if (wasActive) { query.page = 1; load(); return }
-  if (key === 'rehit') query.rehit = '1'
-  else if (key.startsWith('status:')) query.status = key.split(':')[1]
-  else if (key === 'severity:critical') { query.severity = 'critical'; query.status = 'open' }
+  query.status = ''
+  query.severity = ''
+  query.rehit = ''
+  if (wasActive) {
+    query.page = 1
+    load()
+    return
+  }
+  if (key === 'rehit') {
+    query.rehit = '1'
+  } else if (key.startsWith('status:')) {
+    query.status = key.split(':')[1]
+  } else if (key === 'severity:critical') {
+    query.severity = 'critical'
+    query.status = 'open'
+  }
   query.page = 1
   load()
 }
 
 function resetFilters() {
-  query.status = ''; query.source = ''; query.severity = ''; query.actorIp = ''; query.keyword = ''; query.rehit = ''
-  query.page = 1
+  Object.assign(query, { status: '', source: '', severity: '', actorIp: '', keyword: '', rehit: '', page: 1 })
   load()
 }
 
@@ -134,38 +146,56 @@ async function submitNote() {
   load()
 }
 
+const collecting = ref(false)
+
 async function doCollect() {
-  const res = await collectSecurityEvents()
-  ElMessage.success(`采集完成：新建 ${res.created}，累加 ${res.updated}，结案后又命中 ${res.rehit}，白名单挡掉 ${res.muted}`)
-  load()
+  // 采集是「读游标 → 消费 → 推游标」，连点会让两轮采集抢同一个游标，这里挡住
+  if (collecting.value) return
+  collecting.value = true
+  try {
+    const res = await collectSecurityEvents()
+    ElMessage.success(`采集完成：新建 ${res.created}，累加 ${res.updated}，结案后又命中 ${res.rehit}，白名单挡掉 ${res.muted}`)
+    load()
+  } finally {
+    collecting.value = false
+  }
 }
 
 // 研判（支持批量）
 async function doTriage(status: string, targets?: SecurityEvent[]) {
-  const ids = (targets || selection.value).map(r => r.id)
-  if (!ids.length) { ElMessage.warning('请先选择事件'); return }
+  // 去重：详情页的按钮和列表勾选可能指向同一条，后端按「查回行数 != ids 长度」判存在性
+  const ids = [...new Set((targets || selection.value).map((r) => r.id))]
+  if (!ids.length) {
+    ElMessage.warning('请先选择事件')
+    return
+  }
 
   const needsVerdict = ['false-positive', 'ignored', 'handled'].includes(status)
   let verdict = ''
   let owner = ''
   const label = statusMeta[status]?.text || status
 
-  if (needsVerdict) {
-    const { value } = await ElMessageBox.prompt(
-      `将 ${ids.length} 条事件判为「${label}」。写清结论（必填）：`,
-      '研判结论', { inputType: 'textarea', inputValidator: v => (v?.trim() ? true : '必须写结论') }
-    )
-    verdict = value
-  } else if (status === 'investigating') {
-    try {
+  // 三种弹窗都要接住「取消」，否则 ElMessageBox 的 reject 会变成未处理的 rejection
+  try {
+    if (needsVerdict) {
+      const { value } = await ElMessageBox.prompt(
+        `将 ${ids.length} 条事件判为「${label}」。写清结论（必填）：`,
+        '研判结论',
+        { inputType: 'textarea', inputValidator: (v) => (v?.trim() ? true : '必须写结论') }
+      )
+      verdict = value
+    } else if (status === 'investigating') {
       const { value } = await ElMessageBox.prompt(
         `将 ${ids.length} 条事件转为「研判中」。可指定负责人（选填）：`,
-        '开始研判', { inputValue: '', inputValidator: () => true }
+        '开始研判',
+        { inputValue: '', inputValidator: () => true }
       )
       owner = value?.trim() || ''
-    } catch { return }
-  } else {
-    await ElMessageBox.confirm(`确认将 ${ids.length} 条事件设为「${label}」？`, '批量研判')
+    } else {
+      await ElMessageBox.confirm(`确认将 ${ids.length} 条事件设为「${label}」？`, '批量研判')
+    }
+  } catch {
+    return
   }
 
   const res = await triageSecurityEvents({ ids, status, verdict, owner })
@@ -245,7 +275,7 @@ onMounted(async () => {
     <PageHeader title="安全事件" subtitle="从下发闸门/终端拦截/暴露面扫描/越权拦截自动采集，不提供手工新建">
       <template #actions>
         <el-button @click="toggleMuteTab">{{ muteTab ? '回到事件' : '误报白名单' }}</el-button>
-        <el-button v-perm="'secevent:manage'" @click="doCollect">立即采集</el-button>
+        <el-button v-perm="'secevent:manage'" :loading="collecting" @click="doCollect">立即采集</el-button>
       </template>
     </PageHeader>
 
@@ -331,30 +361,8 @@ onMounted(async () => {
             </el-tag>
             <div v-if="row.hitsAfterClose > 0" style="color: #dc2626; font-size: 11px; margin-top: 2px">
               结案后又命中 {{ row.hitsAfterClose }} 次
-    <!-- 封禁草稿对话框 -->
-    <el-dialog v-model="blockVisible" title="生成封禁规则草稿" width="480px">
-      <el-alert type="warning" :closable="false" style="margin-bottom: 10px"
-        title="只登记规则草稿，不会直接动真机。到「防火墙策略」核对后再下发，下发走命令规则与生产确认" />
-      <el-form label-width="80px">
-        <el-form-item label="源地址">
-          <el-input :model-value="detail?.event.actorIp" disabled />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input v-model="blockForm.port" placeholder="必填（底层规则模型要求 tcp 必须带端口）" />
-        </el-form-item>
-        <el-form-item label="挂到主机">
-          <el-select v-model="blockForm.hostId" filterable placeholder="选择主机" style="width: 100%">
-            <el-option v-for="h in hosts" :key="h.id" :label="`${h.name} (${h.env})`" :value="h.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="blockVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitBlock">生成草稿</el-button>
-      </template>
-    </el-dialog>
-  </div>
-</template>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="发起方" width="130">
           <template #default="{ row }">
@@ -466,5 +474,33 @@ onMounted(async () => {
         </el-alert>
       </template>
     </el-drawer>
+
+    <!-- 封禁草稿对话框。必须挂在根节点下，不能塞进表格单元格的 #default 里 ——
+         那样每一行都会实例化一份，点一次会同时弹出一屏。 -->
+    <el-dialog v-model="blockVisible" title="生成封禁规则草稿" width="480px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 10px"
+        title="只登记规则草稿，不会直接动真机。到「防火墙策略」核对后再下发，下发走命令规则与生产确认"
+      />
+      <el-form label-width="80px">
+        <el-form-item label="源地址">
+          <el-input :model-value="detail?.event.actorIp" disabled />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input v-model="blockForm.port" placeholder="必填（底层规则模型要求 tcp 必须带端口）" />
+        </el-form-item>
+        <el-form-item label="挂到主机">
+          <el-select v-model="blockForm.hostId" filterable placeholder="选择主机" style="width: 100%">
+            <el-option v-for="h in hosts" :key="h.id" :label="`${h.name} (${h.env})`" :value="h.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="blockVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitBlock">生成草稿</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>

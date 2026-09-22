@@ -146,13 +146,13 @@ func TestUpsertDedupsAndCountsHits(t *testing.T) {
 		Evidence: "shutdown -h now", RefTable: "session_commands", RefID: 1,
 		SeenAt: time.Now().Add(-time.Hour), FingerKey: "关机或重启主机",
 	}
-	if got := h.upsertSecCandidate(cand); got != "created" {
+	if got, err := h.upsertSecCandidate(cand); err != nil || got != "created" {
 		t.Fatalf("第一次应该新建，实际 %s", got)
 	}
 	again := cand
 	again.RefID = 2
 	again.SeenAt = time.Now()
-	if got := h.upsertSecCandidate(again); got != "updated" {
+	if got, err := h.upsertSecCandidate(again); err != nil || got != "updated" {
 		t.Fatalf("第二次应该累加，实际 %s", got)
 	}
 
@@ -183,7 +183,9 @@ func TestClosedEventCountsRehitWithoutReopening(t *testing.T) {
 		Actor: "ops01", ActorIP: "10.0.0.9", Target: "/api/v1/hosts/:id",
 		RefTable: "audit_logs", RefID: 1, SeenAt: time.Now(), FingerKey: "DELETE /api/v1/hosts/:id",
 	}
-	h.upsertSecCandidate(cand)
+	if _, err := h.upsertSecCandidate(cand); err != nil {
+		t.Fatalf("落库失败: %v", err)
+	}
 
 	var event model.SecurityEvent
 	h.DB.First(&event)
@@ -192,7 +194,7 @@ func TestClosedEventCountsRehitWithoutReopening(t *testing.T) {
 
 	next := cand
 	next.RefID = 2
-	if got := h.upsertSecCandidate(next); got != "rehit" {
+	if got, err := h.upsertSecCandidate(next); err != nil || got != "rehit" {
 		t.Fatalf("结案后再命中应算 rehit，实际 %s", got)
 	}
 
@@ -224,7 +226,7 @@ func TestMuteSkipsCollectionButKeepsCounting(t *testing.T) {
 		t.Fatalf("写白名单失败: %v", err)
 	}
 
-	if got := h.upsertSecCandidate(cand); got != "muted" {
+	if got, err := h.upsertSecCandidate(cand); err != nil || got != "muted" {
 		t.Fatalf("命中白名单应被跳过，实际 %s", got)
 	}
 	var count int64
@@ -249,11 +251,11 @@ func TestCollectCursorDoesNotReprocess(t *testing.T) {
 		t.Fatalf("写入流水失败: %v", err)
 	}
 
-	first := h.CollectSecurityEvents()
+	first, _ := h.CollectSecurityEvents()
 	if first.Created != 1 {
 		t.Fatalf("第一次应新建 1 条，实际 %+v", first)
 	}
-	second := h.CollectSecurityEvents()
+	second, _ := h.CollectSecurityEvents()
 	if second.Created != 0 || second.Updated != 0 {
 		t.Fatalf("同一行流水不该被消费两次，实际 %+v", second)
 	}
@@ -390,6 +392,77 @@ func TestTriageRejectsUnknownStatusAndEmptyIDs(t *testing.T) {
 	if code, _ := secPostJSON(t, engine, "POST", "/security/events/triage",
 		`{"ids":[1],"status":"closed","verdict":"x"}`); code == 200 {
 		t.Fatal("未知状态应被拒")
+	}
+}
+
+func TestTriageKeepsExistingVerdictWhenReopening(t *testing.T) {
+	h, engine := newSecEventTestHandler(t)
+	event := model.SecurityEvent{
+		Fingerprint: "fp-keep", Source: secSourceAuthz, Title: "越权访问被拒",
+		Severity: "warning", Status: secStatusIgnored, Verdict: "内部演练，已跟安全组确认",
+		FirstSeenAt: time.Now(), LastSeenAt: time.Now(),
+	}
+	if err := h.DB.Create(&event).Error; err != nil {
+		t.Fatalf("写事件失败: %v", err)
+	}
+
+	// 转「研判中」不强制填结论，但不能因此把之前写好的结论清空 ——
+	// 那是别人研判的产出，重新打开不等于把它作废
+	code, out := secPostJSON(t, engine, "POST", "/security/events/triage",
+		`{"ids":[`+secIDText(event.ID)+`],"status":"investigating"}`)
+	if code != 200 {
+		t.Fatalf("转研判中失败: %d %v", code, out)
+	}
+	var after model.SecurityEvent
+	h.DB.First(&after, event.ID)
+	if after.Verdict != event.Verdict {
+		t.Fatalf("已有结论被清空了：%q -> %q", event.Verdict, after.Verdict)
+	}
+	if after.Status != secStatusInvestigating {
+		t.Fatalf("状态没改过来: %s", after.Status)
+	}
+}
+
+func TestTriageToleratesDuplicateIDs(t *testing.T) {
+	h, engine := newSecEventTestHandler(t)
+	event := model.SecurityEvent{
+		Fingerprint: "fp-dup", Source: secSourceTerminal, Title: "终端高危命令被拦",
+		Severity: "critical", Status: secStatusNew,
+		FirstSeenAt: time.Now(), LastSeenAt: time.Now(),
+	}
+	if err := h.DB.Create(&event).Error; err != nil {
+		t.Fatalf("写事件失败: %v", err)
+	}
+	// 详情页按钮与列表勾选可能指向同一条，传进来就是重复 ID。
+	// 按「查回行数 != ids 长度」判存在性会把这种情况误判成「有事件不存在」
+	id := secIDText(event.ID)
+	code, out := secPostJSON(t, engine, "POST", "/security/events/triage",
+		`{"ids":[`+id+`,`+id+`],"status":"confirmed"}`)
+	if code != 200 {
+		t.Fatalf("重复 ID 不该让整批失败: %d %v", code, out)
+	}
+	data, _ := out["data"].(map[string]any)
+	if changed, _ := data["changed"].(float64); changed != 1 {
+		t.Fatalf("去重后应只改 1 条，实际 %v", data["changed"])
+	}
+}
+
+func TestCollectSerializesAgainstConcurrentRuns(t *testing.T) {
+	h, _ := newSecEventTestHandler(t)
+	// cron 与手动「立即采集」调的是同一段逻辑，同时跑会抢同一个游标。
+	// 第二个调用必须直接退出（ran=false），而不是排队再消费一遍。
+	secCollectMu.Lock()
+	stat, ran := h.CollectSecurityEvents()
+	secCollectMu.Unlock()
+	if ran {
+		t.Fatal("已经有一轮采集在跑时，第二次调用不该执行")
+	}
+	if stat.Created != 0 {
+		t.Fatalf("没执行就不该有产出，实际 %+v", stat)
+	}
+	// 锁放开后可以正常跑
+	if _, ran := h.CollectSecurityEvents(); !ran {
+		t.Fatal("锁放开后应能正常采集")
 	}
 }
 

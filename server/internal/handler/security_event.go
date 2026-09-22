@@ -1,16 +1,17 @@
 package handler
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ops-platform/server/internal/fwx"
 	"ops-platform/server/internal/middleware"
@@ -104,20 +105,19 @@ func (h *Handler) secCursor(source string) uint {
 	return uint(n)
 }
 
-func (h *Handler) setSecCursor(source string, id uint) {
+func (h *Handler) setSecCursor(source string, id uint) error {
 	key := secCursorKey(source)
 	value := strconv.FormatUint(uint64(id), 10)
 	var exist model.SysConfig
 	if err := h.DB.Where("`key` = ?", key).First(&exist).Error; err == nil {
-		h.DB.Model(&exist).Update("value", value)
-		return
+		return h.DB.Model(&exist).Update("value", value).Error
 	}
-	h.DB.Create(&model.SysConfig{
+	return h.DB.Create(&model.SysConfig{
 		Group: "security", Key: key, Value: value, Type: "int",
 		Label:   "安全事件采集游标：" + secSourceLabels[source],
 		Remark:  "采集器消费到的原始流水 ID，由程序维护；手工改小会重采，改大会漏采",
 		Builtin: false,
-	})
+	}).Error
 }
 
 // ---------- 候选事件 ----------
@@ -141,11 +141,11 @@ type secCandidate struct {
 	FingerKey string
 }
 
-// secFingerprint 指纹只认「谁 / 从哪 / 对谁 / 干了什么」，不含时间与流水 ID
+// secFingerprint 指纹只认「谁 / 从哪 / 对谁 / 干了什么」，不含时间与流水 ID。
+// 哈希直接复用告警那边的 internalAlertFingerprint（sha256 截断到 40 位 hex）。
 func secFingerprint(c secCandidate) string {
 	raw := strings.Join([]string{c.Source, c.Actor, c.ActorIP, c.Target, c.Port, c.FingerKey}, "|")
-	sum := sha1.Sum([]byte(raw))
-	return hex.EncodeToString(sum[:])
+	return internalAlertFingerprint(raw)
 }
 
 // ---------- 四个采集器 ----------
@@ -399,27 +399,41 @@ type secCollectStat struct {
 	Muted   int `json:"muted"`
 }
 
-// upsertSecCandidate 一条候选落库。返回落到哪一类（created / updated / rehit / muted）。
-func (h *Handler) upsertSecCandidate(cand secCandidate) string {
+// upsertSecCandidate 一条候选落库。
+//
+// 返回 outcome（created / updated / rehit / muted）与 error。error 非空时调用方
+// 必须停下来并且**不要**把游标推过这一行 —— 游标只前进，推过去就等于这条线索
+// 永久丢失，而流水表是只追加的，没有第二次机会。
+func (h *Handler) upsertSecCandidate(cand secCandidate) (string, error) {
 	fp := secFingerprint(cand)
 	seen := cand.SeenAt
 	if seen.IsZero() {
 		seen = time.Now()
 	}
 
-	// 误报白名单优先：命中就只记「又挡掉一次」，不建事件也不复活旧事件
+	// 误报白名单优先：命中就只记「又挡掉一次」，不建事件也不复活旧事件。
+	// 计数用 SQL 自增而不是读出来加一：cron 与手动采集可能同时在跑，
+	// 读-改-写会丢更新，而这个数字是判断「是不是当初判错了」的唯一依据。
 	var mute model.SecurityEventMute
-	if err := h.DB.Where("fingerprint = ?", fp).First(&mute).Error; err == nil {
-		h.DB.Model(&mute).Updates(map[string]any{
-			"hit_count":   mute.HitCount + 1,
-			"last_hit_at": &seen,
-		})
-		return "muted"
+	err := h.DB.Where("fingerprint = ?", fp).First(&mute).Error
+	if err == nil {
+		if err := h.DB.Model(&model.SecurityEventMute{}).Where("id = ?", mute.ID).
+			Updates(map[string]any{
+				"hit_count":   gorm.Expr("hit_count + 1"),
+				"last_hit_at": &seen,
+			}).Error; err != nil {
+			return "", fmt.Errorf("更新误报白名单命中数: %w", err)
+		}
+		return "muted", nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		// 查库本身出错（连接断了、表锁住了）不能当成「不在白名单」继续往下走
+		return "", fmt.Errorf("查询误报白名单: %w", err)
 	}
 
 	var exist model.SecurityEvent
-	err := h.DB.Where("fingerprint = ?", fp).First(&exist).Error
-	if err != nil {
+	err = h.DB.Where("fingerprint = ?", fp).First(&exist).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		event := model.SecurityEvent{
 			Fingerprint: fp, Source: cand.Source, Title: truncate(cand.Title, 250),
 			Severity: normalizeSeverity(cand.Severity),
@@ -429,18 +443,20 @@ func (h *Handler) upsertSecCandidate(cand secCandidate) string {
 			HitCount: 1, FirstSeenAt: seen, LastSeenAt: seen, Status: secStatusNew,
 		}
 		if err := h.DB.Create(&event).Error; err != nil {
-			log.Printf("[secevent] 写入安全事件失败: %v", err)
-			return ""
+			return "", fmt.Errorf("写入安全事件: %w", err)
 		}
 		h.appendSecLog(event.ID, "collect",
 			fmt.Sprintf("由「%s」采集到（原始记录 %s#%d）", secSourceLabels[cand.Source], cand.RefTable, cand.RefID),
 			"系统")
-		return "created"
+		return "created", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("查询安全事件: %w", err)
 	}
 
 	// 已经有了：累加次数、刷新最近一次与证据（证据取最新一条，旧的在原始流水里还能查）
 	updates := map[string]any{
-		"hit_count":  exist.HitCount + 1,
+		"hit_count":  gorm.Expr("hit_count + 1"),
 		"evidence":   cand.Evidence,
 		"ref_table":  cand.RefTable,
 		"ref_id":     cand.RefID,
@@ -456,19 +472,19 @@ func (h *Handler) upsertSecCandidate(cand secCandidate) string {
 	outcome := "updated"
 	if secClosedStatuses[exist.Status] {
 		// 结案了还在响：不改状态（那是人的判断），但必须让人看见
-		updates["hits_after_close"] = exist.HitsAfterClose + 1
+		updates["hits_after_close"] = gorm.Expr("hits_after_close + 1")
 		outcome = "rehit"
 	}
-	if err := h.DB.Model(&exist).Updates(updates).Error; err != nil {
-		log.Printf("[secevent] 更新安全事件失败: %v", err)
-		return ""
+	if err := h.DB.Model(&model.SecurityEvent{}).Where("id = ?", exist.ID).
+		Updates(updates).Error; err != nil {
+		return "", fmt.Errorf("更新安全事件: %w", err)
 	}
 	if outcome == "rehit" {
 		h.appendSecLog(exist.ID, "rehit",
 			fmt.Sprintf("已结案（%s）之后又命中，累计 %d 次。判错了还是还在继续，需要人再看一眼",
 				secStatusLabels[exist.Status], exist.HitsAfterClose+1), "系统")
 	}
-	return outcome
+	return outcome, nil
 }
 
 // appendSecLog 追加一条处置链路记录
@@ -479,8 +495,22 @@ func (h *Handler) appendSecLog(eventID uint, action, content, operator string) {
 	})
 }
 
-// CollectSecurityEvents 走一遍四个来源。cron 与手动都调它。
-func (h *Handler) CollectSecurityEvents() secCollectStat {
+// secCollectMu 采集器的进程级串行锁。
+//
+// cron（OPS_SECEVENT_SPEC）与手动「立即采集」调的是同一段逻辑，而采集是
+// 「读游标 → 消费 → 写游标」：两条路径同时跑会读到同一个游标、重复消费同一批流水，
+// 后写的游标还可能把先写的覆盖回去。这里用 TryLock 让第二个调用直接退出而不是排队 ——
+// 排队只会把同一批数据再消费一遍。
+var secCollectMu sync.Mutex
+
+// CollectSecurityEvents 走一遍四个来源。
+// 第二个返回值为 false 表示「上一次采集还在跑，本次没执行」。
+func (h *Handler) CollectSecurityEvents() (secCollectStat, bool) {
+	if !secCollectMu.TryLock() {
+		return secCollectStat{}, false
+	}
+	defer secCollectMu.Unlock()
+
 	stat := secCollectStat{}
 	type collector struct {
 		source string
@@ -494,7 +524,19 @@ func (h *Handler) CollectSecurityEvents() secCollectStat {
 	} {
 		cands, cursor := c.run()
 		for _, cand := range cands {
-			switch h.upsertSecCandidate(cand) {
+			outcome, err := h.upsertSecCandidate(cand)
+			if err != nil {
+				// 停在出错这一行之前：游标只前进，推过去这条线索就永久丢了。
+				// 用 RefID-1 而不是上一条候选的 RefID —— 暴露面来源一行扫描会展开成
+				// 多条候选（一个端口一条），停在同一个 RefID 会跳过剩下的端口。
+				log.Printf("[secevent] 消费 %s#%d 失败，游标停在此之前等下轮重试: %v",
+					cand.RefTable, cand.RefID, err)
+				if cand.RefID > 0 {
+					cursor = cand.RefID - 1
+				}
+				break
+			}
+			switch outcome {
 			case "created":
 				stat.Created++
 			case "updated":
@@ -505,24 +547,33 @@ func (h *Handler) CollectSecurityEvents() secCollectStat {
 				stat.Muted++
 			}
 		}
-		// 游标一定要推进：哪怕这批全被白名单挡掉，也不能下次再看一遍
-		h.setSecCursor(c.source, cursor)
+		// 被白名单挡掉的也算消费过了，游标照推，不然下次还要再看一遍
+		if err := h.setSecCursor(c.source, cursor); err != nil {
+			log.Printf("[secevent] %s 游标写入失败（下轮会重采这批并重复累加命中数）: %v",
+				secSourceLabels[c.source], err)
+		}
 	}
 	if stat.Created > 0 || stat.Rehit > 0 {
 		log.Printf("[secevent] 采集完成：新建 %d 条，累加 %d 条，结案后又命中 %d 条，白名单挡掉 %d 次",
 			stat.Created, stat.Updated, stat.Rehit, stat.Muted)
 	}
-	return stat
+	return stat, true
 }
 
 // CollectSecurityEventsForSchedule cron 入口
 func (h *Handler) CollectSecurityEventsForSchedule() {
-	h.CollectSecurityEvents()
+	if _, ran := h.CollectSecurityEvents(); !ran {
+		log.Println("[secevent] 上一次采集还在跑，本轮跳过")
+	}
 }
 
 // RunSecurityCollect 手动采集一次
 func (h *Handler) RunSecurityCollect(c *gin.Context) {
-	stat := h.CollectSecurityEvents()
+	stat, ran := h.CollectSecurityEvents()
+	if !ran {
+		response.BadRequest(c, "上一次采集还在跑，稍等一下再点")
+		return
+	}
 	response.OK(c, stat)
 }
 
@@ -726,13 +777,34 @@ func (h *Handler) TriageSecurityEvents(c *gin.Context) {
 		}
 	}
 
+	// 先去重再比对存在性：详情页按钮与列表勾选可能指向同一条，
+	// 直接用 len(events) != len(req.IDs) 会把「有重复」误判成「有不存在的」
+	ids := make([]uint, 0, len(req.IDs))
+	seen := map[uint]bool{}
+	for _, id := range req.IDs {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+
 	var events []model.SecurityEvent
-	if err := h.DB.Where("id IN ?", req.IDs).Find(&events).Error; err != nil {
+	if err := h.DB.Where("id IN ?", ids).Find(&events).Error; err != nil {
 		response.Error(c, "查询安全事件失败")
 		return
 	}
-	if len(events) != len(req.IDs) {
-		response.BadRequest(c, fmt.Sprintf("有 %d 条安全事件不存在", len(req.IDs)-len(events)))
+	if len(events) != len(ids) {
+		found := map[uint]bool{}
+		for _, e := range events {
+			found[e.ID] = true
+		}
+		missing := make([]string, 0, len(ids)-len(events))
+		for _, id := range ids {
+			if !found[id] {
+				missing = append(missing, strconv.FormatUint(uint64(id), 10))
+			}
+		}
+		response.BadRequest(c, "这些安全事件不存在: #"+strings.Join(missing, " #"))
 		return
 	}
 
@@ -744,8 +816,14 @@ func (h *Handler) TriageSecurityEvents(c *gin.Context) {
 	}
 
 	changed, muted := 0, 0
+	failed := make([]string, 0)
 	for _, event := range events {
-		updates := map[string]any{"status": req.Status, "verdict": verdict}
+		updates := map[string]any{"status": req.Status}
+		// 只在真的填了结论时才写：转「研判中」不强制填结论，
+		// 无条件覆盖会把之前写好的研判结论清空
+		if verdict != "" {
+			updates["verdict"] = verdict
+		}
 		if req.Owner != "" {
 			updates["owner"] = req.Owner
 		}
@@ -759,6 +837,8 @@ func (h *Handler) TriageSecurityEvents(c *gin.Context) {
 		}
 		if err := h.DB.Model(&model.SecurityEvent{}).Where("id = ?", event.ID).
 			Updates(updates).Error; err != nil {
+			log.Printf("[secevent] 更新事件 #%d 研判状态失败: %v", event.ID, err)
+			failed = append(failed, strconv.FormatUint(uint64(event.ID), 10))
 			continue
 		}
 		changed++
@@ -777,7 +857,7 @@ func (h *Handler) TriageSecurityEvents(c *gin.Context) {
 			}
 		}
 	}
-	response.OK(c, gin.H{"changed": changed, "muted": muted})
+	response.OK(c, gin.H{"changed": changed, "muted": muted, "failed": failed})
 }
 
 // muteFingerprint 把一条事件的指纹加入白名单。已经在里面就不动。
@@ -961,9 +1041,14 @@ func (h *Handler) DeleteSecurityMute(c *gin.Context) {
 	// 对应的事件如果还在，把它拉回待研判：白名单撤了就说明当初的误报判断不成立
 	var event model.SecurityEvent
 	if err := h.DB.Where("fingerprint = ?", mute.Fingerprint).First(&event).Error; err == nil {
-		h.DB.Model(&event).Updates(map[string]any{
-			"status": secStatusNew, "closed_at": nil, "closed_by": "", "hits_after_close": 0,
-		})
+		if err := h.DB.Model(&model.SecurityEvent{}).Where("id = ?", event.ID).
+			Updates(map[string]any{
+				"status": secStatusNew, "closed_at": nil, "closed_by": "", "hits_after_close": 0,
+			}).Error; err != nil {
+			// 白名单已经删了但事件没拉回来，是个半成品状态，必须让人知道
+			response.Error(c, fmt.Sprintf("白名单已撤销，但事件 #%d 没能拉回待研判，请手工改一下", event.ID))
+			return
+		}
 		h.appendSecLog(event.ID, "status",
 			fmt.Sprintf("误报白名单被撤销（期间挡掉 %d 次），重新回到待研判", mute.HitCount),
 			middleware.CurrentUser(c).Username)
