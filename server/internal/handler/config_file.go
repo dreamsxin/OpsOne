@@ -947,9 +947,9 @@ func (h *Handler) DiffConfigFile(c *gin.Context) {
 	// 两版之间比
 	if left, right := loadVersion(c.Query("from")), loadVersion(c.Query("to")); left != nil && right != nil {
 		response.OK(c, gin.H{
-			"mode": "version",
-			"left": gin.H{"label": fmt.Sprintf("v%d", left.Version), "hash": left.Hash},
-			"right": gin.H{"label": fmt.Sprintf("v%d", right.Version), "hash": right.Hash},
+			"mode":      "version",
+			"left":      gin.H{"label": fmt.Sprintf("v%d", left.Version), "hash": left.Hash},
+			"right":     gin.H{"label": fmt.Sprintf("v%d", right.Version), "hash": right.Hash},
 			"same":      left.Hash == right.Hash,
 			"diffLines": diffLineCount(left.Content, right.Content),
 			"diff": unifiedDiff(left.Content, right.Content,
@@ -976,9 +976,9 @@ func (h *Handler) DiffConfigFile(c *gin.Context) {
 	}
 
 	response.OK(c, gin.H{
-		"mode":  "actual",
-		"left":  gin.H{"label": fmt.Sprintf("基线 v%d", desired.Version), "hash": desired.Hash},
-		"right": gin.H{"label": "真机现状", "hash": got.Hash, "mode": got.Mode, "size": got.Size},
+		"mode":      "actual",
+		"left":      gin.H{"label": fmt.Sprintf("基线 v%d", desired.Version), "hash": desired.Hash},
+		"right":     gin.H{"label": "真机现状", "hash": got.Hash, "mode": got.Mode, "size": got.Size},
 		"same":      desired.Hash == got.Hash,
 		"diffLines": diffLineCount(desired.Content, got.Content),
 		"diff": unifiedDiff(desired.Content, got.Content,

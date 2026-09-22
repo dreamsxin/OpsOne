@@ -159,7 +159,8 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 	}
 
 	if isIMChannel(channel.Type) {
-		status, err := h.postIM(channel, imAlertText(alert))
+		// 有配模板就按模板发，没有就按原来的硬编码格式 —— 模板是可选的覆盖
+		status, err := h.postIM(channel, h.renderIMBody(channel, alert))
 		record.HTTPStatus = status
 		record.CostMs = time.Since(start).Milliseconds()
 		if err != nil {
@@ -170,12 +171,17 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 		return
 	}
 
-	status, err := postJSON(channel, alertMessage(alert))
+	payload, warn := h.renderWebhookBody(channel, alert)
+	status, err := postJSON(channel, payload)
 	record.HTTPStatus = status
 	record.CostMs = time.Since(start).Milliseconds()
 	if err != nil {
 		record.Status = "failed"
 		record.ErrorMsg = truncate(err.Error(), 240)
+	} else if warn != "" {
+		// 发出去了，但模板没生效。这种情况必须在流水里说清楚：
+		// 否则使用者只会发现「模板像是没起作用」，查不到原因
+		record.ErrorMsg = truncate(warn, 240)
 	}
 	_ = h.DB.Create(&record).Error
 }

@@ -654,10 +654,15 @@ func (h *Handler) notifyOnCall(schedule model.OnCallSchedule, alert model.Alert,
 		h.DB.Create(&mail)
 		return
 	}
-	// 借用邮件渠道的发信能力，收件人临时指定成值班人的邮箱
+	// 借用邮件渠道的发信能力，收件人临时指定成值班人的邮箱。
+	// 这里刻意指定 oncall.call 模板并传值班场景的变量 —— 在这之前它用的是
+	// alertMailVars + 回落到 alert.default，于是上面精心拼好的「值班呼叫（第 N 级）/
+	// 派给你 / 确认后不再升级」只进了站内消息，邮件里收到的是一封和普通告警
+	// 一模一样的信，看不出这是在叫自己
 	err := h.sendMail(model.NotifyChannel{
 		Type: "email", Recipients: person.Email, Name: "值班呼叫",
-	}, alertMailVars(alert))
+		TemplateCode: tplOnCallCode,
+	}, onCallVars(schedule, alert, person.Level+1, person.UserName, title))
 	if err != nil {
 		mail.Status, mail.Detail = "failed", truncate(err.Error(), 240)
 	} else {

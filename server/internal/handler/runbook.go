@@ -241,8 +241,8 @@ func (h *Handler) MatchRunbooks(c *gin.Context) {
 
 	matches := h.matchRunbooksFor(labels, title, severity)
 	response.OK(c, gin.H{
-		"target": target,
-		"input":  gin.H{"labels": labels, "title": title, "severity": severity},
+		"target":  target,
+		"input":   gin.H{"labels": labels, "title": title, "severity": severity},
 		"matches": matches,
 		"note":    "标签条件要求全部命中；标签 +3 / 关键词 +2 / 级别 +1，没有条件的通用剧本排最后",
 	})

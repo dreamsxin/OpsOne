@@ -5,12 +5,18 @@ import { useUserStore } from '@/stores/user'
 import {
   createAlertRule,
   deleteAlertRule,
+  diffAlertRuleVersions,
   evaluateAlertRule,
   listAlertRuleMetrics,
+  listAlertRuleVersions,
   listAlertRules,
+  restoreAlertRuleVersion,
+  rollbackAlertRule,
   updateAlertRule,
   type AlertRule,
-  type AlertRuleMetric
+  type AlertRuleMetric,
+  type RuleDiffItem,
+  type RuleVersion
 } from '@/api'
 
 const loading = ref(false)
@@ -18,6 +24,94 @@ const rows = ref<AlertRule[]>([])
 const metrics = ref<AlertRuleMetric[]>([])
 const store = useUserStore()
 const canManage = computed(() => store.has('alertrule:manage'))
+
+/* ---------- 版本历史 ----------
+   审计日志不记请求体，所以「谁把阈值从 80 改成 200」只能靠这份留痕回答。
+   平台刻意不做策略审批 —— 真正兜住这件事的是可追溯 + 可回滚。 */
+const versionVisible = ref(false)
+const versionRule = ref<AlertRule | null>(null)
+const versions = ref<RuleVersion[]>([])
+const versionNotes = ref<string[]>([])
+const diffItems = ref<RuleDiffItem[]>([])
+const diffMeta = ref<{ left: any; right: any; same: boolean; changed: number } | null>(null)
+const selectedVersions = ref<number[]>([])
+// 单独一个入口：列出「规则已经不在了」的版本，用来恢复误删
+const showOrphanOnly = ref(false)
+
+const sourceMeta: Record<string, { label: string; type: 'success' | 'warning' | 'danger' | 'info' }> = {
+  created: { label: '新建', type: 'info' },
+  edited: { label: '改动', type: 'warning' },
+  rollback: { label: '回滚', type: 'success' },
+  deleted: { label: '删除前', type: 'danger' },
+  restored: { label: '恢复', type: 'success' }
+}
+
+async function openVersions(row: AlertRule | null) {
+  versionRule.value = row
+  showOrphanOnly.value = row === null
+  diffItems.value = []
+  diffMeta.value = null
+  selectedVersions.value = []
+  const res = await listAlertRuleVersions(row ? { targetId: row.id } : {})
+  versions.value = row ? res.versions : res.versions.filter((v) => !v.targetAlive)
+  versionNotes.value = res.notes
+  versionVisible.value = true
+}
+
+function toggleCompare(row: RuleVersion) {
+  const idx = selectedVersions.value.indexOf(row.id)
+  if (idx >= 0) {
+    selectedVersions.value.splice(idx, 1)
+  } else {
+    selectedVersions.value.push(row.id)
+    // 只保留最后选的两个
+    if (selectedVersions.value.length > 2) selectedVersions.value.shift()
+  }
+  if (selectedVersions.value.length === 2) runDiff()
+  else {
+    diffItems.value = []
+    diffMeta.value = null
+  }
+}
+
+async function runDiff() {
+  const [a, b] = selectedVersions.value
+  // 小 id 在左：diff 的语义是「从旧到新」
+  const res = await diffAlertRuleVersions(Math.min(a, b), Math.max(a, b))
+  diffItems.value = res.items
+  diffMeta.value = { left: res.left, right: res.right, same: res.same, changed: res.changed }
+}
+
+async function doRollback(row: RuleVersion) {
+  if (!versionRule.value) return
+  await ElMessageBox.confirm(
+    `确认把「${versionRule.value.name}」回滚到第 ${row.version} 版？\n\n` +
+      '回滚本身也会记成一个新版本，中间那几版仍然留在历史里；连续命中次数会归零。',
+    '回滚规则',
+    { type: 'warning' }
+  )
+  const res = await rollbackAlertRule(versionRule.value.id, row.id)
+  if (res.changed) ElMessage.success(res.note)
+  else ElMessage.info(res.note)
+  await load()
+  const fresh = rows.value.find((r) => r.id === versionRule.value?.id) || null
+  await openVersions(fresh)
+}
+
+async function doRestore(row: RuleVersion) {
+  await ElMessageBox.confirm(
+    `确认按「${row.targetName}」第 ${row.version} 版恢复？\n\n` +
+      '会建出一条**新规则**（新 ID），而且**默认停用** —— ' +
+      '直接让它开始评估等于在没人确认的情况下恢复了一条可能已经不适用的策略。',
+    '恢复误删的规则',
+    { type: 'warning' }
+  )
+  const res = await restoreAlertRuleVersion(row.id)
+  await ElMessageBox.alert(res.note, '已恢复', { type: 'success' })
+  await load()
+  openVersions(null)
+}
+
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -231,9 +325,10 @@ onMounted(load)
             <el-switch v-model="row.enabled" :disabled="!canManage" @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button v-perm="'alertrule:manage'" link type="primary" @click="evaluate(row)">试跑</el-button>
+            <el-button link type="primary" @click="openVersions(row)">版本</el-button>
             <el-button v-perm="'alertrule:manage'" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-perm="'alertrule:manage'" link type="danger" @click="remove(row)">删除</el-button>
           </template>
@@ -314,5 +409,119 @@ onMounted(load)
         <el-button type="primary" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="versionVisible"
+      :title="versionRule ? `版本历史 · ${versionRule.name}` : '已删除规则的版本（可恢复）'"
+      size="900px"
+    >
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+        <template #title>
+          审计日志<strong>不记请求体</strong>，所以「谁把阈值从 80 改成 200」只能靠这份留痕回答。
+          平台<strong>刻意不做策略审批</strong> —— 改错一条告警规则的后果是静默的（之后几周没人知道
+          出了问题），真正兜住这件事的是改动留痕 + 一键回滚，而不是事前点一下「同意」。
+          <br />
+          勾选两个版本即可比较；只比同一条规则的版本。
+        </template>
+      </el-alert>
+
+      <div class="page-toolbar">
+        <el-button v-if="versionRule" @click="openVersions(null)">看已删除规则的版本</el-button>
+        <el-button v-else @click="versionVisible = false">关闭</el-button>
+        <div class="grow"></div>
+        <el-tag v-if="selectedVersions.length" type="info">已选 {{ selectedVersions.length }} / 2</el-tag>
+      </div>
+
+      <el-table :data="versions" border stripe size="small" empty-text="没有版本记录">
+        <el-table-column label="比较" width="60">
+          <template #default="{ row }">
+            <el-checkbox
+              :model-value="selectedVersions.includes(row.id)"
+              @change="toggleCompare(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="版本" width="70">
+          <template #default="{ row }">第 {{ row.version }} 版</template>
+        </el-table-column>
+        <el-table-column v-if="!versionRule" prop="targetName" label="规则" min-width="130" show-overflow-tooltip />
+        <el-table-column label="来源" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="sourceMeta[row.source]?.type || 'info'">
+              {{ sourceMeta[row.source]?.label || row.source }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="operator" label="操作人" width="100" />
+        <el-table-column prop="note" label="说明" min-width="180" show-overflow-tooltip />
+        <el-table-column label="时间" width="160">
+          <template #default="{ row }">{{ row.createdAt?.slice(0, 19).replace('T', ' ') }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.targetAlive && versionRule"
+              v-perm="'alertrule:manage'"
+              link
+              type="primary"
+              @click="doRollback(row)"
+            >
+              回滚
+            </el-button>
+            <el-button
+              v-else-if="!row.targetAlive"
+              v-perm="'alertrule:manage'"
+              link
+              type="primary"
+              @click="doRestore(row)"
+            >
+              恢复
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-card v-if="diffMeta" shadow="never" style="margin-top: 12px">
+        <template #header>
+          第 {{ diffMeta.left.version }} 版 → 第 {{ diffMeta.right.version }} 版
+          <el-tag v-if="diffMeta.same" size="small" type="info" style="margin-left: 8px">内容完全相同</el-tag>
+          <el-tag v-else size="small" type="warning" style="margin-left: 8px">
+            {{ diffMeta.changed }} 项有变化
+          </el-tag>
+        </template>
+        <el-table :data="diffItems" border stripe size="small">
+          <el-table-column prop="label" label="字段" width="150" />
+          <el-table-column label="改之前" min-width="170">
+            <template #default="{ row }">
+              <span :class="{ 'diff-old': row.changed }">{{ row.before || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="改之后" min-width="170">
+            <template #default="{ row }">
+              <span :class="{ 'diff-new': row.changed }">{{ row.after || '—' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+
+      <el-card v-if="versionNotes.length" shadow="never" style="margin-top: 12px">
+        <template #header>口径</template>
+        <ul style="margin: 0; padding-left: 20px; line-height: 1.9">
+          <li v-for="(note, idx) in versionNotes" :key="idx">{{ note }}</li>
+        </ul>
+      </el-card>
+    </el-drawer>
   </div>
 </template>
+
+<style scoped>
+.diff-old {
+  color: var(--el-color-danger);
+  text-decoration: line-through;
+}
+.diff-new {
+  color: var(--el-color-success);
+  font-weight: 600;
+}
+</style>
+

@@ -1279,6 +1279,70 @@ type HostLogUsage struct {
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
+// RuleVersion 告警规则（以后也可以是检测规则）的配置快照。**只追加不修改** ——
+// 它是回滚与「误删恢复」的唯一依据。
+//
+// 与 ConfigVersion 的差别值得写清楚：配置文件有「机器上的现状」这个第三方，
+// 所以那边要在下发前专门存一版 pre-apply 当回滚点。告警规则的「生效态」就是
+// 数据库里那一行本身，不存在第三方 —— 所以这里的做法更简单：**每次变更之后存一版**，
+// 「改之前的样子」天然就是上一版。
+//
+// 为什么要有这张表：审计日志只记「谁在什么时候 PUT 了 /monitor/alert-rules/3」，
+// **不记请求体**。所以「谁把阈值从 80 改成 200」这个问题在此之前是查不出来的 ——
+// 而改错一条告警规则的后果是静默的：之后几周没人知道出了问题。
+type RuleVersion struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Target 目标类型。目前只写 alert_rule；表故意做成多态的，
+	// 以后接检测规则（它的 Steps 是一整块 JSON，更需要版本）不用改表结构
+	Target   string `gorm:"size:24;index;not null" json:"target"`
+	TargetID uint   `gorm:"index;not null" json:"targetId"`
+	// TargetName 冗余存一份名字：规则删掉之后，版本列表仍然要能读懂
+	TargetName string `gorm:"size:64" json:"targetName"`
+	// Version 版本号，在同一个目标内自增
+	Version int `gorm:"index" json:"version"`
+	// Source created（新建）| edited（改动）| rollback（回滚产生的新版）
+	//	| deleted（删除前的最后一版，留着它才能「误删恢复」）
+	//	| restored（从某一版恢复出来的新规则的首版）
+	Source string `gorm:"size:16;index" json:"source"`
+	// Content 配置字段的 JSON 快照。**只含配置态、不含运行态**
+	//（HitStreak / LastValue / LastStatus 那几个每轮评估都在变，
+	// 混进来会让定时评估不停地「产生新版本」）
+	Content string `gorm:"type:text" json:"content"`
+	Hash    string `gorm:"size:64;index" json:"hash"`
+	Note    string `gorm:"size:255" json:"note"`
+	// Operator 操作人用户名。与 KubeChangeLog 同理冗余存名而不是 ID：
+	// 用户改名或删号之后留痕仍然可读
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// NotifyTemplate 非邮件渠道的通知模板（IM 文本 / webhook JSON）。
+//
+// 为什么不和 EmailTemplate 合成一张表：邮件有主题、IM 与 webhook 没有，
+// 硬合在一起会多出一个「对一半渠道没意义」的字段。变量表是共用的
+// （见 handler 里的 notifyScenes），那才是真正需要收口的东西。
+//
+// 没有模板时**仍然按原来的硬编码格式发** —— 模板是可选的覆盖，不是前置条件。
+// 这一点是刻意的：不能因为新增了模板功能就让没配模板的渠道发不出东西。
+type NotifyTemplate struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Code string `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Name string `gorm:"size:64;not null" json:"name"`
+	// Kind im（纯文本，三家 IM 通用）| webhook（JSON 报文）
+	Kind string `gorm:"size:16;index;not null" json:"kind"`
+	// Scene 决定可用变量，取值见 handler 的 notifyScenes：alert | oncall
+	Scene string `gorm:"size:16;index;not null" json:"scene"`
+	// Body 模板正文，Go text/template 语法。
+	// webhook 类的 Body 渲染后必须是合法 JSON —— 保存时会校验
+	Body      string    `gorm:"type:text" json:"body"`
+	Builtin   bool      `gorm:"default:false" json:"builtin"`
+	Enabled   bool      `json:"enabled"` // 不加 gorm default，见 Domain.AlertEnabled 的说明
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // InventoryBatch 资产盘点批次。创建时按范围对固定资产做快照生成明细。
 type InventoryBatch struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
@@ -1462,7 +1526,15 @@ type AlertRule struct {
 	LastEvalAt *time.Time `json:"lastEvalAt"`
 	LastFireAt *time.Time `json:"lastFireAt"`
 
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	// VersionSeq 已经产生过多少个配置版本，下一版 = 这个数 +1。
+	// 与 ConfigFile.VersionSeq 同一套做法（见 RuleVersion）
+	VersionSeq int `gorm:"default:0" json:"versionSeq"`
+
+	// Enabled 刻意**不加** gorm `default:true`：带 default 的布尔字段，GORM 会把
+	// 零值（false）从 INSERT 里省掉让数据库填默认值 —— 于是「新建一条停用的规则」
+	// 或「从版本恢复出一条默认停用的规则」都会被翻回启用，而界面上看不出来。
+	// 默认值由 handler 显式给（与 Domain.AlertEnabled 同一个坑）
+	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`

@@ -425,9 +425,9 @@ func TestListObjectsPassesSelector(t *testing.T) {
 
 func TestRedactSecretKeepsKeysDropsValues(t *testing.T) {
 	obj := map[string]any{
-		"kind": "Secret",
-		"type": "kubernetes.io/tls",
-		"data": map[string]any{"tls.crt": "QUJD", "tls.key": "WFla"},
+		"kind":     "Secret",
+		"type":     "kubernetes.io/tls",
+		"data":     map[string]any{"tls.crt": "QUJD", "tls.key": "WFla"},
 		"metadata": map[string]any{"name": "web-tls"},
 	}
 	masked := RedactSecret(obj)

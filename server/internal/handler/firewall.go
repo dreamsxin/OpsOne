@@ -505,7 +505,7 @@ func (h *Handler) AdoptFirewallRule(c *gin.Context) {
 		owner = user.Username
 	}
 	rule := model.FirewallRule{
-		HostID: req.HostID,
+		HostID:    req.HostID,
 		Direction: spec.Direction, Action: spec.Action, Protocol: spec.Protocol,
 		Source: spec.Source, Port: spec.Port, Service: spec.Service,
 		RuleKey: key, Description: req.Description, Owner: owner,

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-
 	"github.com/gin-gonic/gin"
 
 	"ops-platform/server/internal/cryptox"
@@ -33,9 +32,9 @@ const credentialCheckTimeout = 20 * time.Second
 
 type credentialReq struct {
 	Name        string `json:"name" binding:"required"`
-	Type        string `json:"type"`     // password | key
+	Type        string `json:"type"` // password | key
 	Username    string `json:"username" binding:"required"`
-	Secret      string `json:"secret"`   // 口令或私钥 PEM，更新时留空表示不变
+	Secret      string `json:"secret"` // 口令或私钥 PEM，更新时留空表示不变
 	Passphrase  string `json:"passphrase"`
 	Description string `json:"description"`
 	Owner       string `json:"owner"`
@@ -198,7 +197,7 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 
 	cred := model.Credential{
 		Name: strings.TrimSpace(req.Name), Type: defaultAuth(req.Type),
-		Username: strings.TrimSpace(req.Username),
+		Username:    strings.TrimSpace(req.Username),
 		Description: req.Description, Owner: strings.TrimSpace(req.Owner),
 		DeptID: req.DeptID, Enabled: true,
 		CreatedBy: middleware.CurrentUser(c).ID,
@@ -307,7 +306,7 @@ func (h *Handler) RotateCredential(c *gin.Context) {
 
 	affected := h.credentialRefCounts()[cred.ID]
 	response.OK(c, gin.H{
-		"affectedHosts": affected,
+		"affectedHosts":  affected,
 		"oldFingerprint": oldFp, "fingerprint": fp,
 		// 这里刻意不自动去测每台主机：几十台机器串行连一遍会把请求拖到几分钟，
 		// 而且真要验也应该由人挑一台先试
@@ -476,4 +475,3 @@ func credentialFingerprint(credType, secret, passphrase string) (string, error) 
 	}
 	return fp, nil
 }
-

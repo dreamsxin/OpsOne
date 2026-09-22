@@ -4989,6 +4989,126 @@ export const listSuggestionDismissals = () =>
 export const deleteSuggestionDismissal = (id: number) =>
   request({ url: `/security/suggestion-dismissals/${id}`, method: 'DELETE' })
 
+/* ---------------- 告警规则版本 / 通知模板 / 值班大屏 ---------------- */
+
+export interface RuleVersion {
+  id: number
+  target: string
+  targetId: number
+  targetName: string
+  version: number
+  source: 'created' | 'edited' | 'rollback' | 'deleted' | 'restored'
+  hash: string
+  note: string
+  operator: string
+  createdAt: string
+  targetAlive: boolean
+}
+
+export interface RuleDiffItem {
+  key: string
+  label: string
+  before: string
+  after: string
+  changed: boolean
+}
+
+export interface NotifyTemplate {
+  id: number
+  code: string
+  name: string
+  kind: 'im' | 'webhook'
+  scene: 'alert' | 'oncall'
+  body: string
+  builtin: boolean
+  enabled: boolean
+  remark: string
+  createdAt: string
+}
+
+export interface NotifyVarSpec {
+  key: string
+  label: string
+  sample: string
+}
+
+export interface NotifyScene {
+  code: string
+  label: string
+  note: string
+  vars: NotifyVarSpec[]
+}
+
+export interface WallboardData {
+  at: string
+  firing: Record<string, number>
+  events: Record<string, any>
+  hosts: Record<string, number>
+  probes: Record<string, number>
+  certs: Record<string, number>
+  domains: Record<string, number>
+  hostLogs: Record<string, number>
+  security: Record<string, number>
+  notify: Record<string, number>
+  trend: { hour: string; total: number }[]
+  onCall: { id: number; name: string; current?: string; levels?: string[]; note?: string }[]
+  notes: string[]
+}
+
+export const listAlertRuleVersions = (params?: Record<string, any>) =>
+  request<{ versions: RuleVersion[]; limit: number; notes: string[] }>({
+    url: '/monitor/alert-rule-versions',
+    params
+  })
+export const getAlertRuleVersion = (id: number) =>
+  request<{ version: RuleVersion; fields: { key: string; label: string; value: string }[] }>({
+    url: `/monitor/alert-rule-versions/${id}`
+  })
+export const diffAlertRuleVersions = (from: number, to: number) =>
+  request<{
+    left: Record<string, any>
+    right: Record<string, any>
+    same: boolean
+    changed: number
+    items: RuleDiffItem[]
+  }>({ url: '/monitor/alert-rule-versions/diff', params: { from, to } })
+export const rollbackAlertRule = (id: number, versionId: number, note?: string) =>
+  request<{ changed: boolean; note: string }>({
+    url: `/monitor/alert-rules/${id}/rollback`,
+    method: 'POST',
+    data: { versionId, note }
+  })
+export const restoreAlertRuleVersion = (id: number) =>
+  request<{ rule: AlertRule; note: string }>({
+    url: `/monitor/alert-rule-versions/${id}/restore`,
+    method: 'POST'
+  })
+
+export const listNotifyTemplateVars = () =>
+  request<{
+    scenes: NotifyScene[]
+    kinds: { code: string; label: string; note: string }[]
+    notes: string[]
+  }>({ url: '/notify/template-vars' })
+export const listNotifyTemplates = (params?: Record<string, any>) =>
+  request<NotifyTemplate[]>({ url: '/notify/templates', params })
+export const createNotifyTemplate = (data: Record<string, any>) =>
+  request<NotifyTemplate>({ url: '/notify/templates', method: 'POST', data })
+export const updateNotifyTemplate = (id: number, data: Record<string, any>) =>
+  request<NotifyTemplate>({ url: `/notify/templates/${id}`, method: 'PUT', data })
+export const deleteNotifyTemplate = (id: number) =>
+  request({ url: `/notify/templates/${id}`, method: 'DELETE' })
+export const previewNotifyTemplate = (id: number, vars?: Record<string, string>) =>
+  request<{
+    rendered: string
+    vars: Record<string, string>
+    kind: string
+    scene: string
+    validJSON?: boolean
+  }>({ url: `/notify/templates/${id}/preview`, method: 'POST', data: { vars: vars || {} } })
+
+export const getWallboard = () => request<WallboardData>({ url: '/monitor/wallboard' })
+
 /* ---------------- 云资源同步 ---------------- */
 
 export interface CloudResource {

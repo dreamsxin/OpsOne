@@ -102,14 +102,14 @@ exit 0`
 
 // unitState 一个 unit 的真机实际态
 type unitState struct {
-	Unit        string   `json:"unit"`
-	LoadState   string   `json:"loadState"`
-	ActiveState string   `json:"activeState"`
-	SubState    string   `json:"subState"`
-	Description string   `json:"description"`
-	EnableState string   `json:"enableState"`
-	Ports       []int    `json:"ports"`
-	PIDs        []int    `json:"pids"`
+	Unit        string `json:"unit"`
+	LoadState   string `json:"loadState"`
+	ActiveState string `json:"activeState"`
+	SubState    string `json:"subState"`
+	Description string `json:"description"`
+	EnableState string `json:"enableState"`
+	Ports       []int  `json:"ports"`
+	PIDs        []int  `json:"pids"`
 }
 
 // serviceSnapshot 一次采集的结果

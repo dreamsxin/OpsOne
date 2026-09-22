@@ -664,6 +664,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/notify/channels/:id", middleware.RequirePerm("channel:manage"), h.DeleteNotifyChannel)
 		auth.POST("/notify/channels/:id/test", middleware.RequirePerm("channel:manage"), h.TestNotifyChannel)
 
+		// 跨渠道通知模板（IM / webhook）。变量表是代码里的唯一权威定义，交给前端而不是让它硬编码
+		auth.GET("/notify/template-vars", h.ListNotifyTemplateVars)
+		auth.GET("/notify/templates", h.ListNotifyTemplates)
+		auth.POST("/notify/templates", middleware.RequirePerm("channel:manage"), h.CreateNotifyTemplate)
+		auth.PUT("/notify/templates/:id", middleware.RequirePerm("channel:manage"), h.UpdateNotifyTemplate)
+		auth.DELETE("/notify/templates/:id", middleware.RequirePerm("channel:manage"), h.DeleteNotifyTemplate)
+		auth.POST("/notify/templates/:id/preview", h.PreviewNotifyTemplate)
+
 		auth.GET("/notify/routes", h.ListNotifyRoutes)
 		auth.POST("/notify/routes", middleware.RequirePerm("route:manage"), h.CreateNotifyRoute)
 		auth.PUT("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.UpdateNotifyRoute)
@@ -831,6 +839,16 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.UpdateAlertRule)
 		auth.DELETE("/monitor/alert-rules/:id", middleware.RequirePerm("alertrule:manage"), h.DeleteAlertRule)
 		auth.POST("/monitor/alert-rules/:id/evaluate", middleware.RequirePerm("alertrule:manage"), h.EvaluateAlertRule)
+		// 告警规则的版本历史 / 字段级差异 / 回滚 / 误删恢复。
+		// 查看只需登录；改回去是写操作，与改规则同一个权限码
+		auth.GET("/monitor/alert-rule-versions", h.ListAlertRuleVersions)
+		auth.GET("/monitor/alert-rule-versions/:id", h.GetAlertRuleVersion)
+		auth.GET("/monitor/alert-rule-versions/diff", h.DiffAlertRuleVersions)
+		auth.POST("/monitor/alert-rules/:id/rollback", middleware.RequirePerm("alertrule:manage"), h.RollbackAlertRule)
+		auth.POST("/monitor/alert-rule-versions/:id/restore", middleware.RequirePerm("alertrule:manage"), h.RestoreAlertRuleVersion)
+
+		// 值班大屏：只聚合已有数据
+		auth.GET("/monitor/wallboard", h.Wallboard)
 
 		auth.GET("/monitor/detection-rules/meta", h.ListDetectionMeta)
 		auth.GET("/monitor/detection-rules", h.ListDetectionRules)

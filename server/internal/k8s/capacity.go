@@ -337,7 +337,6 @@ func (c *Client) Capacity(ctx context.Context, namespace string) (*ClusterCapaci
 		return nil, fmt.Errorf("读取 Pod 失败: %w", err)
 	}
 
-
 	result := &ClusterCapacity{}
 
 	// metrics 是可选的：拿不到不算失败，但要说清原因
@@ -416,7 +415,6 @@ func (c *Client) Capacity(ctx context.Context, namespace string) (*ClusterCapaci
 		}
 	}
 
-
 	// 节点账本
 	for _, node := range nodeList.Items {
 		meta, _ := node["metadata"].(map[string]any)
@@ -443,7 +441,6 @@ func (c *Client) Capacity(ctx context.Context, namespace string) (*ClusterCapaci
 		if n, err := strconv.Atoi(strings.TrimSpace(allocatable["pods"])); err == nil {
 			item.PodCapacity = n
 		}
-
 
 		if entry := byNode[name]; entry != nil {
 			item.PodCount = entry.pods

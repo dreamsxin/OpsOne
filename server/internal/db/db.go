@@ -39,6 +39,7 @@ func Migrate(g *gorm.DB) error {
 		&model.Domain{},
 		&model.HostLogTarget{}, &model.HostLogScan{}, &model.HostLogUsage{},
 		&model.SecuritySuggestionDismissal{},
+		&model.RuleVersion{}, &model.NotifyTemplate{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -291,6 +292,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 442, ParentID: 400, Name: "HostLog", Title: "主机日志", Path: "/monitor/host-logs", Component: "/monitor/host-logs/index", Icon: "Tickets", Sort: 20},
 		{ID: 443, ParentID: 442, Title: "查看日志内容", Type: "button", AuthCode: "hostlog:view", Sort: 1},
 		{ID: 444, ParentID: 442, Title: "维护监控点与巡检", Type: "button", AuthCode: "hostlog:manage", Sort: 2},
+		// 值班大屏与通知模板。大屏回答「现在要不要动手」，与「告警态势」的运营统计分工不同
+		{ID: 445, ParentID: 400, Name: "Wallboard", Title: "值班大屏", Path: "/monitor/wallboard", Component: "/monitor/wallboard/index", Icon: "DataBoard", Sort: 21},
+		{ID: 446, ParentID: 400, Name: "NotifyTemplate", Title: "通知模板", Path: "/monitor/notify-template", Component: "/monitor/notify-template/index", Icon: "ChatDotSquare", Sort: 22},
+		{ID: 447, ParentID: 446, Title: "维护通知模板", Type: "button", AuthCode: "channel:manage", Sort: 1},
 		{ID: 410, ParentID: 400, Name: "TraceQuery", Title: "链路追踪", Path: "/monitor/traces", Component: "/monitor/traces/index", Icon: "Share", Sort: 10},
 		{ID: 433, ParentID: 410, Title: "维护链路数据源", Type: "button", AuthCode: "trace:manage", Sort: 1},
 		{ID: 411, ParentID: 400, Name: "Probe", Title: "拨测探测", Path: "/monitor/probe", Component: "/monitor/probe/index", Icon: "Position", Sort: 11},
@@ -474,6 +479,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 	if err := seedEmailTemplates(g); err != nil {
 		return err
 	}
+	if err := seedNotifyTemplates(g); err != nil {
+		return err
+	}
 	return seedSysConfigs(g)
 }
 
@@ -592,9 +600,9 @@ func seedRunbooks(g *gorm.DB) error {
 	return nil
 }
 
-// seedEmailTemplates 内置告警邮件模板，只在编码不存在时写入
+// seedEmailTemplates 内置邮件模板，只在编码不存在时写入
 func seedEmailTemplates(g *gorm.DB) error {
-	tpl := model.EmailTemplate{
+	templates := []model.EmailTemplate{{
 		Code:    "alert.default",
 		Name:    "告警通知（默认）",
 		Subject: "[{{.severity}}] {{.title}}",
@@ -617,14 +625,80 @@ func seedEmailTemplates(g *gorm.DB) error {
 		Enabled:   true,
 		Builtin:   true,
 		Remark:    "email 类型通知渠道未指定模板时使用",
-	}
+	}, {
+		// 值班呼叫专用模板。在它之前值班呼叫邮件回落到 alert.default，
+		// 于是「派给你、第几级、确认后不再升级」这些只进了站内消息，邮件里看不到 ——
+		// 收到的是一封和普通告警一模一样的信，看不出这是在叫自己
+		Code:    "oncall.call",
+		Name:    "值班呼叫",
+		Subject: "{{.title}}",
+		Body: `值班表【{{.scheduleName}}】把这条 {{.severity}} 级告警派给你（第 {{.level}} 级）。
 
-	var exist model.EmailTemplate
-	err := g.Where("code = ?", tpl.Code).First(&exist).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return g.Create(&tpl).Error
+告警：{{.alertTitle}}
+详情：{{.summary}}
+首次出现：{{.firstSeenAt}}，已累计 {{.count}} 次。
+
+确认后不再向上升级。
+
+-- 本邮件由 OpsOne 自动发送`,
+		Variables: "title,scheduleName,level,assignee,alertTitle,severity,summary,count,firstSeenAt",
+		Enabled:   true,
+		Builtin:   true,
+		Remark:    "值班升级叫人时使用，变量与告警通知不同（见通知模板页的变量表）",
+	}}
+
+	for i := range templates {
+		var exist model.EmailTemplate
+		err := g.Where("code = ?", templates[i].Code).First(&exist).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := g.Create(&templates[i]).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	return nil
+}
+
+// seedNotifyTemplates 内置的 IM / webhook 模板。
+//
+// 都**默认停用**：启用它们会改变现有渠道发出去的内容形状，
+// 尤其 webhook 的默认报文是对接收端的契约。这里只是给人一个可以照着改的起点。
+func seedNotifyTemplates(g *gorm.DB) error {
+	templates := []model.NotifyTemplate{{
+		Code: "alert.im.compact", Name: "告警 IM（精简）",
+		Kind: "im", Scene: "alert",
+		Body: `[{{.severity}}] {{.title}}
+{{.summary}}
+当前值 {{.value}}，累计 {{.count}} 次
+{{.labels}}`,
+		Builtin: true, Enabled: false,
+		Remark: "比默认格式更短，适合群里刷得快的场景。启用前先在预览里看一眼",
+	}, {
+		Code: "alert.webhook.simple", Name: "告警 Webhook（精简 JSON）",
+		Kind: "webhook", Scene: "alert",
+		Body:    `{"text":"[{{.severity}}] {{.title}}","detail":"{{.summary}}","value":"{{.value}}","count":"{{.count}}"}`,
+		Builtin: true, Enabled: false,
+		Remark: "默认报文有 11 个字段且形状是对接收端的契约；这个模板给只认少量字段的接收端用",
+	}}
+
+	for i := range templates {
+		var exist model.NotifyTemplate
+		err := g.Where("code = ?", templates[i].Code).First(&exist).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := g.Create(&templates[i]).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upsertBuiltinMenus 同步内置菜单。

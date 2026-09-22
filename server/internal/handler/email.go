@@ -150,15 +150,11 @@ func (h *Handler) PreviewEmailTemplate(c *gin.Context) {
 	response.OK(c, gin.H{"subject": subject, "body": body, "vars": vars})
 }
 
+// sampleAlertVars 告警场景的样例变量。
+// **从 notifyScenes 那份权威定义派生**，不再单独维护一份 ——
+// 之前样例变量、真实变量、界面提示各写一遍，对得上是人工维护的巧合。
 func sampleAlertVars() map[string]string {
-	return map[string]string{
-		"title": "web-01 磁盘使用率过高", "severity": "critical", "source": "Prometheus 演示",
-		"value": "92%", "count": "3", "status": "firing",
-		"summary":     "/data 使用率 92%，持续 5 分钟",
-		"labels":      "host=web-01, env=prod, service=nginx",
-		"firstSeenAt": time.Now().Add(-30 * time.Minute).Format(time.RFC3339),
-		"lastSeenAt":  time.Now().Format(time.RFC3339),
-	}
+	return sceneSampleVars(sceneAlert)
 }
 
 // validateTemplate 提前发现模板语法错误，避免真正发信时才失败
