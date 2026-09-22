@@ -4842,6 +4842,39 @@ export const checkEgressProxy = (id: number, testUrl?: string) =>
     data: { testUrl: testUrl || '' }
   })
 
+export interface EgressCoverage {
+  module: string
+  target: string
+  note: string
+}
+
+export interface EgressPolicy {
+  /** 是否配了统一出口 */
+  configured: boolean
+  proxyId: number
+  proxyName: string
+  endpoint: string
+  /** 配了但那条代理不存在/已停用时的原因；空串表示没问题 */
+  problem: string
+  bypass: string[]
+  /** 解析不了的 bypass 条目 */
+  bypassBad: string[]
+  /** 进程实际看到的代理环境变量 */
+  env: Record<string, string>
+  covered: EgressCoverage[]
+  notCovered: EgressCoverage[]
+  notes: string[]
+}
+
+export const getEgressPolicy = () => request<EgressPolicy>({ url: '/network/proxy-egress' })
+export const saveEgressPolicy = (data: { proxyId: number; bypass: string }) =>
+  request<{ proxyId: number; bypass: string; detail: string }>({
+    url: '/network/proxy-egress',
+    method: 'PUT',
+    data
+  })
+
+
 /* ---------------- 账号密码库 / 2FA 验证码库 ---------------- */
 
 export interface VaultAccount {

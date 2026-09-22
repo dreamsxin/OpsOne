@@ -74,31 +74,31 @@ type imDirectory interface {
 	label() string
 }
 
-func imDirectoryFor(provider, base string) (imDirectory, error) {
+func imDirectoryFor(provider, base string, client *http.Client) (imDirectory, error) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	switch provider {
 	case channelWecom:
 		if base == "" {
 			base = wecomDefaultBase
 		}
-		return wecomDirectory{base: base}, nil
+		return wecomDirectory{base: base, client: client}, nil
 	case channelDingTalk:
 		if base == "" {
 			base = dingtalkDefaultBase
 		}
-		return dingtalkDirectory{base: base}, nil
+		return dingtalkDirectory{base: base, client: client}, nil
 	case channelFeishu:
 		if base == "" {
 			base = feishuDefaultBase
 		}
-		return feishuDirectory{base: base}, nil
+		return feishuDirectory{base: base, client: client}, nil
 	}
 	return nil, fmt.Errorf("不支持的 IM 类型 %s", provider)
 }
 
 // ---------- HTTP 小工具 ----------
 
-func imGetJSON(ctx context.Context, rawURL, bearer string, out any) error {
+func imGetJSON(ctx context.Context, client *http.Client, rawURL, bearer string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -106,10 +106,10 @@ func imGetJSON(ctx context.Context, rawURL, bearer string, out any) error {
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	return imDoJSON(req, out)
+	return imDoJSON(client, req, out)
 }
 
-func imPostJSON(ctx context.Context, rawURL, bearer string, body, out any) error {
+func imPostJSON(ctx context.Context, client *http.Client, rawURL, bearer string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -122,11 +122,16 @@ func imPostJSON(ctx context.Context, rawURL, bearer string, body, out any) error
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	return imDoJSON(req, out)
+	return imDoJSON(client, req, out)
 }
 
-func imDoJSON(req *http.Request, out any) error {
-	resp, err := (&http.Client{Timeout: imDirTimeout}).Do(req)
+// imDoJSON 发请求。client 由调用方给（业务侧一律传 h.egressClient，走统一出口）；
+// 传 nil 时退回一个不带代理设置的临时 client —— 只有测试会走到这条路
+func imDoJSON(client *http.Client, req *http.Request, out any) error {
+	if client == nil {
+		client = &http.Client{Timeout: imDirTimeout} // egress-exempt: 测试兜底
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("请求失败: %w", err)
 	}
@@ -161,7 +166,10 @@ func (e imErrEnvelope) check(label string) error {
 
 // ---------- 企业微信 ----------
 
-type wecomDirectory struct{ base string }
+type wecomDirectory struct {
+	base   string
+	client *http.Client
+}
 
 func (wecomDirectory) label() string { return "企业微信" }
 
@@ -172,7 +180,7 @@ func (d wecomDirectory) token(ctx context.Context, corpID, secret string) (strin
 	}
 	target := d.base + "/cgi-bin/gettoken?corpid=" + url.QueryEscape(corpID) +
 		"&corpsecret=" + url.QueryEscape(secret)
-	if err := imGetJSON(ctx, target, "", &out); err != nil {
+	if err := imGetJSON(ctx, d.client, target, "", &out); err != nil {
 		return "", err
 	}
 	if err := out.check(d.label()); err != nil {
@@ -198,7 +206,7 @@ func (d wecomDirectory) departments(ctx context.Context, token, root string) ([]
 	if strings.TrimSpace(root) != "" {
 		target += "&id=" + url.QueryEscape(root)
 	}
-	if err := imGetJSON(ctx, target, "", &out); err != nil {
+	if err := imGetJSON(ctx, d.client, target, "", &out); err != nil {
 		return nil, err
 	}
 	if err := out.check(d.label()); err != nil {
@@ -230,7 +238,7 @@ func (d wecomDirectory) users(ctx context.Context, token, deptID string) ([]imUs
 	// fetch_child=0：部门树自己递归，这里只取本部门，免得同一个人被拉很多遍
 	target := d.base + "/cgi-bin/user/list?access_token=" + url.QueryEscape(token) +
 		"&department_id=" + url.QueryEscape(deptID) + "&fetch_child=0"
-	if err := imGetJSON(ctx, target, "", &out); err != nil {
+	if err := imGetJSON(ctx, d.client, target, "", &out); err != nil {
 		return nil, err
 	}
 	if err := out.check(d.label()); err != nil {
@@ -254,7 +262,10 @@ func (d wecomDirectory) users(ctx context.Context, token, deptID string) ([]imUs
 
 // ---------- 钉钉 ----------
 
-type dingtalkDirectory struct{ base string }
+type dingtalkDirectory struct {
+	base   string
+	client *http.Client
+}
 
 func (dingtalkDirectory) label() string { return "钉钉" }
 
@@ -266,7 +277,7 @@ func (d dingtalkDirectory) token(ctx context.Context, appKey, secret string) (st
 	// 钉钉这里 corpID 字段里放的是 appkey
 	target := d.base + "/gettoken?appkey=" + url.QueryEscape(appKey) +
 		"&appsecret=" + url.QueryEscape(secret)
-	if err := imGetJSON(ctx, target, "", &out); err != nil {
+	if err := imGetJSON(ctx, d.client, target, "", &out); err != nil {
 		return "", err
 	}
 	if err := out.check(d.label()); err != nil {
@@ -303,7 +314,7 @@ func (d dingtalkDirectory) departments(ctx context.Context, token, root string) 
 			} `json:"result"`
 		}
 		target := d.base + "/topapi/v2/department/listsub?access_token=" + url.QueryEscape(token)
-		if err := imPostJSON(ctx, target, "", map[string]any{"dept_id": current}, &out); err != nil {
+		if err := imPostJSON(ctx, d.client, target, "", map[string]any{"dept_id": current}, &out); err != nil {
 			return nil, err
 		}
 		if err := out.check(d.label()); err != nil {
@@ -341,7 +352,7 @@ func (d dingtalkDirectory) users(ctx context.Context, token, deptID string) ([]i
 		}
 		target := d.base + "/topapi/v2/user/list?access_token=" + url.QueryEscape(token)
 		body := map[string]any{"dept_id": deptID, "cursor": cursor, "size": 100}
-		if err := imPostJSON(ctx, target, "", body, &out); err != nil {
+		if err := imPostJSON(ctx, d.client, target, "", body, &out); err != nil {
 			return nil, err
 		}
 		if err := out.check(d.label()); err != nil {
@@ -367,7 +378,10 @@ func (d dingtalkDirectory) users(ctx context.Context, token, deptID string) ([]i
 
 // ---------- 飞书 ----------
 
-type feishuDirectory struct{ base string }
+type feishuDirectory struct {
+	base   string
+	client *http.Client
+}
 
 func (feishuDirectory) label() string { return "飞书" }
 
@@ -379,7 +393,7 @@ func (d feishuDirectory) token(ctx context.Context, appID, secret string) (strin
 	}
 	target := d.base + "/open-apis/auth/v3/tenant_access_token/internal"
 	body := map[string]any{"app_id": appID, "app_secret": secret}
-	if err := imPostJSON(ctx, target, "", body, &out); err != nil {
+	if err := imPostJSON(ctx, d.client, target, "", body, &out); err != nil {
 		return "", err
 	}
 	// 飞书用 code/msg 而不是 errcode/errmsg，同样是 200 里藏错误
@@ -417,7 +431,7 @@ func (d feishuDirectory) departments(ctx context.Context, token, root string) ([
 		if pageToken != "" {
 			target += "&page_token=" + url.QueryEscape(pageToken)
 		}
-		if err := imGetJSON(ctx, target, token, &out); err != nil {
+		if err := imGetJSON(ctx, d.client, target, token, &out); err != nil {
 			return nil, err
 		}
 		if out.Code != 0 {
@@ -464,7 +478,7 @@ func (d feishuDirectory) users(ctx context.Context, token, deptID string) ([]imU
 		if pageToken != "" {
 			target += "&page_token=" + url.QueryEscape(pageToken)
 		}
-		if err := imGetJSON(ctx, target, token, &out); err != nil {
+		if err := imGetJSON(ctx, d.client, target, token, &out); err != nil {
 			return nil, err
 		}
 		if out.Code != 0 {

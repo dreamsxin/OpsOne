@@ -214,7 +214,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 		if base == "" {
 			base = wecomDefaultBase
 		}
-		dir, err := imDirectoryFor(app.Provider, app.BaseURL)
+		dir, err := imDirectoryFor(app.Provider, app.BaseURL, h.egressClient(imDirTimeout))
 		if err != nil {
 			return "", err
 		}
@@ -230,7 +230,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 		}
 		target := base + "/cgi-bin/auth/getuserinfo?access_token=" + url.QueryEscape(token) +
 			"&code=" + url.QueryEscape(code)
-		if err := imGetJSON(ctx, target, "", &out); err != nil {
+		if err := imGetJSON(ctx, h.egressClient(imDirTimeout), target, "", &out); err != nil {
 			return "", err
 		}
 		if err := out.check("企业微信"); err != nil {
@@ -246,7 +246,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 		if base == "" {
 			base = feishuDefaultBase
 		}
-		dir, err := imDirectoryFor(app.Provider, app.BaseURL)
+		dir, err := imDirectoryFor(app.Provider, app.BaseURL, h.egressClient(imDirTimeout))
 		if err != nil {
 			return "", err
 		}
@@ -263,7 +263,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 			} `json:"data"`
 		}
 		body := map[string]any{"grant_type": "authorization_code", "code": code}
-		if err := imPostJSON(ctx, base+"/open-apis/authen/v1/access_token", appToken,
+		if err := imPostJSON(ctx, h.egressClient(imDirTimeout), base+"/open-apis/authen/v1/access_token", appToken,
 			body, &out); err != nil {
 			return "", err
 		}
@@ -292,7 +292,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 			"clientId": app.CorpID, "clientSecret": secret,
 			"code": code, "grantType": "authorization_code",
 		}
-		if err := imPostJSON(ctx, loginBase+"/v1.0/oauth2/userAccessToken", "",
+		if err := imPostJSON(ctx, h.egressClient(imDirTimeout), loginBase+"/v1.0/oauth2/userAccessToken", "",
 			body, &tokenOut); err != nil {
 			return "", err
 		}
@@ -310,7 +310,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 			return "", err
 		}
 		req.Header.Set("x-acs-dingtalk-access-token", tokenOut.AccessToken)
-		if err := imDoJSON(req, &me); err != nil {
+		if err := imDoJSON(h.egressClient(imDirTimeout), req, &me); err != nil {
 			return "", err
 		}
 		if me.UnionID == "" {
@@ -325,7 +325,7 @@ func (h *Handler) imResolveLoginUser(ctx context.Context, app *model.ImApp, code
 // dingtalkUserIDByUnionID 把扫码拿到的 unionId 换成通讯录里的 userid
 func (h *Handler) dingtalkUserIDByUnionID(ctx context.Context, app *model.ImApp,
 	unionID string) (string, error) {
-	dir, err := imDirectoryFor(app.Provider, app.BaseURL)
+	dir, err := imDirectoryFor(app.Provider, app.BaseURL, h.egressClient(imDirTimeout))
 	if err != nil {
 		return "", err
 	}
@@ -348,7 +348,7 @@ func (h *Handler) dingtalkUserIDByUnionID(ctx context.Context, app *model.ImApp,
 		} `json:"result"`
 	}
 	target := base + "/topapi/user/getbyunionid?access_token=" + url.QueryEscape(token)
-	if err := imPostJSON(ctx, target, "", map[string]any{"unionid": unionID}, &out); err != nil {
+	if err := imPostJSON(ctx, h.egressClient(imDirTimeout), target, "", map[string]any{"unionid": unionID}, &out); err != nil {
 		return "", err
 	}
 	if err := out.check("钉钉"); err != nil {

@@ -194,7 +194,8 @@ func (h *Handler) jenkinsRequest(server *model.BuildServer, method, path string,
 		req.SetBasicAuth(server.Username, token)
 	}
 
-	client := &http.Client{Timeout: jenkinsTimeout}
+	// 走统一出口：Jenkins 多数装在内网，而内网网段默认就在 bypass 清单里
+	client := h.egressClient(jenkinsTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, err

@@ -1672,6 +1672,93 @@ done | sort -rn | head -n 64
 （要落库才能对比，而落库就得定时采集，绕回到上面拒绝掉的那件事）。
 
 
+## 已落地：统一出口代理 —— 登记的代理终于是真的出网口
+
+代理那一轮留下的状态是：代理能登记、能检测、HTTP 拨测能按条引用它，
+**但平台其余十几个出网点一个都不走它**。对一个只能靠代理出网的内网环境来说，
+云 API / IM / Webhook / 大模型 / Jenkins 全是坏的，而页面上看不出为什么 ——
+这正是「只落库不生效」的典型。这一轮把它接上。
+
+### 顺带纠正一个写错的注释
+
+原来 `proxy.go` 的开头写着那十几处 client「也不读 HTTP_PROXY 环境变量」。
+**不成立**：它们的 `Transport` 是 nil，运行时落到 `http.DefaultTransport`，
+而它的 Proxy 就是 `http.ProxyFromEnvironment`。也就是说这些请求一直在读
+`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`。这件事对「平台到底怎么连出去」有实际影响，
+所以现在**把进程实际看到的这三个值直接摊在页面上**，而不是靠注释描述。
+
+### 语义：三种状态，没有第四种
+
+- **没配统一出口**（`proxy.egress_id = 0`）：与以前完全一致，仍然遵守环境变量。
+  **刻意不改成强制直连** —— 真有人靠环境变量在用，悄悄禁掉等于把能用的功能弄坏。
+- **配了且可用**：走那条代理，命中 `proxy.bypass` 的目标直连。
+- **配了但那条记录不存在或已停用**：走出口的请求**显式失败并点名代理**。
+  与拨测同一条不变量：静默直连会把「代理挂了」显示成「目标一切正常」。
+
+实现上没有引入「当前代理」的全局缓存，而是把判断放进
+`http.Transport.Proxy` —— 标准库那个字段本来就是**每个请求算一次的函数**：
+
+```go
+Proxy: func(req *http.Request) (*url.URL, error) {
+    item, err := h.egressProxy()
+    if err != nil { return nil, err }          // 显式失败
+    if item == nil { return http.ProxyFromEnvironment(req) }
+    if ok, _ := matchEgressBypass(h.egressBypassRules(), req.URL.Hostname()); ok {
+        return nil, nil                         // 命中 bypass：直连
+    }
+    return h.proxyURL(*item)
+}
+```
+
+好处是改配置立刻生效、不需要重启也没有缓存失效这类 bug；代价是每次出网多一两次
+SQLite 查询，这个量级可以忽略。一个必须加的防护：这个函数在 Transport 内部被调用，
+里面 panic 会打挂请求的 goroutine，所以 `h.DB == nil` 时按「没配统一出口」处理。
+
+### bypass 只比字面量
+
+支持精确主机名、`.example.com` 后缀、`10.0.0.0/8` 网段，**不做 DNS 解析**。
+解析结果会变 —— 同一个地址这次直连下次走代理，是最难查的一类问题。
+代价照实写在页面上：`prom.corp.example.com` 这种内网域名不写进清单就会被送去代理。
+默认清单含全部私有网段与本机，否则开启统一出口的那一刻内网数据源会全挂。
+默认值放在 `model.DefaultProxyBypass`，seed 与代码兜底共用一个常量 ——
+两处各写一份，改了一处就会出现「库里是旧清单、代码兜底是新清单」。
+
+### 哪些不走，以及为什么（页面上逐条列出）
+
+- **Prometheus / Loki / Jaeger / apiserver**：内网基础设施，送去代理只会变慢或失败。
+- **HTTP 拨测**：按条指定代理，`proxyId = 0` 的含义就是「这条要直连」。
+  让全局出口覆盖它，等于把「直连探测」这个语义抹掉。
+- **SSH / SMTP / LDAP / DNS / 裸 TCP**（证书检查、端口扫描、TCP 拨测）：
+  不是 HTTP，`Transport.Proxy` 管不到。要让它们走得另做 SOCKS5 拨号，这一轮不做。
+
+### 设成出口之前先卡一道
+
+`PUT /network/proxy-egress` 要求那条代理**存在、启用、且有一次成功的检测记录**。
+指定一条没验过的代理，表现是所有出网功能一起坏掉，而那个现象离
+「我刚改了个下拉框」太远了。bypass 里解析不了的条目也当场顶回来 ——
+一条写错的规则表现成「这个目标本该直连却被送去了代理」，很难联想到是清单写错。
+
+### 这张表由测试守着
+
+`TestNoUnaccountedHTTPClients` 扫 handler 包的源码：任何自己构造 `http.Client`
+的文件，要么改用 `h.egressClient(timeout)`，要么进 `egressExemptClients`
+并写明原因，否则测试失败；豁免清单过期（列了却已经不构造 client）也失败。
+不这么做的话，下一个新增的出网功能会静默绕过统一出口，而页面上的表还说它走代理。
+
+**验证**：9 条测试 —— bypass 解析与匹配（含 172.32 不在 172.16/12 内这类边界）、
+webhook 真的经过代理（用真正的正向代理数命中次数）、命中 bypass 时代理零命中而目标被直连打到、
+代理停用/删除时报错且**目标一次都没被打到**、未配置时不影响出网、
+生效范围接口摊出环境变量与两张清单、设置接口卡住未检测/停用/不存在/坏 bypass。
+全量 `go test` / `go vet` / `gofmt` / `vite build` 干净。真后端跑通：
+未配置时 `configured=false` 且 notes 点明仍遵守环境变量、`env.HTTPS_PROXY` 如实回显、
+新建的代理因为 `lastStatus=unknown` 被拒绝设成出口。
+
+**仍然没有的**：SOCKS5 拨号让 SSH / SMTP / 裸 TCP 也能走代理、
+按模块分别指定不同出口（目前是一个全局出口 + bypass）、
+bypass 的 DNS 解析匹配（刻意不做，理由见上）。
+
+
+
 
 
 

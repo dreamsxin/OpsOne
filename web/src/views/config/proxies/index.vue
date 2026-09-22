@@ -4,8 +4,11 @@ import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   checkEgressProxy,
   deleteEgressProxy,
+  getEgressPolicy,
   listEgressProxies,
+  saveEgressPolicy,
   saveEgressProxy,
+  type EgressPolicy,
   type EgressProxy,
   type ProxyCheckResult
 } from '@/api'
@@ -15,6 +18,31 @@ const rows = ref<EgressProxy[]>([])
 const schemes = ref<{ code: string; label: string }[]>([])
 const globalTestUrl = ref('')
 const notes = ref<string[]>([])
+
+const policy = ref<EgressPolicy | null>(null)
+const savingEgress = ref(false)
+const egressForm = reactive({ proxyId: 0, bypass: '' })
+
+async function loadPolicy() {
+  policy.value = await getEgressPolicy()
+  egressForm.proxyId = policy.value.proxyId || 0
+  egressForm.bypass = (policy.value.bypass || []).join(',')
+}
+
+async function saveEgress() {
+  savingEgress.value = true
+  try {
+    const result = await saveEgressPolicy({
+      proxyId: egressForm.proxyId,
+      bypass: egressForm.bypass
+    })
+    ElMessage.success(result.detail)
+    await loadPolicy()
+  } finally {
+    savingEgress.value = false
+  }
+}
+
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -127,7 +155,11 @@ async function doCheck() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await loadPolicy()
+})
+
 </script>
 
 <template>
@@ -138,16 +170,107 @@ onMounted(load)
           检测会<strong>直连一次、走代理一次</strong>，把两个结果摆在一起 ——
           只测代理的话，「网络本来就不通」和「代理坏了」给出的是同一个报错，分不开。
           <br />
-          <strong>目前只有 HTTP 拨测能指定走代理</strong>（拨测页上选）。云 API、IM、Webhook、
-          指标 / 日志 / 链路数据源、邮件都还是直连 —— 登记代理不会让它们改道，这一点不留想象空间。
+          下面的<strong>统一出口</strong>决定哪条代理真的成为平台的出网口；HTTP 拨测另外
+          <strong>按条</strong>指定代理，`proxyId=0` 就是「这条要直连」，统一出口不覆盖它。
           <br />
-          拨测指定的代理被停用或删除时，那条拨测<strong>直接失败并点名原因</strong>，
+          指定的代理被停用或删除时，走它的请求<strong>直接失败并点名原因</strong>，
           不会静默改成直连：静默直连会把「代理挂了」显示成「目标一切正常」。
           <br />
           出口 IP 只能从<strong>会回显来源 IP</strong> 的测试地址读到；读不到就照实说读不到。
           平台不预设测试地址 —— 默认填一个公网地址等于替你决定了这台机器可以访问公网。
         </template>
       </el-alert>
+
+      <el-card shadow="never" style="margin-bottom: 12px">
+        <template #header>
+          <strong>统一出口</strong>
+          <el-tag v-if="policy?.configured" type="success" size="small" style="margin-left: 8px">
+            {{ policy.proxyName }}（{{ policy.endpoint }}）
+          </el-tag>
+          <el-tag v-else type="info" size="small" style="margin-left: 8px">未统一出口</el-tag>
+          <span style="color: #909399; margin-left: 8px; font-size: 13px">
+            —— 决定云 API / IM / Webhook / 大模型 / Jenkins 的出网走哪里
+          </span>
+        </template>
+
+        <el-alert v-if="policy?.problem" type="error" :closable="false" style="margin-bottom: 10px">
+          <template #title>{{ policy.problem }}</template>
+        </el-alert>
+
+        <div class="page-toolbar" style="flex-wrap: wrap; gap: 8px">
+          <el-select v-model="egressForm.proxyId" style="width: 260px" placeholder="选择出口代理">
+            <el-option :value="0" label="不统一出口（各自遵守环境变量）" />
+            <el-option
+              v-for="row in rows"
+              :key="row.id"
+              :value="row.id"
+              :label="`${row.name}（${row.endpoint}）`"
+              :disabled="!row.enabled || row.lastStatus !== 'ok'"
+            />
+          </el-select>
+          <el-input
+            v-model="egressForm.bypass"
+            type="textarea"
+            :rows="2"
+            style="width: 420px"
+            placeholder="不走代理的目标，逗号分隔"
+          />
+          <el-button v-perm="'proxy:manage'" type="primary" :loading="savingEgress" @click="saveEgress">
+            保存出口设置
+          </el-button>
+        </div>
+
+        <div style="color: #909399; font-size: 13px; margin-bottom: 8px">
+          bypass 支持：精确主机名、<code>.example.com</code>（域名后缀）、<code>10.0.0.0/8</code>（网段）。
+          留空会恢复默认清单。
+        </div>
+
+        <el-alert
+          v-if="policy?.bypassBad?.length"
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 10px"
+        >
+          <template #title>
+            这些 bypass 条目解析不了，等于没写：{{ policy.bypassBad.join('、') }}
+          </template>
+        </el-alert>
+
+        <el-descriptions :column="3" border size="small" style="margin-bottom: 10px">
+          <el-descriptions-item
+            v-for="(value, key) in policy?.env || {}"
+            :key="key"
+            :label="String(key)"
+          >
+            <span v-if="value">{{ value }}</span>
+            <span v-else style="color: #909399">未设置</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <div style="font-weight: 600; margin-bottom: 6px">会走统一出口</div>
+            <el-table :data="policy?.covered || []" border stripe size="small">
+              <el-table-column prop="module" label="模块" width="170" />
+              <el-table-column prop="target" label="目标" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="note" label="说明" min-width="200" show-overflow-tooltip />
+            </el-table>
+          </el-col>
+          <el-col :span="12">
+            <div style="font-weight: 600; margin-bottom: 6px">不走，以及为什么</div>
+            <el-table :data="policy?.notCovered || []" border stripe size="small">
+              <el-table-column prop="module" label="模块" width="170" />
+              <el-table-column prop="target" label="目标" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="note" label="原因" min-width="200" show-overflow-tooltip />
+            </el-table>
+          </el-col>
+        </el-row>
+
+        <ul style="margin-top: 10px; color: #909399; font-size: 13px; line-height: 1.8">
+          <li v-for="(note, idx) in policy?.notes || []" :key="idx">{{ note }}</li>
+        </ul>
+      </el-card>
+
 
       <div class="page-toolbar">
         <el-tag v-if="globalTestUrl" type="info">默认测试地址：{{ globalTestUrl }}</el-tag>

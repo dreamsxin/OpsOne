@@ -172,7 +172,7 @@ func (h *Handler) sendToChannel(alert model.Alert, route *model.NotifyRoute, cha
 	}
 
 	payload, warn := h.renderWebhookBody(channel, alert)
-	status, err := postJSON(channel, payload)
+	status, err := h.postJSON(channel, payload)
 	record.HTTPStatus = status
 	record.CostMs = time.Since(start).Milliseconds()
 	if err != nil {
@@ -207,7 +207,7 @@ func alertMessage(alert model.Alert) map[string]any {
 	}
 }
 
-func postJSON(channel model.NotifyChannel, payload map[string]any) (int, error) {
+func (h *Handler) postJSON(channel model.NotifyChannel, payload map[string]any) (int, error) {
 	if channel.URL == "" {
 		return 0, fmt.Errorf("渠道未配置 URL")
 	}
@@ -225,7 +225,8 @@ func postJSON(channel model.NotifyChannel, payload map[string]any) (int, error) 
 		req.Header.Set(channel.HeaderKey, channel.HeaderValue)
 	}
 
-	client := &http.Client{Timeout: notifyTimeout}
+	// 走统一出口：webhook 地址是人填的，内外网都可能，命中 bypass 的自动直连
+	client := h.egressClient(notifyTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
@@ -461,7 +462,7 @@ func (h *Handler) TestNotifyChannel(c *gin.Context) {
 	}
 
 	start := time.Now()
-	status, err := postJSON(channel, sample)
+	status, err := h.postJSON(channel, sample)
 	if err != nil {
 		response.OK(c, gin.H{
 			"ok": false, "httpStatus": status,

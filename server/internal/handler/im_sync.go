@@ -118,7 +118,7 @@ func (h *Handler) imAppSecret(app *model.ImApp) (string, error) {
 
 // fetchDirectory 拉通讯录。单独拆出来便于把「取数据」与「算改动」分开测。
 func (h *Handler) fetchDirectory(ctx context.Context, app *model.ImApp) (*syncContext, error) {
-	dir, err := imDirectoryFor(app.Provider, app.BaseURL)
+	dir, err := imDirectoryFor(app.Provider, app.BaseURL, h.egressClient(imDirTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -720,7 +720,7 @@ func (h *Handler) checkImApp(app *model.ImApp) gin.H {
 		return gin.H{"status": "error", "detail": detail}
 	}
 
-	dir, err := imDirectoryFor(app.Provider, app.BaseURL)
+	dir, err := imDirectoryFor(app.Provider, app.BaseURL, h.egressClient(imDirTimeout))
 	if err != nil {
 		return fail(err.Error())
 	}

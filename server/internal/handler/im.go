@@ -286,7 +286,8 @@ func (h *Handler) postIM(channel model.NotifyChannel, text string) (int, error) 
 		req.Header.Set(channel.HeaderKey, channel.HeaderValue)
 	}
 
-	client := &http.Client{Timeout: notifyTimeout}
+	// 走统一出口：机器人地址几乎总是公网（也有人挂在自建网关后面，那种会命中 bypass）
+	client := h.egressClient(notifyTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err

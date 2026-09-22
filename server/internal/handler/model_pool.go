@@ -312,7 +312,8 @@ func (h *Handler) checkModelUpstream(upstream *model.ModelUpstream, operator *mo
 	}
 
 	started := time.Now()
-	resp, err := (&http.Client{Timeout: modelCheckTimeout}).Do(req)
+	// 走统一出口：公网厂商与自建 vLLM 都有人用，命中 bypass 的自建地址自动直连
+	resp, err := h.egressClient(modelCheckTimeout).Do(req)
 	if err != nil {
 		return fail("连接失败: " + err.Error())
 	}
@@ -349,7 +350,7 @@ func (h *Handler) checkModelUpstream(upstream *model.ModelUpstream, operator *mo
 		Messages:  []chatMessage{{Role: "user", Content: "ping"}},
 		MaxTokens: 1,
 	}
-	result, callErr := callUpstream(ctx, upstream, probe)
+	result, callErr := h.callUpstream(ctx, upstream, probe)
 	record := model.ModelCall{
 		UpstreamID: upstream.ID, UpstreamName: upstream.Name, Alias: upstream.Alias,
 		Provider: upstream.Provider, Model: upstream.Model, Caller: "check",
@@ -503,7 +504,7 @@ type callResult struct {
 }
 
 // callUpstream 向一个上游发一次非流式 chat 请求
-func callUpstream(ctx context.Context, upstream *model.ModelUpstream, req *chatRequest) (*callResult, error) {
+func (h *Handler) callUpstream(ctx context.Context, upstream *model.ModelUpstream, req *chatRequest) (*callResult, error) {
 	payload := map[string]any{
 		"model":    upstream.Model, // 对上游要报它自己的模型名，而不是平台的 Alias
 		"messages": req.Messages,
@@ -538,7 +539,7 @@ func callUpstream(ctx context.Context, upstream *model.ModelUpstream, req *chatR
 	}
 
 	started := time.Now()
-	resp, err := (&http.Client{Timeout: timeout}).Do(httpReq)
+	resp, err := h.egressClient(timeout).Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -648,7 +649,7 @@ func (h *Handler) dispatchChat(ctx context.Context, req *chatRequest, caller str
 		var result *callResult
 		opened, callErr := h.openUpstream(&upstream)
 		if callErr == nil {
-			result, callErr = callUpstream(ctx, opened, req)
+			result, callErr = h.callUpstream(ctx, opened, req)
 		}
 
 		record := model.ModelCall{

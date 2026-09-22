@@ -1051,14 +1051,27 @@ type MailAccount struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// DefaultProxyBypass 统一出口代理默认不覆盖的目标（配置项 proxy.bypass 的初始值）。
+//
+// 放在 model 里是为了让「seed 的值」和「代码里的兜底默认值」是同一个常量 ——
+// 两处各写一份，改了一处就会出现「库里是旧清单、代码兜底是新清单」这种对不上的状态。
+// 私有网段与本机必须在里面：平台要连的内网服务远多于公网服务，
+// 默认把内网也送去代理，开启统一出口的那一刻监控数据源会全挂。
+const DefaultProxyBypass = "localhost,127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12," +
+	"192.168.0.0/16,169.254.0.0/16,.internal,.local,.svc,.cluster.local"
+
 // EgressProxy 出口代理。
 //
-// 登记它有两个用处，缺一个这一页就是装饰：
+// 登记它有三个用处：
 //  1. **检测**：真的通过它发一次请求，把「直连通不通」和「走代理通不通」摆在一起对比 ——
 //     这是判断「是网络不通还是代理坏了」唯一靠得住的方式；
-//  2. **被用**：HTTP 拨测可以指定走某个代理。除此之外平台其它出网点
-//     （云 API、IM、Webhook、指标 / 日志 / 链路数据源）**目前都不走代理**，
-//     这一点写在页面上，不让人误以为登记了就全局生效。
+//  2. **统一出口**：配置项 `proxy.egress_id` 指向某一条时，云 API / IM / Webhook /
+//     大模型 / Jenkins 的出网都走它（命中 `proxy.bypass` 的目标除外）；
+//  3. **按条引用**：HTTP 拨测可以单独指定走某个代理，`proxyId = 0` 就是「这条要直连」，
+//     统一出口刻意不覆盖它 —— 否则「直连探测」这个语义就没了。
+//
+// 内网基础设施（Prometheus / Loki / Jaeger / apiserver）与非 HTTP 通道
+// （SSH / SMTP / LDAP / DNS / 裸 TCP）都不走代理，原因写在出口页面上。
 type EgressProxy struct {
 	ID   uint   `gorm:"primaryKey" json:"id"`
 	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`

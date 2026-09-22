@@ -148,6 +148,9 @@ func (h *Handler) doSync(ctx context.Context, acct *model.CloudAccount, resource
 		AccessKeyID:     acct.AccessKeyID,
 		AccessKeySecret: secret,
 		Endpoint:        cloudEndpointOverride,
+		// 云 OpenAPI 的域名写死在 cloudapi 包里，必然是公网 —— 注入统一出口的 client，
+		// 没配统一出口时它的行为与以前一样（遵守 HTTP_PROXY 环境变量）
+		HTTP: h.egressClient(cloudapi.DefaultTimeout),
 	}
 
 	switch resourceType {

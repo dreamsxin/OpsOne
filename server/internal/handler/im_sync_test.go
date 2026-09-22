@@ -59,7 +59,7 @@ func newFakeWecom(t *testing.T, errcode int) *httptest.Server {
 
 func TestWecomDirectoryParsesAndSurfacesErrcode(t *testing.T) {
 	srv := newFakeWecom(t, 0)
-	dir, err := imDirectoryFor(channelWecom, srv.URL)
+	dir, err := imDirectoryFor(channelWecom, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("取适配器失败: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestWecomDirectoryParsesAndSurfacesErrcode(t *testing.T) {
 
 	// 密钥错时企微返回 HTTP 200 + errcode，必须当失败处理并带上原话
 	bad := newFakeWecom(t, 40001)
-	badDir, _ := imDirectoryFor(channelWecom, bad.URL)
+	badDir, _ := imDirectoryFor(channelWecom, bad.URL, nil)
 	if _, err := badDir.token(ctx, "corp", "wrong"); err == nil {
 		t.Fatal("errcode 非 0 时应该报错")
 	} else if !strings.Contains(err.Error(), "40001") ||
@@ -135,7 +135,7 @@ func TestFeishuDirectoryUsesCodeAndSkipsResigned(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	dir, _ := imDirectoryFor(channelFeishu, srv.URL)
+	dir, _ := imDirectoryFor(channelFeishu, srv.URL, nil)
 	ctx := context.Background()
 	if _, err := dir.token(ctx, "app", "wrong"); err == nil ||
 		!strings.Contains(err.Error(), "99991663") {
@@ -194,7 +194,7 @@ func TestDingtalkDirectoryWalksTreeAndPages(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	dir, _ := imDirectoryFor(channelDingTalk, srv.URL)
+	dir, _ := imDirectoryFor(channelDingTalk, srv.URL, nil)
 	ctx := context.Background()
 	token, err := dir.token(ctx, "key", "secret")
 	if err != nil {

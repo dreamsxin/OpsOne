@@ -674,12 +674,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/notify/mail-accounts/:id/test", middleware.RequirePerm("mail:manage"), h.TestMailAccount)
 		auth.POST("/notify/mail-accounts/import-global", middleware.RequirePerm("mail:manage"), h.ImportGlobalSMTP)
 
-		// 出口代理：检测是直连 + 走代理各一次的对比；目前只有 HTTP 拨测会真的走它
+		// 出口代理：检测是直连 + 走代理各一次的对比
 		auth.GET("/network/proxies", h.ListEgressProxies)
 		auth.POST("/network/proxies", middleware.RequirePerm("proxy:manage"), h.CreateEgressProxy)
 		auth.PUT("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.UpdateEgressProxy)
 		auth.DELETE("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.DeleteEgressProxy)
 		auth.POST("/network/proxies/:id/check", middleware.RequirePerm("proxy:manage"), h.CheckEgressProxy)
+		// 统一出口：哪些模块真的走代理、哪些不走，以及进程实际看到的 HTTP_PROXY
+		auth.GET("/network/proxy-egress", h.GetEgressPolicy)
+		auth.PUT("/network/proxy-egress", middleware.RequirePerm("proxy:manage"), h.UpdateEgressPolicy)
 
 		auth.GET("/site-links", h.ListSiteLinks)
 		auth.POST("/site-links", middleware.RequirePerm("config:manage"), h.CreateSiteLink)
