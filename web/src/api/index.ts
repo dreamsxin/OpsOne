@@ -1920,6 +1920,24 @@ export async function exportDBQueryCSV(id: number, data: Record<string, any>) {
 
 // ---------- 事件中心 ----------
 
+export interface SLAClock {
+  kind: string
+  targetMinutes: number
+  state: string // na | pending | risk | met | breached
+  reason: string
+  dueAt: string | null
+  doneAt: string | null
+  usedSeconds: number
+  remainSeconds: number
+}
+
+export interface EventSLA {
+  respond: SLAClock
+  recover: SLAClock
+  worst: string
+  worstLabel: string
+}
+
 export interface OpsEvent {
   id: number
   title: string
@@ -1937,7 +1955,9 @@ export interface OpsEvent {
   lastActivityAt: string
   resolvedAt: string | null
   resolvedBy: string
+  respondedAt: string | null
   createdAt: string
+  sla: EventSLA
 }
 
 export interface EventLog {
@@ -1957,7 +1977,38 @@ export interface EventStats {
   mine: number
   unassigned: number
   today: number
+  slaBreached: number
+  slaRisk: number
 }
+
+// ---------- 监控设置（事件 SLA） ----------
+
+export interface SLALevel {
+  severity: string
+  label: string
+  respondKey: string
+  respondMinutes: number
+  recoverKey: string
+  recoverMinutes: number
+}
+
+export interface SLASettings {
+  levels: SLALevel[]
+  remindBefore: number
+  repeatHours: number
+  stats: { respondBreached: number; recoverBreached: number; risk: number }
+  notes: string[]
+}
+
+export const getSLASettings = () => request<SLASettings>({ url: '/monitor/sla-settings' })
+export const updateSLASettings = (data: {
+  respond?: Record<string, number>
+  recover?: Record<string, number>
+  remindBefore?: number
+  repeatHours?: number
+}) => request<{ updated: number }>({ url: '/monitor/sla-settings', method: 'PUT', data })
+export const runSLAScan = () =>
+  request<{ message: string }>({ url: '/monitor/sla-settings/scan', method: 'POST' })
 
 export interface EventContext {
   hosts: { id?: number; name: string; address?: string; env?: string; status: string; checkedAt?: string }[]

@@ -126,7 +126,8 @@ func main() {
 	} else {
 		log.Println("[kube] 定时检查未启用（OPS_KUBE_CHECK_SPEC 为空），只能手动检查")
 	}
-	if cfg.HostMetricSpec != "" {		if err := sched.AddFixed(cfg.HostMetricSpec, h.CollectHostMetricsForSchedule); err != nil {
+	if cfg.HostMetricSpec != "" {
+		if err := sched.AddFixed(cfg.HostMetricSpec, h.CollectHostMetricsForSchedule); err != nil {
 			log.Fatalf("主机指标采集 cron 表达式无效(%s): %v", cfg.HostMetricSpec, err)
 		}
 		log.Printf("[metric] 定时采集已启用: %s", cfg.HostMetricSpec)
@@ -180,6 +181,14 @@ func main() {
 		log.Printf("[config] 配置巡检已启用: %s", cfg.ConfigSpec)
 	} else {
 		log.Println("[config] 配置巡检未启用（OPS_CONFIG_SPEC 为空），配置被改了不会自动被发现")
+	}
+	if cfg.SLASpec != "" {
+		if err := sched.AddFixed(cfg.SLASpec, h.CheckEventSLAForSchedule); err != nil {
+			log.Fatalf("事件 SLA 扫描 cron 表达式无效(%s): %v", cfg.SLASpec, err)
+		}
+		log.Printf("[sla] 事件 SLA 扫描已启用: %s", cfg.SLASpec)
+	} else {
+		log.Println("[sla] 事件 SLA 扫描未启用（OPS_SLA_SPEC 为空），响应/恢复超时不会有人被提醒")
 	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
@@ -957,6 +966,11 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/runbooks/:id/use", middleware.RequirePerm("runbook:manage"), h.UseRunbook)
 		auth.GET("/monitor/runbook-uses", h.ListRunbookUses)
 		auth.POST("/monitor/runbooks/draft-from-review", middleware.RequirePerm("runbook:manage"), h.DraftRunbookFromReview)
+
+		// 监控设置：事件 SLA 目标与超时提醒
+		auth.GET("/monitor/sla-settings", h.GetSLASettings)
+		auth.PUT("/monitor/sla-settings", middleware.RequirePerm("sla:manage"), h.UpdateSLASettings)
+		auth.POST("/monitor/sla-settings/scan", middleware.RequirePerm("sla:manage"), h.RunEventSLACheck)
 
 		auth.GET("/exec/scripts", h.ListScripts)
 		auth.GET("/exec/scripts/categories", h.ListScriptCategories)

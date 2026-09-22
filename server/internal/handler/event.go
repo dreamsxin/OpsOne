@@ -44,8 +44,18 @@ func eventView(event model.Event) gin.H {
 		"assignee": event.Assignee, "assignedBy": event.AssignedBy, "assignedAt": event.AssignedAt,
 		"createdByName": event.CreatedByName, "lastActivityAt": event.LastActivityAt,
 		"resolvedAt": event.ResolvedAt, "resolvedBy": event.ResolvedBy,
-		"createdAt": event.CreatedAt,
+		"respondedAt": event.RespondedAt,
+		"createdAt":   event.CreatedAt,
 	}
+}
+
+// eventViewSLA 列表与详情用的输出：在 eventView 之上挂实时 SLA。
+// SLA 是「现在几点」算出来的，不落库，所以每次输出都重新算一遍。
+func eventViewSLA(event model.Event, targets slaTargets, now time.Time) gin.H {
+	view := eventView(event)
+	respond, recoverClock := eventSLA(event, targets, now)
+	view["sla"] = eventSLAView(respond, recoverClock)
+	return view
 }
 
 // appendEventLog 追加一条时间线记录并刷新事件的最近活动时间
@@ -231,6 +241,9 @@ func (h *Handler) notifyEventAssignee(event model.Event, operator string) {
 
 func (h *Handler) ListEvents(c *gin.Context) {
 	page, size := pageParams(c)
+	targets := h.slaTargets()
+	now := time.Now()
+
 	q := h.DB.Model(&model.Event{})
 	if status := c.Query("status"); status != "" {
 		q = q.Where("status = ?", status)
@@ -245,6 +258,8 @@ func (h *Handler) ListEvents(c *gin.Context) {
 		like := "%" + kw + "%"
 		q = q.Where("title LIKE ? OR summary LIKE ?", like, like)
 	}
+	// SLA 筛选翻成 SQL，发生在分页之前
+	q = applySLAFilter(q, c.Query("sla"), targets, now)
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -259,7 +274,7 @@ func (h *Handler) ListEvents(c *gin.Context) {
 
 	views := make([]gin.H, 0, len(list))
 	for _, item := range list {
-		views = append(views, eventView(item))
+		views = append(views, eventViewSLA(item, targets, now))
 	}
 	response.OKPage(c, views, total, page, size)
 }
@@ -276,6 +291,8 @@ func (h *Handler) EventStats(c *gin.Context) {
 	}
 	user := middleware.CurrentUser(c)
 	todayStart := time.Now().Truncate(24 * time.Hour)
+	targets := h.slaTargets()
+	now := time.Now()
 
 	response.OK(c, gin.H{
 		"total":      count(""),
@@ -285,6 +302,9 @@ func (h *Handler) EventStats(c *gin.Context) {
 		"mine":       count("assignee = ? AND status IN ?", user.Username, []string{"open", "processing"}),
 		"unassigned": count("assignee = '' AND status IN ?", []string{"open", "processing"}),
 		"today":      count("created_at >= ?", todayStart),
+		// SLA 只数「还没做到且已超时/临期」的，跟列表上的筛选是同一个口径
+		"slaBreached": h.countSLAState("breached", targets, now),
+		"slaRisk":     h.countSLAState("risk", targets, now),
 	})
 }
 
@@ -306,7 +326,7 @@ func (h *Handler) GetEvent(c *gin.Context) {
 	h.DB.Where("event_id = ?", event.ID).Order("id asc").Find(&logs)
 
 	response.OK(c, gin.H{
-		"event":   eventView(event),
+		"event":   eventViewSLA(event, h.slaTargets(), time.Now()),
 		"alerts":  alerts,
 		"logs":    logs,
 		"context": h.eventContext(alerts),
@@ -485,6 +505,8 @@ func (h *Handler) AddEventNote(c *gin.Context) {
 		return
 	}
 	h.appendEventLog(event.ID, "note", req.Content, middleware.CurrentUser(c).Username)
+	// 写下第一条处置记录就算响应了 —— 有人在这条单子上留下了判断
+	h.markEventResponded(event, time.Now())
 	response.OK(c, nil)
 }
 
@@ -536,6 +558,12 @@ func (h *Handler) UpdateEventStatus(c *gin.Context) {
 		updates["resolved_at"], updates["resolved_by"] = nil, ""
 	}
 	h.DB.Model(&model.Event{}).Where("id = ?", event.ID).Updates(updates)
+
+	// 状态离开「待处理」就算响应：有人接手、直接解决、或判定无需处理，
+	// 三种都是有人真的看过这条单子并做了判断。
+	if event.Status == "open" && req.Status != "open" {
+		h.markEventResponded(event, now)
+	}
 
 	content := fmt.Sprintf("状态 %s -> %s", eventStatusLabels[event.Status], eventStatusLabels[req.Status])
 	if req.Note != "" {

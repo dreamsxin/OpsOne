@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onActivated, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   addEventNote,
@@ -21,6 +21,7 @@ import {
   type OpsEvent,
   type RunbookMatch,
   type RunbookMatchResult,
+  type SLAClock,
   type User
 } from '@/api'
 import { useUserStore } from '@/stores/user'
@@ -31,12 +32,58 @@ import Pagination from '@/components/Pagination.vue'
 
 const store = useUserStore()
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const rows = ref<OpsEvent[]>([])
 const total = ref(0)
 const stats = ref<EventStats | null>(null)
-const query = reactive({ page: 1, pageSize: 20, status: '', severity: '', assignee: '', keyword: '' })
+const query = reactive({
+  page: 1,
+  pageSize: 20,
+  status: '',
+  severity: '',
+  assignee: '',
+  keyword: '',
+  sla: ''
+})
+
+// nowTs 只为了让「还剩多久」自己走。倒计时从后端给的绝对到点时间算，
+// 不是把接口返回的剩余秒数往下减 —— 页面开着不动的时候后者会越来越不准。
+const nowTs = ref(Date.now())
+let slaTimer: ReturnType<typeof setInterval> | null = null
+
+function humanSeconds(seconds: number) {
+  const s = Math.abs(Math.round(seconds))
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分钟`
+  const h = Math.floor(m / 60)
+  if (h < 48) return m % 60 === 0 ? `${h} 小时` : `${h} 小时 ${m % 60} 分钟`
+  return `${Math.floor(h / 24)} 天 ${h % 24} 小时`
+}
+
+/** 时钟停了就用后端的结论，还在跑就按到点时间现算，这样页面不刷新也准 */
+function slaState(clock: SLAClock) {
+  if (clock.state === 'na' || clock.doneAt || !clock.dueAt) return clock.state
+  return new Date(clock.dueAt).getTime() - nowTs.value < 0 ? 'breached' : clock.state
+}
+
+function slaText(clock: SLAClock) {
+  if (clock.state === 'na') return clock.reason
+  if (clock.doneAt || !clock.dueAt) return clock.reason
+  const diff = (new Date(clock.dueAt).getTime() - nowTs.value) / 1000
+  return diff >= 0 ? `还剩 ${humanSeconds(diff)}` : `已超时 ${humanSeconds(diff)}`
+}
+
+const slaTone: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+  na: 'info',
+  met: 'success',
+  pending: '',
+  risk: 'warning',
+  breached: 'danger'
+}
+
 
 const users = ref<User[]>([])
 
@@ -67,6 +114,7 @@ const actionText: Record<string, string> = {
   assign: '指派',
   note: '处置记录',
   status: '状态变更',
+  sla: 'SLA 提醒',
   review: '复盘',
   runbook: '剧本处置'
 }
@@ -100,12 +148,15 @@ const chips = computed<ChipItem[]>(() => {
     { key: 'status:processing', label: '处理中', count: s?.processing ?? 0, hint: '已认领', tone: 'warning' },
     { key: 'status:resolved', label: '已解决', count: s?.resolved ?? 0, hint: '仅回溯', tone: 'success' },
     { key: 'mine', label: '我负责', count: s?.mine ?? 0, hint: '指派给我的' },
+    { key: 'sla:breached', label: 'SLA 已超时', count: s?.slaBreached ?? 0, hint: '未完结且已超时', tone: 'danger' },
+    { key: 'sla:risk', label: 'SLA 临期', count: s?.slaRisk ?? 0, hint: '快到点了', tone: 'warning' },
     { key: 'unassigned', label: '未指派', count: s?.unassigned ?? 0, hint: '待处理+处理中', static: true },
     { key: 'today', label: '今日新增', count: s?.today ?? 0, static: true }
   ]
 })
 
 const activeChipKey = computed<string | null>(() => {
+  if (query.sla) return `sla:${query.sla}`
   if (query.status) return `status:${query.status}`
   if (query.assignee && query.assignee === store.profile?.username) return 'mine'
   return null
@@ -116,8 +167,10 @@ function onChipSelect(key: string) {
   const wasActive = activeChipKey.value === key
   query.status = ''
   query.assignee = ''
+  query.sla = ''
   if (!wasActive && key === 'mine') query.assignee = store.profile?.username || ''
   else if (!wasActive && key.startsWith('status:')) query.status = key.split(':')[1]
+  else if (!wasActive && key.startsWith('sla:')) query.sla = key.split(':')[1]
   query.page = 1
   load()
 }
@@ -127,6 +180,7 @@ function resetFilters() {
   query.severity = ''
   query.assignee = ''
   query.keyword = ''
+  query.sla = ''
   query.page = 1
   load()
 }
@@ -295,11 +349,34 @@ async function remove(row: OpsEvent) {
   load()
 }
 
+// applyRouteQuery 支持从别处深链过来，例如监控设置页的「去事件中心处理」。
+// 列表页在 keep-alive 里，所以 onActivated 也要走一次，不然第二次进来还是老筛选。
+function applyRouteQuery() {
+  const sla = String(route.query.sla || '')
+  if (!sla) return false
+  query.sla = sla
+  query.status = ''
+  query.assignee = ''
+  query.page = 1
+  return true
+}
+
 onMounted(async () => {
   const data = await listUsers({ page: 1, pageSize: 100 })
   users.value = data.list || []
+  applyRouteQuery()
   load()
+  slaTimer = setInterval(() => (nowTs.value = Date.now()), 30000)
 })
+
+onActivated(() => {
+  if (applyRouteQuery()) load()
+})
+
+onUnmounted(() => {
+  if (slaTimer) clearInterval(slaTimer)
+})
+
 </script>
 
 <template>
@@ -330,6 +407,10 @@ onMounted(async () => {
         <el-select v-model="query.assignee" placeholder="负责人" clearable filterable style="width: 140px">
           <el-option v-for="u in users" :key="u.id" :label="u.username" :value="u.username" />
         </el-select>
+        <el-select v-model="query.sla" placeholder="SLA" clearable style="width: 130px">
+          <el-option label="已超时" value="breached" />
+          <el-option label="临期" value="risk" />
+        </el-select>
         <el-button type="primary" @click="((query.page = 1), load())">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
       </div>
@@ -353,6 +434,18 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="关联告警" width="100">
           <template #default="{ row }">{{ row.alertIds.length }} 条</template>
+        </el-table-column>
+        <el-table-column label="SLA" min-width="210">
+          <template #default="{ row }">
+            <div class="sla-cell">
+              <el-tag size="small" :type="slaTone[slaState(row.sla.respond)]">
+                响应 {{ slaText(row.sla.respond) }}
+              </el-tag>
+              <el-tag size="small" :type="slaTone[slaState(row.sla.recover)]">
+                恢复 {{ slaText(row.sla.recover) }}
+              </el-tag>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="负责人" width="110">
           <template #default="{ row }">
@@ -443,6 +536,30 @@ onMounted(async () => {
           </el-descriptions-item>
           <el-descriptions-item label="负责人">{{ detail.event.assignee || '未指派' }}</el-descriptions-item>
           <el-descriptions-item label="建单人">{{ detail.event.createdByName }}</el-descriptions-item>
+          <el-descriptions-item label="响应 SLA">
+            <el-tag size="small" :type="slaTone[slaState(detail.event.sla.respond)]">
+              {{ slaText(detail.event.sla.respond) }}
+            </el-tag>
+            <span style="color: #6b7280; margin-left: 6px">
+              {{
+                detail.event.sla.respond.targetMinutes > 0
+                  ? `目标 ${detail.event.sla.respond.targetMinutes} 分钟`
+                  : ''
+              }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="恢复 SLA">
+            <el-tag size="small" :type="slaTone[slaState(detail.event.sla.recover)]">
+              {{ slaText(detail.event.sla.recover) }}
+            </el-tag>
+            <span style="color: #6b7280; margin-left: 6px">
+              {{
+                detail.event.sla.recover.targetMinutes > 0
+                  ? `目标 ${detail.event.sla.recover.targetMinutes} 分钟`
+                  : ''
+              }}
+            </span>
+          </el-descriptions-item>
           <el-descriptions-item label="来源" :span="2">
             {{ detail.event.origin === 'bucket' ? '聚合桶' : '手动' }}
             <span v-if="detail.event.originNote" style="color: #6b7280">（{{ detail.event.originNote }}）</span>
@@ -704,3 +821,13 @@ onMounted(async () => {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.sla-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+</style>
+

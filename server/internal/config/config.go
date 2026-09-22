@@ -126,6 +126,12 @@ type Config struct {
 	// 每个文件一次 SFTP 读取，节奏不宜太密。
 	ConfigSpec string
 
+	// SLASpec 事件 SLA 扫描的 cron 表达式。留空表示不自动提醒
+	//（界面上的「距 SLA 还有多久」照样准确，只是超时了不会有人被叫，
+	// 等于 SLA 变成一个事后才有人发现的数字）。
+	// 只查库不连主机，可以跑得比巡检密。
+	SLASpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -232,10 +238,11 @@ func Load() (*Config, error) {
 		ReviewSpec:         strings.TrimSpace(env("OPS_REVIEW_SPEC", "10 9 * * *")),
 		ServiceSpec:        strings.TrimSpace(env("OPS_SERVICE_SPEC", "*/10 * * * *")),
 		ConfigSpec:         strings.TrimSpace(env("OPS_CONFIG_SPEC", "*/30 * * * *")),
+		SLASpec:            strings.TrimSpace(env("OPS_SLA_SPEC", "*/2 * * * *")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 
-		BackupSpec: strings.TrimSpace(env("OPS_BACKUP_SPEC", "0 3 * * *")),		BackupDir:  strings.TrimSpace(env("OPS_BACKUP_DIR", "backups")),
+		BackupSpec: strings.TrimSpace(env("OPS_BACKUP_SPEC", "0 3 * * *")), BackupDir: strings.TrimSpace(env("OPS_BACKUP_DIR", "backups")),
 		BackupKeep: envInt("OPS_BACKUP_KEEP", 7),
 
 		ForwardBind:       strings.TrimSpace(env("OPS_FORWARD_BIND", "0.0.0.0")),

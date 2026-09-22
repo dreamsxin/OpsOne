@@ -67,7 +67,72 @@ func Migrate(g *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return backfillCronProdConfirmed(g)
+	if err := backfillCronProdConfirmed(g); err != nil {
+		return err
+	}
+	return backfillEventResponded(g)
+}
+
+// cfgEventRespondedBackfill 记录「存量事件的响应时间已回填过」
+const cfgEventRespondedBackfill = "migration.event_responded_backfilled"
+
+// backfillEventResponded 升级兼容：SLA 上线前建的事件没有 responded_at。
+//
+// 如果留空不管，这些单子在新界面上会一律显示「响应已超时 N 天」——
+// 明明当时有人处理过，只是平台那时候没记这个时间点，等于凭空造出一批违约。
+// 所以从只追加的时间线里把真实时间捞回来：最早一条 status / note 记录就是
+// 「第一次有人动手」；连时间线都没有的已解决事件，退一步用解决时间
+// （解决本身也是一次响应，只是把响应时间算晚了，宁可算晚也不凭空算超时）。
+func backfillEventResponded(g *gorm.DB) error {
+	var exist model.SysConfig
+	err := g.Where("`key` = ?", cfgEventRespondedBackfill).First(&exist).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	var events []model.Event
+	if err := g.Where("responded_at IS NULL").Find(&events).Error; err != nil {
+		return err
+	}
+	fromLog, fromResolved := 0, 0
+	for _, event := range events {
+		var first model.EventLog
+		err := g.Where("event_id = ? AND action IN ?", event.ID, []string{"status", "note"}).
+			Order("id asc").First(&first).Error
+		switch {
+		case err == nil:
+			at := first.CreatedAt
+			if err := g.Model(&model.Event{}).Where("id = ?", event.ID).
+				Update("responded_at", &at).Error; err != nil {
+				return err
+			}
+			fromLog++
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			if event.ResolvedAt == nil {
+				continue // 确实没人动过，留空是实话
+			}
+			if err := g.Model(&model.Event{}).Where("id = ?", event.ID).
+				Update("responded_at", event.ResolvedAt).Error; err != nil {
+				return err
+			}
+			fromResolved++
+		default:
+			return err
+		}
+	}
+	if fromLog > 0 || fromResolved > 0 {
+		log.Printf("[migrate] 事件 SLA 上线：回填响应时间 %d 条（取自时间线）+ %d 条（退回解决时间）",
+			fromLog, fromResolved)
+	}
+	return g.Create(&model.SysConfig{
+		Group: "migration", Key: cfgEventRespondedBackfill, Value: "true", Type: "bool",
+		Label:   "事件响应时间已回填",
+		Remark:  "SLA 上线时从事件时间线回填存量事件的响应时间，只执行一次，请勿手工改动",
+		Builtin: true,
+	}).Error
 }
 
 // cfgCronBackfill 记录「存量定时任务的生产确认已回填过」，避免每次启动都回填
@@ -221,6 +286,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 435, ParentID: 418, Title: "维护复盘与改进项", Type: "button", AuthCode: "review:manage", Sort: 1},
 		{ID: 419, ParentID: 400, Name: "Runbook", Title: "处置剧本", Path: "/monitor/runbooks", Component: "/monitor/runbooks/index", Icon: "Reading", Sort: 19},
 		{ID: 436, ParentID: 419, Title: "维护剧本与记录使用", Type: "button", AuthCode: "runbook:manage", Sort: 1},
+		// 400-419 这段页面 ID 用满了，按钮占到 436，页面从 440 起续接
+		{ID: 440, ParentID: 400, Name: "MonitorSLA", Title: "监控设置", Path: "/monitor/sla-settings", Component: "/monitor/sla-settings/index", Icon: "Clock", Sort: 20},
+		{ID: 441, ParentID: 440, Title: "维护 SLA 目标", Type: "button", AuthCode: "sla:manage", Sort: 1},
 
 		// ---------- 安全合规 ----------
 		{ID: 500, Name: "Security", Title: "安全合规", Path: "/security", Icon: "Key", Sort: 60},
@@ -608,6 +676,14 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "security", Key: "firewall.sudo", Value: "true", Type: "bool", Label: "防火墙命令自动 sudo", Remark: "防火墙命令全都要 root。主机账号不是 root 时自动加 sudo -n，需要为该账号配置免密 sudo；关掉则原样执行", Builtin: true},
 		{Group: "security", Key: "service.sudo", Value: "true", Type: "bool", Label: "服务启停自动 sudo", Remark: "systemctl 的读操作普通用户可以做，start/stop/enable 必须 root。主机账号不是 root 时自动加 sudo -n；关掉则原样执行", Builtin: true},
 		{Group: "security", Key: "firewall.idle_days", Value: "30", Type: "int", Label: "防火墙规则闲置天数", Remark: "创建超过这么多天且从未命中的放行规则会进清理建议", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_respond_critical", Value: "15", Type: "int", Label: "紧急事件响应目标(分钟)", Remark: "从建单算到「有人接手或写下第一条处置记录」。0 表示这一级不设 SLA", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_respond_warning", Value: "60", Type: "int", Label: "警告事件响应目标(分钟)", Remark: "同上；指派不算响应，把单子转给别人不等于开始处理", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_respond_info", Value: "480", Type: "int", Label: "提示事件响应目标(分钟)", Remark: "同上", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_recover_critical", Value: "60", Type: "int", Label: "紧急事件恢复目标(分钟)", Remark: "从建单算到状态变成「已解决」；标记「已关闭」的事件不计 SLA。0 表示这一级不设", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_recover_warning", Value: "240", Type: "int", Label: "警告事件恢复目标(分钟)", Remark: "同上", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_recover_info", Value: "1440", Type: "int", Label: "提示事件恢复目标(分钟)", Remark: "同上", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_remind_before", Value: "5", Type: "int", Label: "SLA 临期提前量(分钟)", Remark: "距超时不足这么多分钟标成「临期」并提醒一次。0 表示只在真超时后才提醒", Builtin: true},
+		{Group: "monitor", Key: "monitor.sla_repeat_hours", Value: "4", Type: "int", Label: "SLA 重复提醒间隔(小时)", Remark: "同一个事件的同一条 SLA 在这段时间内不重复发消息，避免一个不处理的单子刷满消息中心", Builtin: true},
 	}
 
 	for i := range configs {

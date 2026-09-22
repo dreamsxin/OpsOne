@@ -666,7 +666,6 @@ type FirewallSnapshot struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-
 // AlertSource 告警接入源，外部系统用 Token 推送告警
 type AlertSource struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
@@ -1277,6 +1276,17 @@ type Event struct {
 	ResolvedAt     *time.Time `json:"resolvedAt"`
 	ResolvedBy     string     `gorm:"size:64" json:"resolvedBy"`
 
+	// RespondedAt 第一次「真的有人动手」的时间，用来算响应 SLA。
+	//
+	// 口径只认两件事：状态离开 open（有人接手），或者写下第一条处置记录。
+	// 指派**不算**响应 —— 把单子丢给别人不等于开始处理，这是故意的，
+	// 否则值班的人可以靠互相转单把响应 SLA 刷成全绿。
+	RespondedAt *time.Time `json:"respondedAt"`
+	// SLARespondAlertedAt / SLARecoverAlertedAt 上一次因为 SLA 提醒过的时间。
+	// 只为了不刷屏：同一个事件同一条 SLA 在提醒间隔内不重复发消息。
+	SLARespondAlertedAt *time.Time `json:"slaRespondAlertedAt"`
+	SLARecoverAlertedAt *time.Time `json:"slaRecoverAlertedAt"`
+
 	CreatedBy uint      `gorm:"index;default:0" json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -1286,7 +1296,7 @@ type Event struct {
 type EventLog struct {
 	ID      uint   `gorm:"primaryKey" json:"id"`
 	EventID uint   `gorm:"index;not null" json:"eventId"`
-	Action  string `gorm:"size:16" json:"action"` // create | assign | note | status
+	Action  string `gorm:"size:16" json:"action"` // create | assign | note | status | sla
 	// Content 一句人能看懂的说明，例如「状态 open -> processing」
 	Content   string    `gorm:"size:500" json:"content"`
 	Operator  string    `gorm:"size:64" json:"operator"`
@@ -1349,11 +1359,11 @@ type EventActionItem struct {
 	DoneAt   *time.Time `json:"doneAt"`
 	DoneNote string     `gorm:"size:255" json:"doneNote"`
 	// LastRemindAt 上次催办时间，用来保证一天最多催一次
-	LastRemindAt *time.Time `json:"lastRemindAt"`
-	CreatedByName string    `gorm:"size:64" json:"createdByName"`
-	CreatedBy     uint      `gorm:"index;default:0" json:"createdBy"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	LastRemindAt  *time.Time `json:"lastRemindAt"`
+	CreatedByName string     `gorm:"size:64" json:"createdByName"`
+	CreatedBy     uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // ConfigFile 被管配置文件：登记「哪台机器的哪个路径，内容该是什么」。
@@ -1445,12 +1455,12 @@ type ConfigApply struct {
 	// VerifyHash 下发后回读的 hash，与目标版本一致才算成功
 	VerifyHash string `gorm:"size:64" json:"verifyHash"`
 	// ReloadStatus 关联服务的 reload 结果：skipped | success | failed
-	ReloadStatus string `gorm:"size:16" json:"reloadStatus"`
-	ReloadDetail string `gorm:"size:255" json:"reloadDetail"`
-	Detail       string `gorm:"size:500" json:"detail"`
-	ExecJobID    uint   `gorm:"index;default:0" json:"execJobId"`
-	Operator     string `gorm:"size:64" json:"operator"`
-	ClientIP     string `gorm:"size:64" json:"clientIp"`
+	ReloadStatus string    `gorm:"size:16" json:"reloadStatus"`
+	ReloadDetail string    `gorm:"size:255" json:"reloadDetail"`
+	Detail       string    `gorm:"size:500" json:"detail"`
+	ExecJobID    uint      `gorm:"index;default:0" json:"execJobId"`
+	Operator     string    `gorm:"size:64" json:"operator"`
+	ClientIP     string    `gorm:"size:64" json:"clientIp"`
 	CreatedAt    time.Time `gorm:"index" json:"createdAt"`
 }
 
@@ -1484,12 +1494,12 @@ type HostService struct {
 	Remark       string `gorm:"size:255" json:"remark"`
 
 	// ---------- 实际态，由巡检回填 ----------
-	LoadState   string `gorm:"size:24" json:"loadState"`          // loaded | not-found | masked | error
-	ActiveState string `gorm:"size:24;index" json:"activeState"`  // active | inactive | failed | activating…
-	SubState    string `gorm:"size:24" json:"subState"`           // running | exited | dead | failed…
-	EnableState string `gorm:"size:24" json:"enableState"`        // enabled | disabled | static | masked…
-	Ports       string `gorm:"size:255" json:"ports"`             // 逗号分隔，按 cgroup 反查出来的监听端口
-	ProcCount   int    `json:"procCount"`                         // 持有监听端口的进程数
+	LoadState   string `gorm:"size:24" json:"loadState"`         // loaded | not-found | masked | error
+	ActiveState string `gorm:"size:24;index" json:"activeState"` // active | inactive | failed | activating…
+	SubState    string `gorm:"size:24" json:"subState"`          // running | exited | dead | failed…
+	EnableState string `gorm:"size:24" json:"enableState"`       // enabled | disabled | static | masked…
+	Ports       string `gorm:"size:255" json:"ports"`            // 逗号分隔，按 cgroup 反查出来的监听端口
+	ProcCount   int    `json:"procCount"`                        // 持有监听端口的进程数
 
 	// Drift ok 一致 | inactive 该跑没跑 | unexpected 该停在跑 | disabled 该自启没自启
 	//     | missing 机器上找不到这个 unit | unknown 还没巡检过 | error 巡检失败
@@ -1519,11 +1529,11 @@ type HostServiceAction struct {
 	Status string `gorm:"size:16;index" json:"status"`
 	Detail string `gorm:"size:500" json:"detail"`
 	// BeforeState / AfterState 形如 active/running,enabled
-	BeforeState string `gorm:"size:64" json:"beforeState"`
-	AfterState  string `gorm:"size:64" json:"afterState"`
-	ExecJobID   uint   `gorm:"index;default:0" json:"execJobId"`
-	Operator    string `gorm:"size:64" json:"operator"`
-	ClientIP    string `gorm:"size:64" json:"clientIp"`
+	BeforeState string    `gorm:"size:64" json:"beforeState"`
+	AfterState  string    `gorm:"size:64" json:"afterState"`
+	ExecJobID   uint      `gorm:"index;default:0" json:"execJobId"`
+	Operator    string    `gorm:"size:64" json:"operator"`
+	ClientIP    string    `gorm:"size:64" json:"clientIp"`
 	CreatedAt   time.Time `gorm:"index" json:"createdAt"`
 }
 
@@ -1580,7 +1590,7 @@ type RunbookUse struct {
 	RunbookID   uint   `gorm:"index;not null" json:"runbookId"`
 	RunbookName string `gorm:"size:128" json:"runbookName"`
 	// Version 使用时剧本的版本号，剧本后来被改了也能对上当时看到的内容
-	Version int `gorm:"default:1" json:"version"`
+	Version int  `gorm:"default:1" json:"version"`
 	EventID uint `gorm:"index;default:0" json:"eventId"`
 	AlertID uint `gorm:"index;default:0" json:"alertId"`
 	// Outcome resolved 解决了 | partial 部分有效 | invalid 没用
@@ -2190,8 +2200,8 @@ type AwarenessCourse struct {
 // Answer 带 json:"-"：正确答案绝不出接口，判分只在后端做 ——
 // 否则「考核」就是把答案先发给浏览器再问一遍，等于送分。
 type AwarenessQuestion struct {
-	ID       uint `gorm:"primaryKey" json:"id"`
-	CourseID uint `gorm:"index;not null" json:"courseId"`
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	CourseID uint   `gorm:"index;not null" json:"courseId"`
 	Content  string `gorm:"size:512;not null" json:"content"`
 	// Options 选项文本，JSON 数组
 	Options string `gorm:"type:text" json:"options"`

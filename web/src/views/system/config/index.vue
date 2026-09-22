@@ -11,6 +11,7 @@ const groupTitle: Record<string, string> = {
   platform: '平台信息',
   execute: '执行与文件',
   bastion: '堡垒机',
+  monitor: '监控与 SLA',
   general: '其他'
 }
 
