@@ -229,6 +229,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		// 主机体检报告：汇总已有巡检数据，不触发新的采集。平台没有 agent，
 		// 所以它与参照站的「Agent 报告」不是一回事，页面上照实写明
 		{ID: 134, ParentID: 100, Name: "HostReport", Title: "主机体检报告", Path: "/asset/host-report", Component: "/asset/host-report/index", Icon: "Document", Sort: 12},
+		// 磁盘占用分析：按需 SSH 跑 df/du 找大目录大文件，并对照 df 与 du 的差值
+		// 解释「已删除但仍被进程持有」的空间。只读、结果不落库
+		{ID: 135, ParentID: 100, Name: "DiskUsage", Title: "磁盘占用分析", Path: "/asset/disk-usage", Component: "/asset/disk-usage/index", Icon: "PieChart", Sort: 13},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来

@@ -494,6 +494,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/hosts/metrics/collect", middleware.RequirePerm("host:check"), h.CollectAllHostMetrics)
 		auth.GET("/hosts/:id/metrics", h.HostMetricHistory)
 		auth.POST("/hosts/:id/metrics/collect", middleware.RequirePerm("host:check"), h.CollectHostMetric)
+		// 磁盘占用分析：按需跑 df/du，只读、不落库、不做定时任务
+		auth.POST("/hosts/:id/disk-usage", middleware.RequirePerm("file:read"), h.AnalyzeHostDisk)
 		auth.GET("/hosts/:id/terminal", middleware.RequirePerm("terminal:connect"), h.Terminal)
 
 		// 主机服务：纳管 systemd unit、对照期望态巡检漂移、启停

@@ -4668,6 +4668,53 @@ export interface HostReport {
 
 export const getHostReport = (id: number) => request<HostReport>({ url: `/hosts/${id}/report` })
 
+/* ---------------- 磁盘占用分析 ---------------- */
+
+export interface DiskEntry {
+  path: string
+  sizeKb: number
+  /** 占本次分析根目录的比例；根目录合计为 0 时这里也是 0 */
+  percent: number
+}
+
+export interface DeletedHeldFile {
+  pid: string
+  path: string
+  sizeKb: number
+}
+
+export interface DiskAnalysis {
+  host: { id: number; name: string; address: string }
+  path: string
+  costMs: number
+  filesystem: {
+    mount: string
+    totalKb: number
+    usedKb: number
+    availKb: number
+    usedText: string
+    totalText: string
+  }
+  /** du 统计到的根目录合计 */
+  rootKb: number
+  rootText: string
+  dirs: DiskEntry[]
+  files: DiskEntry[]
+  minFileMB: number
+  deleted: DeletedHeldFile[]
+  deletedCount: number
+  deletedKb: number
+  deniedDirs: number
+  deniedFiles: number
+  /** df 与 du 差额的解释；空串表示这次没有可比的结论 */
+  gapNote: string
+  notes: string[]
+}
+
+export const analyzeHostDisk = (data: { hostId: number; path?: string; minFileMB?: number }) =>
+  request<DiskAnalysis>({ url: `/hosts/${data.hostId}/disk-usage`, method: 'post', data })
+
+
 /* ---------------- 发件邮箱 / 出口代理 ---------------- */
 
 export interface MailAccount {
