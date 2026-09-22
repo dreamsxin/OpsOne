@@ -190,6 +190,14 @@ func main() {
 	} else {
 		log.Println("[sla] 事件 SLA 扫描未启用（OPS_SLA_SPEC 为空），响应/恢复超时不会有人被提醒")
 	}
+	if cfg.SecEventSpec != "" {
+		if err := sched.AddFixed(cfg.SecEventSpec, h.CollectSecurityEventsForSchedule); err != nil {
+			log.Fatalf("安全事件采集 cron 表达式无效(%s): %v", cfg.SecEventSpec, err)
+		}
+		log.Printf("[secevent] 安全事件采集已启用: %s", cfg.SecEventSpec)
+	} else {
+		log.Println("[secevent] 安全事件采集未启用（OPS_SECEVENT_SPEC 为空），拦截与暴露面流水不会进研判台")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -515,6 +523,17 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/security/signatures/:id/revoke", middleware.RequirePerm("signature:apply"), h.RevokeSignature)
 		auth.POST("/security/signatures/:id/port-check", h.CheckPortSignature)
 		auth.GET("/security/signatures/reconcile", h.ReconcileSignatures)
+
+		// 安全事件研判台：事件只由采集器从已有流水生成，界面上不能手工新建
+		auth.GET("/security/events", h.ListSecurityEvents)
+		auth.GET("/security/events/stats", h.SecurityEventStats)
+		auth.GET("/security/events/:id", h.GetSecurityEvent)
+		auth.POST("/security/events/collect", middleware.RequirePerm("secevent:manage"), h.RunSecurityCollect)
+		auth.POST("/security/events/triage", middleware.RequirePerm("secevent:manage"), h.TriageSecurityEvents)
+		auth.POST("/security/events/:id/note", middleware.RequirePerm("secevent:manage"), h.AddSecurityEventNote)
+		auth.POST("/security/events/:id/block", middleware.RequirePerm("secevent:respond"), h.BlockSecurityEventSource)
+		auth.GET("/security/event-mutes", h.ListSecurityMutes)
+		auth.DELETE("/security/event-mutes/:id", middleware.RequirePerm("secevent:manage"), h.DeleteSecurityMute)
 
 		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
 		auth.GET("/secrets/audit", h.GetSecretAudit)

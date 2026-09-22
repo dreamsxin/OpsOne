@@ -4562,6 +4562,112 @@ export const reconcileSignatures = () =>
     url: '/security/signatures/reconcile'
   })
 
+/* ---------------- 安全事件研判台 ---------------- */
+
+export interface SecurityEvent {
+  id: number
+  fingerprint: string
+  source: string
+  sourceLabel: string
+  title: string
+  severity: string
+  actor: string
+  actorIp: string
+  target: string
+  port: string
+  protocol: string
+  evidence: string
+  refTable: string
+  refId: number
+  hitCount: number
+  hitsAfterClose: number
+  firstSeenAt: string
+  lastSeenAt: string
+  status: string
+  statusLabel: string
+  verdict: string
+  owner: string
+  closedAt: string | null
+  closedBy: string
+  createdAt: string
+}
+
+export interface SecurityEventLog {
+  id: number
+  eventId: number
+  action: string
+  content: string
+  operator: string
+  createdAt: string
+}
+
+export interface SecurityEventMute {
+  id: number
+  fingerprint: string
+  source: string
+  sourceLabel: string
+  title: string
+  reason: string
+  hitCount: number
+  lastHitAt: string | null
+  operator: string
+  createdAt: string
+}
+
+export interface SecurityEventStats {
+  total: number
+  new: number
+  investigating: number
+  confirmed: number
+  handled: number
+  falsePositive: number
+  ignored: number
+  critical: number
+  rehit: number
+  muteCount: number
+  muteHits: number
+  bySource: { source: string; label: string; total: number; open: number; cursor: number; table: string }[]
+}
+
+export interface SecurityEventDetail {
+  event: SecurityEvent
+  logs: SecurityEventLog[]
+  evidence: string
+  related: SecurityEvent[]
+  muted: boolean
+  muteHits: number
+  notes: string[]
+}
+
+export const listSecurityEvents = (params: Record<string, any>) =>
+  request<PageData<SecurityEvent>>({ url: '/security/events', params })
+export const getSecurityEventStats = () =>
+  request<SecurityEventStats>({ url: '/security/events/stats' })
+export const getSecurityEvent = (id: number) =>
+  request<SecurityEventDetail>({ url: `/security/events/${id}` })
+export const collectSecurityEvents = () =>
+  request<{ created: number; updated: number; rehit: number; muted: number }>({
+    url: '/security/events/collect',
+    method: 'POST'
+  })
+export const triageSecurityEvents = (data: {
+  ids: number[]
+  status: string
+  verdict?: string
+  owner?: string
+  mute?: boolean
+}) => request<{ changed: number; muted: number }>({ url: '/security/events/triage', method: 'POST', data })
+export const addSecurityEventNote = (id: number, content: string) =>
+  request({ url: `/security/events/${id}/note`, method: 'POST', data: { content } })
+export const blockSecurityEventSource = (
+  id: number,
+  data: { hostId?: number; groupId?: number; port?: string }
+) => request<{ rule: any; message: string }>({ url: `/security/events/${id}/block`, method: 'POST', data })
+export const listSecurityMutes = (params?: Record<string, any>) =>
+  request<PageData<SecurityEventMute>>({ url: '/security/event-mutes', params })
+export const deleteSecurityMute = (id: number) =>
+  request<{ revoked: string; blockedHits: number }>({ url: `/security/event-mutes/${id}`, method: 'DELETE' })
+
 
 
 

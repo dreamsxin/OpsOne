@@ -163,6 +163,8 @@ func (h *Handler) healthScheduler() []healthItem {
 		"OPS_CONFIG_SPEC 为空，配置被人改了不会自动被发现"))
 	items = append(items, h.fixedTaskItem("sla", "事件 SLA 扫描", h.Cfg.SLASpec,
 		"OPS_SLA_SPEC 为空，事件响应/恢复超时不会有人被提醒，SLA 只能靠人盯列表"))
+	items = append(items, h.fixedTaskItem("secevent", "安全事件采集", h.Cfg.SecEventSpec,
+		"OPS_SECEVENT_SPEC 为空，下发拦截/终端拦截/未登记端口/越权被拒这些流水不会自动进研判台"))
 	items = append(items, h.fixedTaskItem("backup", "自动备份", h.Cfg.BackupSpec,
 		"OPS_BACKUP_SPEC 为空，只能手动执行 `ops backup`；而数据留存清理是真删且不可逆"))
 	return items

@@ -132,6 +132,11 @@ type Config struct {
 	// 只查库不连主机，可以跑得比巡检密。
 	SLASpec string
 
+	// SecEventSpec 安全事件采集的 cron 表达式。留空表示不自动采集
+	//（研判台上可以手动「立即采集」，但没人点就等于四个来源的流水没人看）。
+	// 只读本地库、按 ID 水位推进，跑得密一点也不贵。
+	SecEventSpec string
+
 	// SecretKey 凭据字段的加密密钥（AES-GCM，任意长度口令派生）。
 	// 默认值是演示密钥 demo（见 DefaultSecretKey），所以**默认是加密的** ——
 	// 这样带演示数据的库文件开箱即可用，prod 模式下带着 demo 启动会被拒绝。
@@ -239,6 +244,7 @@ func Load() (*Config, error) {
 		ServiceSpec:        strings.TrimSpace(env("OPS_SERVICE_SPEC", "*/10 * * * *")),
 		ConfigSpec:         strings.TrimSpace(env("OPS_CONFIG_SPEC", "*/30 * * * *")),
 		SLASpec:            strings.TrimSpace(env("OPS_SLA_SPEC", "*/2 * * * *")),
+		SecEventSpec:       strings.TrimSpace(env("OPS_SECEVENT_SPEC", "*/5 * * * *")),
 
 		SecretKey: normalizeSecretKey(env("OPS_SECRET_KEY", DefaultSecretKey)),
 

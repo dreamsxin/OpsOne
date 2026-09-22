@@ -64,6 +64,7 @@ func Migrate(g *gorm.DB) error {
 		&model.FirewallRule{}, &model.FirewallGroup{}, &model.FirewallSnapshot{},
 		&model.AwarenessCourse{}, &model.AwarenessQuestion{}, &model.AwarenessRecord{},
 		&model.Signature{},
+		&model.SecurityEvent{}, &model.SecurityEventLog{}, &model.SecurityEventMute{},
 	); err != nil {
 		return err
 	}
@@ -308,6 +309,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 511, ParentID: 500, Name: "Credential", Title: "凭证库", Path: "/security/credential", Component: "/security/credential/index", Icon: "Key", Sort: 6},
 		{ID: 512, ParentID: 511, Title: "维护凭据", Type: "button", AuthCode: "credential:manage", Sort: 1},
 		{ID: 513, ParentID: 511, Title: "测试连接", Type: "button", AuthCode: "credential:check", Sort: 2},
+		// 500 段页面与按钮是混着递增的，501-516 已用满，从 517 续
+		{ID: 517, ParentID: 500, Name: "SecurityEvent", Title: "安全事件", Path: "/security/events", Component: "/security/events/index", Icon: "WarnTriangleFilled", Sort: 7},
+		{ID: 518, ParentID: 517, Title: "研判与处置", Type: "button", AuthCode: "secevent:manage", Sort: 1},
+		{ID: 519, ParentID: 517, Title: "生成封禁草稿", Type: "button", AuthCode: "secevent:respond", Sort: 2},
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},

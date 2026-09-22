@@ -2274,3 +2274,92 @@ type Signature struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 }
+
+// ---------- 安全事件与研判 ----------
+
+// SecurityEvent 一条要有人看一眼的安全事件。
+//
+// 这个模块最容易做成「一张漂亮但永远是空的研判台」，所以定的规矩是：
+// **事件只能由采集器从平台已经在产生的真实记录里生成，界面上不提供手工新建**。
+// 目前四个来源都是只追加的流水表，采集靠「上次消费到哪个 ID」推进：
+//
+//	exec-guard  下发闸门拦下的高危命令（exec_guard_logs.status = blocked）
+//	terminal    Web 终端里被拦下的命令（session_commands.risk = blocked）
+//	exposure    真机 TCP 探测到的未登记开放端口（exposure_scans.unexpected）
+//	authz       越权被拒的写操作（audit_logs.status = 403）
+//
+// 刻意没有的来源：登录失败爆破。登录接口在公开路由上，审计中间件不覆盖它，
+// 平台现在**根本没有记录过一次失败登录**，所以这块是诚实的空白，不假装有。
+type SecurityEvent struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Fingerprint 同一个「谁 / 从哪 / 对谁 / 干了什么」只留一条，重复只累加次数。
+	// 不去重的研判台第二天就没人看了。
+	Fingerprint string `gorm:"size:64;uniqueIndex;not null" json:"fingerprint"`
+	Source      string `gorm:"size:16;index;not null" json:"source"` // exec-guard | terminal | exposure | authz
+	Title       string `gorm:"size:255;not null" json:"title"`
+	Severity    string `gorm:"size:16;index;default:warning" json:"severity"` // critical | warning | info
+
+	// 研判要回答的「谁对谁做了什么」。取不到的字段一律留空，不用 unknown 之类的占位
+	// 冒充已知 —— 空字段在界面上显示「—」，让人知道这条线索本身缺了。
+	Actor    string `gorm:"size:64;index" json:"actor"`   // 发起方：平台账号
+	ActorIP  string `gorm:"size:64;index" json:"actorIp"` // 源地址
+	Target   string `gorm:"size:255" json:"target"`       // 目标：主机名 / 地址 / 接口路径
+	Port     string `gorm:"size:64" json:"port"`
+	Protocol string `gorm:"size:16" json:"protocol"` // tcp | ssh | http
+	// Evidence 证据摘要：命令原文、端口清单、命中的规则说明。研判就靠它。
+	Evidence string `gorm:"type:text" json:"evidence"`
+	// RefTable / RefID 溯源到原始流水的最新一条，点进去能看到没被摘要过的原文
+	RefTable string `gorm:"size:32" json:"refTable"`
+	RefID    uint   `gorm:"default:0" json:"refId"`
+
+	HitCount    int       `gorm:"default:1" json:"hitCount"`
+	FirstSeenAt time.Time `json:"firstSeenAt"`
+	LastSeenAt  time.Time `gorm:"index" json:"lastSeenAt"`
+	// HitsAfterClose 结案之后又命中了多少次。
+	//
+	// 结案了还在响，要么是判错了，要么是攻击还在继续 —— 这个数字不能被
+	// 「已处置」这个状态盖掉，所以单独存一列并在界面上顶出来。
+	HitsAfterClose int `gorm:"default:0" json:"hitsAfterClose"`
+
+	// Status new 待研判 | investigating 研判中 | confirmed 确认威胁 | false-positive 误报 |
+	// ignored 忽略（是真的，但不用管）| handled 已处置
+	Status string `gorm:"size:16;index;default:new" json:"status"`
+	// Verdict 研判结论，人填。结案（confirmed 之外的终态）时必须有。
+	Verdict   string     `gorm:"type:text" json:"verdict"`
+	Owner     string     `gorm:"size:64;index" json:"owner"`
+	ClosedAt  *time.Time `json:"closedAt"`
+	ClosedBy  string     `gorm:"size:64" json:"closedBy"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// SecurityEventLog 安全事件的处置链路，只追加不修改
+type SecurityEventLog struct {
+	ID      uint `gorm:"primaryKey" json:"id"`
+	EventID uint `gorm:"index;not null" json:"eventId"`
+	// Action collect 采集 | status 研判状态变更 | note 处置记录 | respond 处置动作 | rehit 结案后又命中
+	Action    string    `gorm:"size:16" json:"action"`
+	Content   string    `gorm:"size:500" json:"content"`
+	Operator  string    `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
+// SecurityEventMute 误报白名单：被判成误报的指纹进这里，采集器下次直接跳过。
+//
+// 误报反馈不沉淀的话，同一条噪音每天都会重新冒出来，研判台很快就没人看了。
+// 但「跳过」不等于「装作没发生」：命中次数照记，界面上能看到某条白名单
+// 这段时间挡掉了多少次，挡得异常多就该回头看是不是当初判错了。
+type SecurityEventMute struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Fingerprint string `gorm:"size:64;uniqueIndex;not null" json:"fingerprint"`
+	Source      string `gorm:"size:16;index" json:"source"`
+	// Title 建白名单时那条事件的标题，只为了让人看得懂这条白名单是干什么的
+	Title  string `gorm:"size:255" json:"title"`
+	Reason string `gorm:"type:text" json:"reason"`
+	// HitCount 建了白名单之后又挡掉多少次
+	HitCount  int        `gorm:"default:0" json:"hitCount"`
+	LastHitAt *time.Time `json:"lastHitAt"`
+	Operator  string     `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
