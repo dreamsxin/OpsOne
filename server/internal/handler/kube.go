@@ -40,11 +40,18 @@ func (h *Handler) kubeClient(cluster model.KubeCluster) (*k8s.Client, error) {
 	return k8s.NewClient(cfg, kubeCallTimeout)
 }
 
-// requireKubeCluster 取集群记录，顺带建好客户端
+// requireKubeCluster 取集群记录，顺带建好客户端。
+//
+// 容器平台授权的闸门就在这里 —— 全平台所有 K8s 读写接口都要经过这个函数，
+// 放一处就漏不掉（详见 kube_grant.go 开头的说明）。
 func (h *Handler) requireKubeCluster(c *gin.Context) (*model.KubeCluster, *k8s.Client, bool) {
 	var cluster model.KubeCluster
 	if err := h.DB.First(&cluster, idParam(c)).Error; err != nil {
 		response.NotFound(c, "集群不存在")
+		return nil, nil, false
+	}
+	if ok, reason := h.kubeGrantCheck(c, &cluster); !ok {
+		response.Forbidden(c, reason)
 		return nil, nil, false
 	}
 	client, err := h.kubeClient(cluster)
@@ -80,8 +87,18 @@ func (h *Handler) KubeconfigContexts(c *gin.Context) {
 }
 
 func (h *Handler) ListKubeClusters(c *gin.Context) {
+	q := h.DB.Model(&model.KubeCluster{})
+	// 授权生效时，集群选择器里只出现能打开的集群 ——
+	// 列出来却一点就 403 比看不见更让人困惑
+	if ids, limited := h.kubeVisibleClusterIDs(c); limited {
+		if len(ids) == 0 {
+			response.OK(c, []model.KubeCluster{})
+			return
+		}
+		q = q.Where("id IN ?", ids)
+	}
 	var list []model.KubeCluster
-	if err := h.DB.Order("id asc").Find(&list).Error; err != nil {
+	if err := q.Order("id asc").Find(&list).Error; err != nil {
 		response.Error(c, "查询集群失败")
 		return
 	}

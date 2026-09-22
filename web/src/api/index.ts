@@ -4548,6 +4548,122 @@ export const checkCredential = (id: number, hostId: number) =>
     credUsername: string
   }>({ url: `/credentials/${id}/check`, method: 'POST', data: { hostId } })
 
+/* ---------------- 容器平台授权 / 主机体检报告 ---------------- */
+
+export interface KubeGrant {
+  id: number
+  subjectType: string
+  subjectId: number
+  subjectName: string
+  clusterId: number
+  clusterName: string
+  namespaces: string
+  kinds: string
+  allowLogs: boolean
+  allowWrite: boolean
+  allowForward: boolean
+  expiresAt: string | null
+  remark: string
+  operator: string
+  createdAt: string
+  updatedAt: string
+  expired: boolean
+  allNamespaces: boolean
+  allKinds: boolean
+}
+
+export interface KubeGrantState {
+  enforced: boolean
+  grantCount: number
+  clusterCount: number
+  coveredClusters: number
+  uncoveredClusters: number
+  expiredGrants: number
+  configKey: string
+  adminPerm: string
+  activeNote: string
+  notes: string[]
+}
+
+export interface KubeGrantDiagnosis {
+  userId: number
+  username: string
+  enforced: boolean
+  isKubeAdmin: boolean
+  clusters: {
+    clusterId: number
+    clusterName: string
+    visible: boolean
+    reason: string
+    namespaces?: string
+    kinds?: string
+    allowLogs?: boolean
+    allowWrite?: boolean
+    allowForward?: boolean
+  }[]
+}
+
+export const getKubeGrantState = () => request<KubeGrantState>({ url: '/kube/grant-state' })
+export const listKubeGrants = (params: Record<string, any> = {}) =>
+  request<KubeGrant[]>({ url: '/kube/grants', params })
+export const saveKubeGrant = (id: number, data: Record<string, any>) =>
+  id
+    ? request<KubeGrant>({ url: `/kube/grants/${id}`, method: 'PUT', data })
+    : request<KubeGrant>({ url: '/kube/grants', method: 'POST', data })
+export const deleteKubeGrant = (id: number) =>
+  request<null>({ url: `/kube/grants/${id}`, method: 'DELETE' })
+export const diagnoseKubeGrant = (userId: number) =>
+  request<KubeGrantDiagnosis>({ url: `/kube/grants/diagnose/${userId}` })
+
+export interface HostReportItem {
+  name?: string
+  value?: string
+  detail?: string
+  note?: string
+  warn?: boolean
+  source?: string
+  /** 服务 / 配置 / 日志段用的字段 */
+  path?: string
+  status?: string
+  drift?: string
+  critical?: boolean
+  activeState?: string
+  enableState?: string
+  ports?: string
+  diffLines?: number
+  hitCount?: number
+  category?: string
+  checkedAt?: string | null
+  scannedAt?: string | null
+  rotated?: boolean
+}
+
+export interface HostReportSection {
+  title: string
+  source: string
+  checkedAt: string | null
+  stale: boolean
+  /** 非空表示这一段没有数据，值就是原因 */
+  gap: string
+  summary: string
+  items: HostReportItem[]
+  problems: number
+}
+
+export interface HostReport {
+  host: { id: number; name: string; address: string; env: string; status: string }
+  generatedAt: string
+  basic: HostReportItem[]
+  sections: HostReportSection[]
+  problemCount: number
+  gapCount: number
+  notCollected: { item: string; reason: string }[]
+  staleAfterHrs: number
+  notes: string[]
+}
+
+export const getHostReport = (id: number) => request<HostReport>({ url: `/hosts/${id}/report` })
+
 /* ---------------- 发件邮箱 / 出口代理 ---------------- */
 
 export interface MailAccount {

@@ -488,6 +488,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/hosts/:id", middleware.RequirePerm("host:update"), h.UpdateHost)
 		auth.DELETE("/hosts/:id", middleware.RequirePerm("host:delete"), h.DeleteHost)
 		auth.POST("/hosts/:id/check", middleware.RequirePerm("host:check"), h.CheckHost)
+		// 主机体检报告：把已有巡检数据汇总，不触发任何新的 SSH 连接
+		auth.GET("/hosts/:id/report", h.GetHostReport)
 		auth.GET("/hosts/metrics", h.ListHostMetrics)
 		auth.POST("/hosts/metrics/collect", middleware.RequirePerm("host:check"), h.CollectAllHostMetrics)
 		auth.GET("/hosts/:id/metrics", h.HostMetricHistory)
@@ -914,6 +916,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/monitor/oncall/schedules/:id/overrides/:overrideId", middleware.RequirePerm("oncall:manage"), h.DeleteOnCallOverride)
 
 		auth.POST("/kube/contexts", middleware.RequirePerm("kube:manage"), h.KubeconfigContexts)
+		// 容器平台授权：一条授权同时限定集群 + 命名空间 + 资源类型，
+		// 闸门在 requireKubeCluster 一处。默认不生效（配置项 kube.grant_enforce）
+		auth.GET("/kube/grant-state", h.GetKubeGrantState)
+		auth.GET("/kube/grants", h.ListKubeGrants)
+		auth.POST("/kube/grants", middleware.RequirePerm("kubegrant:manage"), h.CreateKubeGrant)
+		auth.PUT("/kube/grants/:id", middleware.RequirePerm("kubegrant:manage"), h.UpdateKubeGrant)
+		auth.DELETE("/kube/grants/:id", middleware.RequirePerm("kubegrant:manage"), h.DeleteKubeGrant)
+		auth.GET("/kube/grants/diagnose/:id", h.DiagnoseKubeGrant)
 		auth.GET("/kube/clusters", h.ListKubeClusters)
 		auth.POST("/kube/clusters", middleware.RequirePerm("kube:manage"), h.CreateKubeCluster)
 		auth.PUT("/kube/clusters/:id", middleware.RequirePerm("kube:manage"), h.UpdateKubeCluster)

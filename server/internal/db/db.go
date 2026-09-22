@@ -41,7 +41,7 @@ func Migrate(g *gorm.DB) error {
 		&model.SecuritySuggestionDismissal{},
 		&model.RuleVersion{}, &model.NotifyTemplate{},
 		&model.VaultAccount{}, &model.VaultTOTP{}, &model.VaultAccess{},
-		&model.MailAccount{}, &model.EgressProxy{},
+		&model.MailAccount{}, &model.EgressProxy{}, &model.KubeGrant{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -226,6 +226,9 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 131, ParentID: 100, Name: "DomainList", Title: "域名管理", Path: "/asset/domain", Component: "/asset/domain/index", Icon: "Link", Sort: 11},
 		{ID: 132, ParentID: 131, Title: "维护域名", Type: "button", AuthCode: "domain:manage", Sort: 1},
 		{ID: 133, ParentID: 131, Title: "执行巡检", Type: "button", AuthCode: "domain:check", Sort: 2},
+		// 主机体检报告：汇总已有巡检数据，不触发新的采集。平台没有 agent，
+		// 所以它与参照站的「Agent 报告」不是一回事，页面上照实写明
+		{ID: 134, ParentID: 100, Name: "HostReport", Title: "主机体检报告", Path: "/asset/host-report", Component: "/asset/host-report/index", Icon: "Document", Sort: 12},
 
 		// ---------- 运维执行 ----------
 		// 「堡垒机」是个二级分组：Web 终端 / 会话审计 / 文件管理 这三件事合起来
@@ -269,6 +272,10 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 311, ParentID: 300, Name: "K8sRBAC", Title: "RBAC 账户", Path: "/kubernetes/rbac", Component: "/kubernetes/rbac/index", Icon: "User", Sort: 8},
 		// 节点与命名空间：只看它们自身的健康与约束，资源账本仍然在「容量与配额」页
 		{ID: 312, ParentID: 300, Name: "K8sNode", Title: "节点与命名空间", Path: "/kubernetes/node", Component: "/kubernetes/node/index", Icon: "Cpu", Sort: 9},
+		// 授权管理：一条授权同时表达「哪个集群 + 哪些命名空间 + 哪些资源类型」，
+		// 刻意不拆成「授权」与「数据授权」两页，理由见 model.KubeGrant 的注释
+		{ID: 313, ParentID: 300, Name: "K8sGrant", Title: "授权管理", Path: "/kubernetes/grant", Component: "/kubernetes/grant/index", Icon: "Unlock", Sort: 10},
+		{ID: 314, ParentID: 313, Title: "维护授权", Type: "button", AuthCode: "kubegrant:manage", Sort: 1},
 
 		// ---------- 监控告警 ----------
 		{ID: 400, Name: "Monitor", Title: "监控告警", Path: "/monitor", Icon: "TrendCharts", Sort: 50},
@@ -777,6 +784,8 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
 		{Group: "proxy", Key: "proxy.test_url", Value: "", Type: "string", Label: "代理检测地址",
 			Remark: "检测出口代理时请求的地址。默认留空——内网不一定有可用的回显服务，平台不替你决定这台机器可以访问公网。填一个会回显来源 IP 的地址才能看出出口 IP", Builtin: true},
+		{Group: "kube", Key: "kube.grant_enforce", Value: "false", Type: "bool", Label: "启用容器平台授权",
+			Remark: "默认关闭，此时任何登录用户都能看到所有集群的只读数据（含 Pod 日志、RBAC）。开启前请先在「容器平台 → 授权管理」把授权配好：没有任何授权的集群，开启后对非管理员立刻完全不可见。拥有 kube:manage 的人不受限制", Builtin: true},
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
 		{Group: "retention", Key: "retention.exec_job_days", Value: "90", Type: "int", Label: "执行记录保留天数", Remark: "批量执行/脚本/定时任务的作业与逐台结果；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.probe_record_days", Value: "7", Type: "int", Label: "拨测记录保留天数", Remark: "拨测频率高、增长快，建议保持较短；0 表示永久保留", Builtin: true},

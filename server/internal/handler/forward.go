@@ -302,6 +302,12 @@ func (h *Handler) CreateKubeForward(c *gin.Context) {
 		response.BadRequest(c, "集群已停用")
 		return
 	}
+	// 端口转发不走 requireKubeCluster（集群 ID 在请求体里而不是 :id），
+	// 所以这里显式补一次授权校验：命名空间与「能不能开隧道」都要过
+	if ok, reason := h.kubeForwardGrantCheck(c, &cluster, req.Namespace); !ok {
+		response.Forbidden(c, reason)
+		return
+	}
 	client, err := h.kubeClient(cluster)
 	if err != nil {
 		response.BadRequest(c, "集群凭据不可用: "+err.Error())

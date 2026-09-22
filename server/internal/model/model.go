@@ -139,6 +139,51 @@ type SiteLink struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+// KubeGrant 容器平台授权：把「哪个集群、哪些命名空间、哪些资源类型」授予某个用户或角色。
+//
+// 为什么不复用 ResourceGrant：那张表是 (主体, 资源类型, 资源 ID, 动作) 四元组，
+// 表达不了「命名空间清单」与「资源类型清单」这两个额外维度。硬塞进 Actions
+// 字段会让它变成一个自定义 DSL，两边的校验逻辑都要跟着复杂化。
+//
+// 为什么不像参照站那样拆成「K8s 授权」（集群）与「K8s 数据授权」（命名空间 / 资源）两张表：
+// 拆开之后必然出现「两处配置互相矛盾时听谁的」——而这个问题没有直觉正确的答案，
+// 任何一种取舍都会让人算不准自己到底能看到什么。一条授权表达完整的可见范围。
+//
+// **默认不生效**：配置项 kube.grant_enforce 为 false 时，任何登录用户仍能看到所有集群
+// （这是这一页上线前的既有行为）。默认打开会让升级瞬间把所有人锁在外面 ——
+// 那种"安全"是靠制造事故换来的。页面上照实写明当前是哪种状态。
+type KubeGrant struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// SubjectType user | role
+	SubjectType string `gorm:"size:16;index;not null" json:"subjectType"`
+	SubjectID   uint   `gorm:"index;not null" json:"subjectId"`
+	SubjectName string `gorm:"size:64" json:"subjectName"`
+	// ClusterID 必填。刻意不支持「全部集群」：那等于把一条授权写成一张空白支票，
+	// 新接入的集群会被它自动包含进去，而没人会记得回来看这条授权
+	ClusterID   uint   `gorm:"index;not null" json:"clusterId"`
+	ClusterName string `gorm:"size:64" json:"clusterName"`
+	// Namespaces 逗号分隔的命名空间清单。空表示该集群全部命名空间。
+	// 非空时**跨命名空间的列表请求会被拒绝**（而不是静默只返回允许的那部分）——
+	// 静默过滤会让人以为集群里只有这些东西
+	Namespaces string `gorm:"size:512" json:"namespaces"`
+	// Kinds 逗号分隔的资源类型（与资源浏览页的 kind 取值一致）。空表示不限
+	Kinds string `gorm:"size:512" json:"kinds"`
+	// AllowLogs 能否看 Pod 日志。单独一个开关是因为日志里常有业务数据与密钥，
+	// 「能看到这个命名空间的对象」与「能读它的日志」不是一件事
+	AllowLogs bool `gorm:"default:false" json:"allowLogs"`
+	// AllowWrite 能否 apply / scale / restart。仍然要同时具备 kube:write 功能权限，
+	// 两者是 AND 关系：功能权限管「这个人有没有这类操作」，授权管「在哪个集群上」
+	AllowWrite bool `gorm:"default:false" json:"allowWrite"`
+	// AllowForward 能否开端口转发隧道。同样要同时具备 kube:forward
+	AllowForward bool `gorm:"default:false" json:"allowForward"`
+	// ExpiresAt 空表示长期有效
+	ExpiresAt *time.Time `json:"expiresAt"`
+	Remark    string     `gorm:"size:255" json:"remark"`
+	Operator  string     `gorm:"size:64" json:"operator"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
 // EmailTemplate 邮件模板，正文用 Go text/template 语法，如 {{.Title}}
 type EmailTemplate struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
