@@ -137,6 +137,11 @@ type Config struct {
 	// 只读本地库、按 ID 水位推进，跑得密一点也不贵。
 	SecEventSpec string
 
+	// VaultSpec 密码库口令轮换逾期检查的 cron 表达式。留空表示不检查
+	//（设了轮换周期的口令逾期也不会有人被提醒，那个周期就只是一行说明文字）。
+	// 只读本地库，一天一次够了。
+	VaultSpec string
+
 	// CloudSyncSpec 云资源同步的 cron 表达式。**默认留空 = 不自动同步**，
 	// 与其它巡检项不同 —— 这一项会真的出网调阿里云 OpenAPI，
 	// 默认就开等于替用户决定了「这台机器可以访问公网、也愿意消耗云 API 配额」。
@@ -276,6 +281,7 @@ func Load() (*Config, error) {
 		ConfigSpec:         strings.TrimSpace(env("OPS_CONFIG_SPEC", "*/30 * * * *")),
 		SLASpec:            strings.TrimSpace(env("OPS_SLA_SPEC", "*/2 * * * *")),
 		SecEventSpec:       strings.TrimSpace(env("OPS_SECEVENT_SPEC", "*/5 * * * *")),
+		VaultSpec:          strings.TrimSpace(env("OPS_VAULT_SPEC", "30 9 * * *")),
 		CloudSyncSpec:      strings.TrimSpace(env("OPS_CLOUD_SYNC_SPEC", "")),
 		DomainSpec:         strings.TrimSpace(env("OPS_DOMAIN_SPEC", "0 8 * * *")),
 		DNSServer:          strings.TrimSpace(env("OPS_DNS_SERVER", "")),

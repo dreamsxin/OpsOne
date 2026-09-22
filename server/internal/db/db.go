@@ -40,6 +40,7 @@ func Migrate(g *gorm.DB) error {
 		&model.HostLogTarget{}, &model.HostLogScan{}, &model.HostLogUsage{},
 		&model.SecuritySuggestionDismissal{},
 		&model.RuleVersion{}, &model.NotifyTemplate{},
+		&model.VaultAccount{}, &model.VaultTOTP{}, &model.VaultAccess{},
 		&model.InventoryBatch{}, &model.InventoryItem{},
 		&model.PurchaseOrder{}, &model.PurchaseItem{},
 		&model.BuildServer{}, &model.BuildJob{}, &model.BuildRecord{},
@@ -344,6 +345,12 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 520, ParentID: 500, Name: "SecurityOverview", Title: "安全概览", Path: "/security/overview", Component: "/security/overview/index", Icon: "DataBoard", Sort: 8},
 		{ID: 521, ParentID: 500, Name: "SecuritySuggestion", Title: "学习建议", Path: "/security/suggestions", Component: "/security/suggestions/index", Icon: "MagicStick", Sort: 9},
 		{ID: 522, ParentID: 521, Title: "通过与拒绝建议", Type: "button", AuthCode: "suggestion:apply", Sort: 1},
+		{ID: 523, ParentID: 500, Name: "Vault", Title: "账号密码库", Path: "/security/vault", Component: "/security/vault/index", Icon: "Wallet", Sort: 10},
+		{ID: 524, ParentID: 523, Title: "维护条目", Type: "button", AuthCode: "vault:manage", Sort: 1},
+		{ID: 525, ParentID: 523, Title: "取用明文", Type: "button", AuthCode: "vault:reveal", Sort: 2},
+		{ID: 526, ParentID: 500, Name: "VaultTOTP", Title: "2FA 验证码库", Path: "/security/vault-totp", Component: "/security/vault-totp/index", Icon: "Iphone", Sort: 11},
+		{ID: 527, ParentID: 526, Title: "维护种子", Type: "button", AuthCode: "vault:manage", Sort: 1},
+		{ID: 528, ParentID: 526, Title: "出验证码", Type: "button", AuthCode: "vault:reveal", Sort: 2},
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},

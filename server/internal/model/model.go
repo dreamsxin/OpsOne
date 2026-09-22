@@ -375,6 +375,97 @@ type Credential struct {
 	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
+// VaultAccount 账号密码库条目：人要用的那类账号口令。
+//
+// 和上面的 Credential（凭证库）**刻意分成两张表**，因为安全模型正好相反：
+//   - 凭证库是给平台自己用的，明文永不出接口，人也拿不到 —— 所以它不需要取用留痕；
+//   - 密码库是给人用的（某个后台系统的管理员账号、某个第三方平台的登录口令），
+//     明文必须能取出来，否则这一页只是个不能用的清单。
+//
+// 明文能取出来，安全性就只能靠「取用必留痕」来兜：每次取明文都写一条
+// VaultAccess，取不留痕就不给明文（见 handler.revealVaultAccount）。
+type VaultAccount struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	// Category 分类，仅用于归类展示：system | database | network | thirdparty | other
+	Category string `gorm:"size:16;default:other" json:"category"`
+	// Platform 这个账号属于哪个系统（如「Jenkins」「阿里云控制台」）
+	Platform string `gorm:"size:64" json:"platform"`
+	// URL 登录地址，选填
+	URL      string `gorm:"size:512" json:"url"`
+	Username string `gorm:"size:128;not null" json:"username"`
+	// Secret 口令。配了 OPS_SECRET_KEY 时以 AES-GCM 密文存（前缀 enc:v1:）
+	Secret      string `gorm:"type:text" json:"-"`
+	Description string `gorm:"size:255" json:"description"`
+	Owner       string `gorm:"size:64" json:"owner"`
+	DeptID      uint   `gorm:"index;default:0" json:"deptId"`
+	// Enabled 刻意不加 gorm default:true，见 Domain.AlertEnabled 上的说明
+	Enabled bool `json:"enabled"`
+	// RotateDays 期望多少天轮换一次口令，0 表示不提醒。
+	// 非 0 时逾期会进告警通道（OPS_VAULT_SPEC 控制的固定任务）
+	RotateDays int        `gorm:"default:0" json:"rotateDays"`
+	RotatedAt  *time.Time `json:"rotatedAt"`
+	// LastViewedAt / ViewCount 取用统计。这两个是 VaultAccess 的冗余汇总，
+	// 列表页要显示「最近谁看过」，不能每行都去扫留痕表
+	LastViewedAt *time.Time `json:"lastViewedAt"`
+	LastViewedBy string     `gorm:"size:64" json:"lastViewedBy"`
+	ViewCount    int        `gorm:"default:0" json:"viewCount"`
+	CreatedBy    uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// VaultTOTP 2FA 验证码库：共享账号的 TOTP 种子托管。
+//
+// 解决的是「这个账号开了两步验证，验证器绑在离职同事手机上」。种子存平台，
+// 谁需要就现算一个码 —— 算码用的是**服务器时间**，服务器时钟偏了码就是错的，
+// 所以出码接口一并返回服务器时间，界面上照实显示。
+type VaultTOTP struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:64;uniqueIndex;not null" json:"name"`
+	// Issuer / Account 验证器里显示的服务方与账号，重建二维码时要用
+	Issuer  string `gorm:"size:64" json:"issuer"`
+	Account string `gorm:"size:128" json:"account"`
+	// AccountID 关联的密码库条目，0 表示不关联
+	AccountID uint `gorm:"index;default:0" json:"accountId"`
+	// Secret base32 种子。落库前必须能被 totp.DecodeSecret 解开，
+	// 否则等到要用的时候才发现存进来的是一串乱码
+	Secret       string     `gorm:"type:text" json:"-"`
+	Description  string     `gorm:"size:255" json:"description"`
+	Owner        string     `gorm:"size:64" json:"owner"`
+	Enabled      bool       `json:"enabled"`
+	LastViewedAt *time.Time `json:"lastViewedAt"`
+	LastViewedBy string     `gorm:"size:64" json:"lastViewedBy"`
+	ViewCount    int        `gorm:"default:0" json:"viewCount"`
+	CreatedBy    uint       `gorm:"index;default:0" json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// VaultAccess 取用留痕：谁在什么时候取走了哪一条的明文。
+//
+// 这张表是密码库能存在的前提，不是附加功能。所以：
+//   - 留痕写库失败时接口直接报错，不返回明文；
+//   - TargetName 冗余存一份，条目被删掉之后留痕还读得懂；
+//   - 只记「取了什么」，绝不记明文本身。
+type VaultAccess struct {
+	ID uint `gorm:"primaryKey" json:"id"`
+	// Target account | totp
+	Target   string `gorm:"size:16;index:idx_vault_access_target" json:"target"`
+	TargetID uint   `gorm:"index:idx_vault_access_target" json:"targetId"`
+	// TargetName 取用时条目的名字，条目删了也留着
+	TargetName string `gorm:"size:64" json:"targetName"`
+	// Action reveal 取口令明文 | code 出验证码 | uri 导出 otpauth 二维码地址 | rotate 轮换口令
+	Action     string `gorm:"size:16;index" json:"action"`
+	Operator   string `gorm:"size:64;index" json:"operator"`
+	OperatorID uint   `gorm:"index;default:0" json:"operatorId"`
+	IP         string `gorm:"size:64" json:"ip"`
+	// Reason 取用理由，选填。不设必填是因为强制填写只会收到一堆「日常运维」，
+	// 留痕本身（谁、什么时候、取了哪一条）才是有用的部分
+	Reason    string    `gorm:"size:255" json:"reason"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
+}
+
 // CommandRule 命令审计规则，命中后按 Action 处理
 type CommandRule struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

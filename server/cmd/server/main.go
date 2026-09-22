@@ -227,6 +227,14 @@ func main() {
 	} else {
 		log.Println("[hostlog] 主机日志巡检未启用（OPS_HOST_LOG_SPEC 为空），日志里新冒出来的错误与日志目录占用只能手动巡检")
 	}
+	if cfg.VaultSpec != "" {
+		if err := sched.AddFixed(cfg.VaultSpec, h.RemindVaultRotationForSchedule); err != nil {
+			log.Fatalf("密码库轮换检查 cron 表达式无效(%s): %v", cfg.VaultSpec, err)
+		}
+		log.Printf("[vault] 口令轮换逾期检查已启用: %s", cfg.VaultSpec)
+	} else {
+		log.Println("[vault] 口令轮换逾期检查未启用（OPS_VAULT_SPEC 为空），设了轮换周期的口令逾期也不会有人被提醒")
+	}
 	if cfg.BackupSpec != "" {
 		if err := sched.AddFixed(cfg.BackupSpec, h.RunBackupForSchedule); err != nil {
 			log.Fatalf("自动备份 cron 表达式无效(%s): %v", cfg.BackupSpec, err)
@@ -523,6 +531,23 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/credentials/:id/rotate", middleware.RequirePerm("credential:manage"), h.RotateCredential)
 		auth.POST("/credentials/:id/hosts", middleware.RequirePerm("credential:manage"), h.BindCredentialHosts)
 		auth.POST("/credentials/:id/check", middleware.RequirePerm("credential:check"), h.CheckCredential)
+
+		// 账号密码库 / 2FA 验证码库：明文是给人取走用的，所以「取用」单独一个权限，
+		// 且每次取用都留痕（留痕写不进去就不给明文）
+		auth.GET("/vault/state", h.GetVaultState)
+		auth.GET("/vault/accounts", h.ListVaultAccounts)
+		auth.POST("/vault/accounts", middleware.RequirePerm("vault:manage"), h.CreateVaultAccount)
+		auth.PUT("/vault/accounts/:id", middleware.RequirePerm("vault:manage"), h.UpdateVaultAccount)
+		auth.DELETE("/vault/accounts/:id", middleware.RequirePerm("vault:manage"), h.DeleteVaultAccount)
+		auth.POST("/vault/accounts/:id/reveal", middleware.RequirePerm("vault:reveal"), h.RevealVaultAccount)
+		auth.POST("/vault/accounts/:id/rotate", middleware.RequirePerm("vault:manage"), h.RotateVaultAccount)
+		auth.GET("/vault/accesses", h.ListVaultAccesses)
+		auth.GET("/vault/totps", h.ListVaultTOTPs)
+		auth.POST("/vault/totps", middleware.RequirePerm("vault:manage"), h.CreateVaultTOTP)
+		auth.PUT("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.UpdateVaultTOTP)
+		auth.DELETE("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.DeleteVaultTOTP)
+		auth.POST("/vault/totps/:id/code", middleware.RequirePerm("vault:reveal"), h.CodeVaultTOTP)
+		auth.POST("/vault/totps/:id/uri", middleware.RequirePerm("vault:reveal"), h.URIVaultTOTP)
 
 		// 安全意识：学员侧（人人可用，只能看/做自己的那份）
 		auth.GET("/security/awareness/my", h.ListMyAwareness)

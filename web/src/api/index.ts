@@ -4544,6 +4544,126 @@ export const checkCredential = (id: number, hostId: number) =>
     credUsername: string
   }>({ url: `/credentials/${id}/check`, method: 'POST', data: { hostId } })
 
+/* ---------------- 账号密码库 / 2FA 验证码库 ---------------- */
+
+export interface VaultAccount {
+  id: number
+  name: string
+  category: string
+  platform: string
+  url: string
+  username: string
+  description: string
+  owner: string
+  deptId: number
+  enabled: boolean
+  rotateDays: number
+  rotatedAt: string | null
+  lastViewedAt: string | null
+  lastViewedBy: string
+  viewCount: number
+  createdAt: string
+  updatedAt: string
+  /** encrypted | plain */
+  storage: string
+  hasSecret: boolean
+  /** 逾期未轮换的天数，0 表示不逾期或没设周期 */
+  overdueDays: number
+  neverRotated: boolean
+}
+
+export interface VaultTOTPItem {
+  id: number
+  name: string
+  issuer: string
+  account: string
+  accountId: number
+  accountName: string
+  description: string
+  owner: string
+  enabled: boolean
+  lastViewedAt: string | null
+  lastViewedBy: string
+  viewCount: number
+  createdAt: string
+  updatedAt: string
+  storage: string
+}
+
+export interface VaultAccess {
+  id: number
+  target: string
+  targetId: number
+  targetName: string
+  action: string
+  operator: string
+  operatorId: number
+  ip: string
+  reason: string
+  createdAt: string
+}
+
+export interface VaultState {
+  encryptEnabled: boolean
+  total: number
+  sealed: number
+  plain: number
+  overdue: number
+  noRotatePolicy: number
+  totpTotal: number
+  totpSealed: number
+  access7d: number
+  reveal7d: number
+  categories: { code: string; label: string }[]
+  notes: string[]
+  lastCheckAt?: string
+  lastCheckInfo?: string
+}
+
+export const getVaultState = () => request<VaultState>({ url: '/vault/state' })
+export const listVaultAccounts = (params: Record<string, any>) =>
+  request<PageData<VaultAccount>>({ url: '/vault/accounts', params })
+export const saveVaultAccount = (id: number, data: Record<string, any>) =>
+  id
+    ? request<VaultAccount>({ url: `/vault/accounts/${id}`, method: 'PUT', data })
+    : request<VaultAccount>({ url: '/vault/accounts', method: 'POST', data })
+export const deleteVaultAccount = (id: number) =>
+  request<null>({ url: `/vault/accounts/${id}`, method: 'DELETE' })
+export const revealVaultAccount = (id: number, reason: string) =>
+  request<{ username: string; secret: string; url: string; note: string }>({
+    url: `/vault/accounts/${id}/reveal`,
+    method: 'POST',
+    data: { reason }
+  })
+export const rotateVaultAccount = (id: number, data: { secret: string; reason?: string }) =>
+  request<VaultAccount>({ url: `/vault/accounts/${id}/rotate`, method: 'POST', data })
+export const listVaultAccesses = (params: Record<string, any>) =>
+  request<PageData<VaultAccess>>({ url: '/vault/accesses', params })
+
+export const listVaultTOTPs = (params: Record<string, any>) =>
+  request<PageData<VaultTOTPItem>>({ url: '/vault/totps', params })
+export const saveVaultTOTP = (id: number, data: Record<string, any>) =>
+  id
+    ? request<VaultTOTPItem>({ url: `/vault/totps/${id}`, method: 'PUT', data })
+    : request<VaultTOTPItem>({ url: '/vault/totps', method: 'POST', data })
+export const deleteVaultTOTP = (id: number) =>
+  request<null>({ url: `/vault/totps/${id}`, method: 'DELETE' })
+export const codeVaultTOTP = (id: number, reason: string) =>
+  request<{
+    code: string
+    nextCode?: string
+    remainSeconds: number
+    period: number
+    serverTime: string
+    note: string
+  }>({ url: `/vault/totps/${id}/code`, method: 'POST', data: { reason } })
+export const uriVaultTOTP = (id: number, reason: string) =>
+  request<{ uri: string; note: string }>({
+    url: `/vault/totps/${id}/uri`,
+    method: 'POST',
+    data: { reason }
+  })
+
 /* ---------------- 密钥加密体检 ---------------- */
 
 export interface SecretAuditRow {
