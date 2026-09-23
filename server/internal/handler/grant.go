@@ -96,6 +96,7 @@ func (h *Handler) CreateResourceGrant(c *gin.Context) {
 		response.Error(c, "授权创建失败")
 		return
 	}
+	h.recordVersion(ruleTargetResourceGrnt, grant.ID, "created", req.Remark, grant.Operator)
 	response.OK(c, grant)
 }
 
@@ -123,12 +124,17 @@ func (h *Handler) UpdateResourceGrant(c *gin.Context) {
 		return
 	}
 
+	// 改前补一版：版本功能上线前的授权没有 v1，直接记「改后」会让 diff 无从对比
+	h.backfillVersion(ruleTargetResourceGrnt, grant.ID)
+	h.DB.First(&grant, grant.ID)
+
 	grant.Actions, grant.ExpiresAt, grant.Remark = actions, expires, req.Remark
 	grant.Operator = middleware.CurrentUser(c).Username
 	if err := h.DB.Save(&grant).Error; err != nil {
 		response.Error(c, "授权更新失败")
 		return
 	}
+	h.recordVersion(ruleTargetResourceGrnt, grant.ID, "edited", "", grant.Operator)
 	response.OK(c, grant)
 }
 
@@ -143,6 +149,9 @@ func (h *Handler) DeleteResourceGrant(c *gin.Context) {
 			grant.ResourceType, grant.ResourceID, grant.ResourceName,
 			grant.Actions, expiresText(grant.ExpiresAt)))
 	}
+	// 删前留一版：硬删之后这条授权的内容只有版本里还有，而且可以「误删恢复」
+	h.recordVersionBeforeDelete(ruleTargetResourceGrnt, idParam(c),
+		middleware.CurrentUser(c).Username)
 	if err := h.DB.Delete(&model.ResourceGrant{}, idParam(c)).Error; err != nil {
 		response.Error(c, "授权删除失败")
 		return

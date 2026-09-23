@@ -214,7 +214,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 204, ParentID: 203, Title: "下发命令", Type: "button", AuthCode: "exec:run", Sort: 1},
 		// 生产主机单列一个码。原来「生产确认」只是前端的一个布尔回传，
 		// 直接调 API 写死 confirmProd=true 就绕过了 —— 那是个提示，不是控制
-		{ID: 205, ParentID: 203, Title: "在生产主机上执行", Type: "button", AuthCode: "exec:prod", Sort: 2},
+		{ID: 209, ParentID: 203, Title: "在生产主机上执行", Type: "button", AuthCode: "exec:prod", Sort: 2},
 		{ID: 211, ParentID: 200, Name: "Scheduler", Title: "定时任务", Path: "/execute/scheduler", Component: "/execute/scheduler/index", Icon: "Timer", Sort: 3},
 		{ID: 216, ParentID: 211, Title: "维护任务", Type: "button", AuthCode: "cron:manage", Sort: 1},
 		{ID: 217, ParentID: 211, Title: "立即执行", Type: "button", AuthCode: "cron:run", Sort: 2},
@@ -387,7 +387,7 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},
 		{ID: 822, ParentID: 800, Name: "AuditLog", Title: "操作审计", Path: "/system/audit", Component: "/system/audit/index", Icon: "Document", Sort: 14},
 		// 审计日志本身以前是「登录即可读 + 可导出 CSV」，等于审计对被审计的人完全透明
-		{ID: 829, ParentID: 822, Title: "查看与导出审计", Type: "button", AuthCode: "audit:view", Sort: 1},
+		{ID: 835, ParentID: 822, Title: "查看与导出审计", Type: "button", AuthCode: "audit:view", Sort: 1},
 		{ID: 817, ParentID: 800, Name: "DataRetention", Title: "数据留存", Path: "/system/retention", Component: "/system/retention/index", Icon: "DeleteFilled", Sort: 15},
 		{ID: 828, ParentID: 817, Title: "执行清理", Type: "button", AuthCode: "retention:run", Sort: 1},
 

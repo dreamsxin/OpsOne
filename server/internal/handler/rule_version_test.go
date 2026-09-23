@@ -42,6 +42,13 @@ func newRuleVersionTestHandler(t *testing.T) (*Handler, *gin.Engine) {
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
 		c.Set("ctx_user", &model.User{ID: 1, Username: "admin"})
+		// 回滚/恢复现在按 target 判精确权限码（以前写死在路由上的 alertrule:manage，
+		// 等于「有告警规则权限就能回滚别的类型」）。测试里给齐三种规则的码
+		c.Set("ctx_perms", map[string]struct{}{
+			"alertrule:manage":   {},
+			"detection:manage":   {},
+			"aggregation:manage": {},
+		})
 		c.Next()
 	})
 	engine.POST("/monitor/alert-rules", h.CreateAlertRule)
@@ -404,7 +411,10 @@ func TestSnapshotHashIsStable(t *testing.T) {
 		Priority: 100, Enabled: true,
 	})
 
-	for _, spec := range ruleTargetSpecs {
+	// 只遍历规则类 target：权限类（角色/授权）的测试数据在 perm_version_test.go 里，
+	// 而且它们的第一个字段也不叫 name
+	for _, target := range []string{ruleTargetAlert, ruleTargetDetection, ruleTargetAggregation} {
+		spec, _ := ruleSpecOf(target)
 		row, ok := spec.Load(h, 1)
 		if !ok {
 			t.Fatalf("%s 读不到测试数据", spec.Target)
@@ -427,8 +437,10 @@ func TestSnapshotHashIsStable(t *testing.T) {
 // 这一条是给「以后再接第四种规则」的人看的：少写一个闭包不会编译失败，
 // 但会在运行时表现成「版本记下来了却回滚不了」这种很难查的半残状态。
 func TestRuleTargetSpecsAreComplete(t *testing.T) {
-	if len(ruleTargetSpecs) != 3 {
-		t.Fatalf("目前应该有 3 种可版本化的规则，实际 %d", len(ruleTargetSpecs))
+	// 不写死数量：这套机制后来又接了角色与两类授权（perm_version.go）。
+	// 写死一个数字只会让每次新增 target 都先改一次测试，而它并不校验任何东西
+	if len(ruleTargetSpecs) < 6 {
+		t.Fatalf("规则 3 种 + 权限 3 种，至少应该有 6 个 target，实际 %d", len(ruleTargetSpecs))
 	}
 	for _, spec := range ruleTargetSpecs {
 		if spec.Target == "" || spec.Label == "" || len(spec.Fields) == 0 {
@@ -441,18 +453,23 @@ func TestRuleTargetSpecsAreComplete(t *testing.T) {
 			spec.ToUpdates == nil || spec.Apply == nil || spec.Create == nil {
 			t.Fatalf("%s 缺少必需的闭包 —— 会表现成「能记版本但不能回滚 / 不能恢复」", spec.Target)
 		}
-		// 字段里必须有 name：列表、留痕、错误信息都靠它指认是哪一条
-		hasName := false
+		// 字段键不能重名、都要有中文名：差异页拿 Label 显示，
+		// 重名的键会让 marshalSnapshot 里同一个值被写两次（hash 还是稳定的，但人读不懂）
+		seen := map[string]bool{}
 		for _, field := range spec.Fields {
-			if field.Key == "name" {
-				hasName = true
+			if field.Key == "" {
+				t.Errorf("%s 有一个字段没有 Key", spec.Target)
 			}
+			if seen[field.Key] {
+				t.Errorf("%s 的字段 %s 重复了", spec.Target, field.Key)
+			}
+			seen[field.Key] = true
 			if field.Label == "" {
 				t.Errorf("%s 的字段 %s 没有中文名，差异页会显示成英文键", spec.Target, field.Key)
 			}
 		}
-		if !hasName {
-			t.Errorf("%s 的字段清单里没有 name", spec.Target)
-		}
+		// 刻意**不再**要求字段里有 name：授权类 target 没有名字字段，
+		// 它们的显示名是「主体→资源」这种组合，由 Load 填进 ruleSnapshotRow.Name。
+		// 原来那条断言是在只有三种规则时写的，照搬到授权上就是个假要求
 	}
 }

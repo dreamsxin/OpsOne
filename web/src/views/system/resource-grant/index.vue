@@ -19,6 +19,17 @@ import {
   type User
 } from '@/api'
 import Pagination from '@/components/Pagination.vue'
+import RuleVersionDrawer from '@/components/RuleVersionDrawer.vue'
+
+// 变更历史：撤销是硬删，「删的是谁对哪台主机的什么动作」以前查不到。
+// 现在删之前会留一版，那一版还能用来把授权恢复回去
+const versionVisible = ref(false)
+const versionGrant = ref<ResourceGrant | null>(null)
+function openVersions(row: ResourceGrant) {
+  versionGrant.value = row
+  versionVisible.value = true
+}
+
 
 
 const loading = ref(false)
@@ -257,13 +268,23 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="operator" label="授权人" width="110" />
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button v-perm="'grant:manage'" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-perm="'grant:manage'" link @click="openVersions(row)">变更历史</el-button>
             <el-button v-perm="'grant:manage'" link type="danger" @click="remove(row)">撤销</el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <RuleVersionDrawer
+        v-model="versionVisible"
+        target="resource_grant"
+        :target-id="versionGrant?.id ?? 0"
+        :target-name="versionGrant ? `${versionGrant.subjectName}→${versionGrant.resourceName}` : ''"
+        @changed="load"
+      />
+
 
       <Pagination
         v-model:current-page="query.page"

@@ -204,6 +204,9 @@ func (h *Handler) CreateRole(c *gin.Context) {
 		response.Error(c, "菜单权限绑定失败")
 		return
 	}
+	// 权限改动要能追溯：建角色也记一版，否则第一次编辑时没有「改前」可比
+	h.recordVersion(ruleTargetRole, role.ID, "created", req.Description,
+		middleware.CurrentUser(c).Username)
 	response.OK(c, toRoleView(role))
 }
 
@@ -218,6 +221,10 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 		response.BadRequest(c, "参数校验失败")
 		return
 	}
+	// 版本功能上线前建的角色没有 v1，先补一版，否则 diff 没有「改前」
+	h.backfillVersion(ruleTargetRole, role.ID)
+	h.DB.First(&role, role.ID) // 取回被 backfill 推进过的 version_seq
+
 	role.Name, role.Description = req.Name, req.Description
 	role.DataScope = normalizeDataScope(req.DataScope)
 	role.DataDeptIDs = marshalIDs(req.DataDeptIDs)
@@ -231,6 +238,8 @@ func (h *Handler) UpdateRole(c *gin.Context) {
 			return
 		}
 	}
+	// 记在绑定菜单之后：菜单就是这个角色最要紧的内容，先记会漏掉本次改动
+	h.recordVersion(ruleTargetRole, role.ID, "edited", "", middleware.CurrentUser(c).Username)
 	response.OK(c, toRoleView(role))
 }
 
@@ -240,6 +249,9 @@ func (h *Handler) DeleteRole(c *gin.Context) {
 		response.BadRequest(c, "内置管理员角色不可删除")
 		return
 	}
+	// 删之前留一版：角色删掉之后，「它原来有哪些权限」只有这里答得出来，
+	// 而且这一版可以用「误删恢复」把角色建回来
+	h.recordVersionBeforeDelete(ruleTargetRole, id, middleware.CurrentUser(c).Username)
 	if err := h.DB.Delete(&model.Role{}, id).Error; err != nil {
 		response.Error(c, "角色删除失败")
 		return

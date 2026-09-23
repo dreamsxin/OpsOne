@@ -5553,7 +5553,19 @@ export interface WallboardData {
 }
 
 /** 支持版本化的规则类型。后端 rule_version.go 里的注册表决定有哪些 */
-export type RuleVersionTarget = 'alert_rule' | 'detection_rule' | 'aggregation_policy'
+/**
+ * 可版本化的目标。前三个是业务规则，后三个是**权限本身**。
+ *
+ * 权限类的读与回滚都要对应的 manage 权限码（后端按 target 判），
+ * 因为快照内容就是权限配置：角色有哪些按钮码、谁被授权了哪台主机的哪些动作。
+ */
+export type RuleVersionTarget =
+  | 'alert_rule'
+  | 'detection_rule'
+  | 'aggregation_policy'
+  | 'role'
+  | 'resource_grant'
+  | 'kube_grant'
 
 export interface RuleVersionTargetSpec {
   target: RuleVersionTarget

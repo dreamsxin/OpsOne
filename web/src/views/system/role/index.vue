@@ -10,6 +10,17 @@ import {
   type MenuTreeNode,
   type Role
 } from '@/api'
+import RuleVersionDrawer from '@/components/RuleVersionDrawer.vue'
+
+// 变更历史：权限改错了要能看出「改前是什么」并改回去。
+// 抽屉是和告警规则共用的那个组件——权限走的就是同一套版本化机制
+const versionVisible = ref(false)
+const versionRole = ref<Role | null>(null)
+function openVersions(row: Role) {
+  versionRole.value = row
+  versionVisible.value = true
+}
+
 
 const loading = ref(false)
 const rows = ref<Role[]>([])
@@ -103,16 +114,26 @@ onMounted(async () => {
         <el-table-column label="权限数" width="90">
           <template #default="{ row }">{{ (row.menus || []).length }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button v-perm="'role:manage'" link type="primary" @click="openEdit(row)">
               编辑授权
             </el-button>
+            <el-button v-perm="'role:manage'" link @click="openVersions(row)">变更历史</el-button>
             <el-button v-perm="'role:manage'" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <RuleVersionDrawer
+      v-model="versionVisible"
+      target="role"
+      :target-id="versionRole?.id ?? 0"
+      :target-name="versionRole?.name"
+      @changed="load"
+    />
+
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑角色' : '新增角色'" width="560px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">

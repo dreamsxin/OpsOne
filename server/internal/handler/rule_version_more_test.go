@@ -226,13 +226,23 @@ func TestRestoreRejectsBrokenSnapshot(t *testing.T) {
 	}
 }
 
-// 目标类型清单给前端用，三种都要带上字段清单与口径说明
+// 目标类型清单给前端用，每一种都要带上字段清单与口径说明
 func TestRuleVersionTargetsEndpoint(t *testing.T) {
 	_, engine := newRuleVersionTestHandler(t)
 	_, resp := ruleJSON(t, engine, http.MethodGet, "/monitor/rule-version-targets", "")
 	list, ok := resp["data"].([]any)
-	if !ok || len(list) != 3 {
-		t.Fatalf("应该返回 3 种目标: %v", resp["data"])
+	// 规则 3 种 + 权限 3 种（角色 / 资源授权 / 容器授权）
+	if !ok || len(list) < 6 {
+		t.Fatalf("至少应该返回 6 种目标: %v", resp["data"])
+	}
+	targets := map[string]bool{}
+	for _, raw := range list {
+		targets[raw.(map[string]any)["target"].(string)] = true
+	}
+	for _, want := range []string{"alert_rule", "role", "resource_grant", "kube_grant"} {
+		if !targets[want] {
+			t.Errorf("清单里缺 %s", want)
+		}
 	}
 	for _, raw := range list {
 		item := raw.(map[string]any)

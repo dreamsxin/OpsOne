@@ -406,6 +406,7 @@ func (h *Handler) CreateKubeGrant(c *gin.Context) {
 		response.Error(c, "创建失败")
 		return
 	}
+	h.recordVersion(ruleTargetKubeGrant, item.ID, "created", req.Remark, item.Operator)
 	response.OK(c, kubeGrantView(item))
 }
 
@@ -425,6 +426,10 @@ func (h *Handler) UpdateKubeGrant(c *gin.Context) {
 		response.BadRequest(c, "参数校验失败")
 		return
 	}
+	// 改前补一版，否则 diff 没有「改前」
+	h.backfillVersion(ruleTargetKubeGrant, item.ID)
+	h.DB.First(&item, item.ID)
+
 	// 主体与集群不允许改：那等于换了一条授权，留着原记录只会让审计看不懂
 	updates := map[string]any{
 		"namespaces": normalizeGrantList(req.Namespaces), "kinds": normalizeGrantList(req.Kinds),
@@ -437,6 +442,7 @@ func (h *Handler) UpdateKubeGrant(c *gin.Context) {
 		return
 	}
 	h.DB.First(&item, item.ID)
+	h.recordVersion(ruleTargetKubeGrant, item.ID, "edited", "", operatorName(c))
 	response.OK(c, kubeGrantView(item))
 }
 
@@ -449,6 +455,8 @@ func (h *Handler) DeleteKubeGrant(c *gin.Context) {
 			grant.SubjectType, grant.SubjectID, grant.ClusterID,
 			grant.Namespaces, grant.Kinds, grant.AllowLogs, grant.AllowWrite, grant.AllowForward))
 	}
+	// 删前留一版，可用「误删恢复」建回来
+	h.recordVersionBeforeDelete(ruleTargetKubeGrant, idParam(c), operatorName(c))
 	if err := h.DB.Delete(&model.KubeGrant{}, idParam(c)).Error; err != nil {
 		response.Error(c, "删除失败")
 		return

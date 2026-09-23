@@ -91,9 +91,15 @@ type Role struct {
 	// DataScope all | dept | dept_below | self | custom，缺省 all
 	DataScope string `gorm:"size:16;default:all" json:"dataScope"`
 	// DataDeptIDs DataScope=custom 时生效，JSON 数组；接口层用 dataDeptIds 暴露
-	DataDeptIDs string    `gorm:"type:text" json:"-"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	DataDeptIDs string `gorm:"type:text" json:"-"`
+	// VersionSeq 角色配置的版本号，由 RuleVersion 那套机制推进。
+	//
+	// 权限被误改（或被人悄悄放宽）是真实的事故源，而原来这里**没有任何历史**：
+	// 审计里只剩一行 `PUT /system/roles/3`，改前是什么、能不能改回去都答不出来。
+	// 告警规则早就有版本化 + diff + 回滚，权限却没有 —— 这是治理上最说不过去的一处不对称。
+	VersionSeq int       `json:"versionSeq"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 
 	Menus []Menu `gorm:"many2many:role_menus" json:"menus,omitempty"`
 }
@@ -144,8 +150,11 @@ type ResourceGrant struct {
 	ExpiresAt    *time.Time `json:"expiresAt"`                         // 空表示长期有效
 	Remark       string     `gorm:"size:255" json:"remark"`
 	Operator     string     `gorm:"size:64" json:"operator"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	// VersionSeq 授权的版本号。原来删授权是硬删，`DELETE /resource-grants/7` 之后
+	// 连「删的是谁对哪台主机的什么动作」都查不到 —— 现在删之前先留一版
+	VersionSeq int       `json:"versionSeq"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // SiteLink 站点导航条目，用于集中收拢内部系统入口
@@ -203,8 +212,10 @@ type KubeGrant struct {
 	ExpiresAt *time.Time `json:"expiresAt"`
 	Remark    string     `gorm:"size:255" json:"remark"`
 	Operator  string     `gorm:"size:64" json:"operator"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	// VersionSeq 容器授权的版本号，同 ResourceGrant：硬删之后要还能查到删的是什么
+	VersionSeq int       `json:"versionSeq"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // EmailTemplate 邮件模板，正文用 Go text/template 语法，如 {{.Title}}

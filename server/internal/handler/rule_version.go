@@ -77,6 +77,20 @@ type ruleSnapshotRow struct {
 type ruleTargetSpec struct {
 	Target string `json:"target"`
 	Label  string `json:"label"`
+	// WritePerm 回滚与误删恢复要的权限码。
+	//
+	// **必须按 target 分开**：路由上原来只挂了 alertrule:manage，
+	// 于是有告警规则权限的人可以回滚检测规则与聚合策略。那时候影响还小，
+	// 但这套机制接了「角色」与「资源授权」之后，同一个洞意味着
+	// **拿一个业务权限就能改权限**。所以路由上只做粗粒度放行，
+	// 精确的码在 handler 里按 spec 判。
+	WritePerm string `json:"writePerm"`
+	// ReadPerm 读版本（列表/详情/diff）要的权限码。空表示登录即可。
+	//
+	// 业务规则的历史对值班的人是有用的，所以留空；但**权限类 target 的快照内容
+	// 就是权限配置本身**（角色有哪些按钮码、某人被授权了哪台主机的哪些动作），
+	// 那份东西是侦察材料，必须和改它一样要权限。
+	ReadPerm string `json:"readPerm"`
 	// Fields 配置字段清单，顺序即展示顺序，也决定 hash 的稳定性
 	Fields []ruleField `json:"fields"`
 	// RuntimeNote 说明哪些运行态字段刻意不进快照
@@ -108,7 +122,7 @@ var comparatorChinese = map[string]string{
 // ruleTargetSpecs 三种规则的定义。新增一种可版本化的规则只要往这里加一项。
 var ruleTargetSpecs = []ruleTargetSpec{
 	{
-		Target: ruleTargetAlert, Label: "告警规则",
+		Target: ruleTargetAlert, Label: "告警规则", WritePerm: "alertrule:manage",
 		Fields: []ruleField{
 			{"name", "名称"}, {"metric", "指标"}, {"comparator", "比较符"},
 			{"threshold", "阈值"}, {"windowMinutes", "统计窗口（分钟）"},
@@ -161,7 +175,7 @@ var ruleTargetSpecs = []ruleTargetSpec{
 		},
 	},
 	{
-		Target: ruleTargetDetection, Label: "检测规则",
+		Target: ruleTargetDetection, Label: "检测规则", WritePerm: "detection:manage",
 		Fields: []ruleField{
 			{"name", "名称"}, {"mode", "关联方式"}, {"steps", "步骤定义"},
 			{"joinLabel", "对齐标签"}, {"windowMinutes", "关联窗口（分钟）"},
@@ -211,7 +225,7 @@ var ruleTargetSpecs = []ruleTargetSpec{
 		},
 	},
 	{
-		Target: ruleTargetAggregation, Label: "聚合策略",
+		Target: ruleTargetAggregation, Label: "聚合策略", WritePerm: "aggregation:manage",
 		Fields: []ruleField{
 			{"name", "名称"}, {"dimensions", "归桶维度"}, {"matchSeverity", "匹配级别"},
 			{"windowMinutes", "窗口（分钟）"}, {"minCount", "成桶阈值"},
@@ -415,6 +429,9 @@ func (h *Handler) ListRuleVersions(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.allowRuleRead(c, spec) {
+		return
+	}
 
 	q := h.DB.Model(&model.RuleVersion{}).Where("target = ?", spec.Target)
 	if v := strings.TrimSpace(c.Query("targetId")); v != "" {
@@ -483,6 +500,9 @@ func (h *Handler) GetRuleVersion(c *gin.Context) {
 	spec, ok := ruleSpecOf(version.Target)
 	if !ok {
 		response.Error(c, "这一版的目标类型已不受支持: "+version.Target)
+		return
+	}
+	if !h.allowRuleRead(c, spec) {
 		return
 	}
 	response.OK(c, gin.H{
@@ -597,6 +617,9 @@ func (h *Handler) DiffRuleVersions(c *gin.Context) {
 		response.Error(c, "这一版的目标类型已不受支持: "+left.Target)
 		return
 	}
+	if !h.allowRuleRead(c, spec) {
+		return
+	}
 
 	items := diffSnapshots(left.Content, right.Content, spec.Fields)
 	changed := 0
@@ -641,6 +664,39 @@ func diffSnapshots(leftContent, rightContent string, fields []ruleField) []ruleD
 
 // ---------- 回滚与误删恢复 ----------
 
+// allowRuleWrite 回滚/恢复的精确权限判定。
+//
+// 路由上只做粗粒度放行（任一目标的 manage 码即可进来），真正的判断在这里按 target 做。
+// 这么分是因为这套机制现在同时承载业务规则与**权限本身**：
+// 路由上写死一个码，就等于「有告警规则权限的人能回滚角色与授权」。
+//
+// 注意这里不是在发明新权限：能回滚角色的人本来就有 role:manage、
+// 也就本来就能直接改角色。回滚只是把「改回去」变得不容易出错，不扩大任何人的能力。
+// allowRuleRead 读版本的权限判定。ReadPerm 为空的 target 登录即可读。
+func (h *Handler) allowRuleRead(c *gin.Context, spec ruleTargetSpec) bool {
+	if spec.ReadPerm == "" {
+		return true
+	}
+	if _, ok := middleware.Perms(c)[spec.ReadPerm]; !ok {
+		response.Forbidden(c, "无权查看"+spec.Label+"的变更历史，需要权限: "+spec.ReadPerm)
+		return false
+	}
+	return true
+}
+
+func (h *Handler) allowRuleWrite(c *gin.Context, spec ruleTargetSpec) bool {
+	if spec.WritePerm == "" {
+		// 新加 target 时忘了填 WritePerm：拒绝比放行安全，而且这条错误会立刻被发现
+		response.Forbidden(c, "该类型没有配置回滚权限码（spec.WritePerm 为空），请补上后再用")
+		return false
+	}
+	if _, ok := middleware.Perms(c)[spec.WritePerm]; !ok {
+		response.Forbidden(c, "无权回滚"+spec.Label+"，需要权限: "+spec.WritePerm)
+		return false
+	}
+	return true
+}
+
 type rollbackReq struct {
 	Target    string `json:"target" binding:"required"`
 	RuleID    uint   `json:"ruleId" binding:"required"`
@@ -662,6 +718,9 @@ func (h *Handler) RollbackRule(c *gin.Context) {
 	spec, ok := ruleSpecOf(req.Target)
 	if !ok {
 		response.BadRequest(c, fmt.Sprintf("不支持的 target %q，可选：%s", req.Target, ruleTargetNames()))
+		return
+	}
+	if !h.allowRuleWrite(c, spec) {
 		return
 	}
 
@@ -736,6 +795,9 @@ func (h *Handler) RestoreRuleVersion(c *gin.Context) {
 	spec, ok := ruleSpecOf(version.Target)
 	if !ok {
 		response.Error(c, "这一版的目标类型已不受支持: "+version.Target)
+		return
+	}
+	if !h.allowRuleWrite(c, spec) {
 		return
 	}
 

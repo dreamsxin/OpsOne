@@ -1095,8 +1095,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/monitor/rule-versions", h.ListRuleVersions)
 		auth.GET("/monitor/rule-versions/diff", h.DiffRuleVersions)
 		auth.GET("/monitor/rule-versions/:id", h.GetRuleVersion)
-		auth.POST("/monitor/rule-versions/rollback", middleware.RequirePerm("alertrule:manage"), h.RollbackRule)
-		auth.POST("/monitor/rule-versions/:id/restore", middleware.RequirePerm("alertrule:manage"), h.RestoreRuleVersion)
+		auth.POST("/monitor/rule-versions/rollback", middleware.RequireAnyPerm("alertrule:manage", "detection:manage", "aggregation:manage", "role:manage", "grant:manage", "kubegrant:manage"), h.RollbackRule)
+		auth.POST("/monitor/rule-versions/:id/restore", middleware.RequireAnyPerm("alertrule:manage", "detection:manage", "aggregation:manage", "role:manage", "grant:manage", "kubegrant:manage"), h.RestoreRuleVersion)
 
 		// 值班大屏：只聚合已有数据
 		auth.GET("/monitor/wallboard", h.Wallboard)
