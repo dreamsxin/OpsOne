@@ -23,6 +23,7 @@ import (
 	"ops-platform/server/internal/db"
 	"ops-platform/server/internal/handler"
 	"ops-platform/server/internal/instance"
+	"ops-platform/server/internal/logx"
 	"ops-platform/server/internal/metrics"
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/migrate"
@@ -58,9 +59,27 @@ func main() {
 	}
 
 	cfg := mustLoadConfig()
-	log.Printf("opsone %s 启动中，运行模式 %s", version, cfg.Env)
 
-	gormDB, err := db.Open(cfg.DSN, cfg.Debug)
+	// 日志输出尽早接过来：这之前的几行（配置校验的 warn）只写 stderr，
+	// 那是可以接受的 —— 反过来「为了让几行 warn 进文件而在配置还没校验完时就建文件」
+	// 才是本末倒置
+	logWriter, err := logx.New(logx.Options{
+		File: cfg.LogFile, JSON: cfg.LogJSON,
+		MaxMB: cfg.LogMaxMB, Keep: cfg.LogKeep, AlsoStderr: cfg.LogStderr,
+	})
+	if err != nil {
+		log.Fatalf("日志初始化失败: %v", err)
+	}
+	defer func() { _ = logWriter.Close() }()
+	log.SetOutput(logWriter)
+	// gin 的访问日志与它内部的错误输出也走同一个 writer，否则落文件时会漏掉一半
+	gin.DefaultWriter = logWriter
+	gin.DefaultErrorWriter = logWriter
+
+	log.Printf("opsone %s 启动中，运行模式 %s", version, cfg.Env)
+	log.Printf("[logx] 日志去向：%s", logWriter.Describe())
+
+	gormDB, err := db.Open(cfg.DSN, cfg.Debug, logWriter)
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
@@ -385,7 +404,7 @@ func runBackupCmd(args []string) {
 	}
 
 	// 备份只读源库，不跑迁移、不做初始化，免得在恢复现场改动数据
-	gormDB, err := db.Open(cfg.DSN, false)
+	gormDB, err := db.Open(cfg.DSN, false, nil)
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
@@ -442,7 +461,7 @@ func runMigrateCmd(args []string) {
 		log.Fatalf("数据库文件 %s 不存在或不可读（%v）。\n"+
 			"如果是通过 sudo/cron 跑的，环境变量很可能没带进来，请加 --env-file 或 --dsn 指定路径", cfg.DSN, statErr)
 	}
-	gormDB, err := db.Open(cfg.DSN, false)
+	gormDB, err := db.Open(cfg.DSN, false, nil)
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}

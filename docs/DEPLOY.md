@@ -139,7 +139,7 @@ docker build -t opsone:latest \
 
 - **看状态**：`systemctl status opsone`、`journalctl -u opsone -f`。平台自身的体检在界面「监控告警 → 平台健康」，那一页会列出调度器、内置巡检、通知链路、数据库与录像占用。
 - **探活**：`/healthz` 只看进程（常量返回），`/readyz` 会真查数据库与用户表，负载均衡/k8s 探针应该用 `/readyz`。
-- **日志**：平台只往 stdout/stderr 写，不自己落文件、不轮转。systemd 交给 journald（`journalctl --vacuum-time=30d` 控制体积），Docker 交给 log driver。
+- **日志**：默认只往 stdout/stderr 写，**推荐保持这样** —— systemd 交给 journald（`journalctl --vacuum-time=30d` 控制体积），Docker 交给 log driver，它们在收集、按时间切、压缩归档上都比应用自己做更好。裸进程部署（没有 journald 也没有 logrotate）可以让平台自己落文件：`OPS_LOG_FILE=/var/log/opsone/opsone.log`，另有 `OPS_LOG_FORMAT=json`、`OPS_LOG_MAX_MB`（默认 64）、`OPS_LOG_KEEP`（默认 7）、`OPS_LOG_STDERR=false`。已经有 logrotate 的话让它管就行，文件被挪走后平台会自己重建，**不需要 `copytruncate`**。JSON 格式里**没有 level 字段**（平台的 `log.Printf` 不带级别信息，猜出来的不准）。
 - **重启语义**：收到 SIGTERM 会依次停调度 → 通知并断开 Web 终端 → 关闭转发隧道并落库 → 等在跑的请求收尾（批量执行是同步请求）→ 收尾会话状态 → 关库。超时上限 `OPS_SHUTDOWN_TIMEOUT_SEC`（默认 30s），systemd 的 `TimeoutStopSec` 必须比它大。
 - **平台自己挂了谁告警**：平台内置的告警都跑在自己进程里，进程死了没人叫。请用外部监控轮询 `/readyz`（Zabbix/Prometheus blackbox/云监控都行）。
 
@@ -242,7 +242,7 @@ Docker 方式：`docker compose exec opsone ops backup` → `docker compose pull
   最值得先配的两条告警：`opsone_up` 消失（`absent(opsone_up)`）、内置任务不跑了
   （`time() - opsone_fixed_task_last_run_timestamp_seconds > 21600`）。
   **pprof 查完就关**：heap profile 是进程内存快照，里面有 SSH 私钥与主机口令。
-- **日志不结构化、不轮转**：交给 journald / docker log driver。
+- **日志不结构化、不轮转**：~~交给 journald / docker log driver。~~ 已改：`OPS_LOG_FILE` 可落文件并按大小轮转，`OPS_LOG_FORMAT=json` 输出 JSON 行（`time` / `module` / `msg`，**无 level**）。不设这两项时行为与以前一字不差。
 - **转发隧道端口不做认证**：能连到 `OPS_FORWARD_BIND:端口` 的人等同于能访问被转发的服务，详见 `docs/SECURITY.md` 第 16 节。
 - **审计只记写操作、不记请求体**：查得到「谁 PUT 了 /hosts/3」，查不到改了哪个字段（`docs/SECURITY.md` 第 5 节）。
 

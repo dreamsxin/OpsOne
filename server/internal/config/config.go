@@ -97,6 +97,22 @@ type Config struct {
 	// 只在排查性能问题时临时开，查完关掉。
 	EnablePprof bool
 
+	// LogFile 日志落地文件。**留空则只写 stderr**，与以前行为完全一致 ——
+	// 在 systemd / docker 下那才是对的（journald 与 log driver 负责收集与轮转）。
+	// 这个选项是给「裸进程 + 没有 logrotate」那种最小部署兜底的。
+	LogFile string
+	// LogJSON 是否输出 JSON 行（喂 Loki / ES 时用）。
+	// 注意：**没有 level 字段** —— 平台那 228 处 log.Printf 不带级别信息，
+	// 按文本猜级别会造出不准的字段。只有 time / module / msg。
+	LogJSON bool
+	// LogMaxMB 单个日志文件大小上限，超过就切
+	LogMaxMB int
+	// LogKeep 保留多少份历史日志（不含当前文件）
+	LogKeep int
+	// LogStderr 落文件时是否同时写 stderr。默认开：
+	// 起进程的人通常在看终端，日志突然「不见了」是个糟糕的体验
+	LogStderr bool
+
 	// CertCheckSpec 证书巡检的 cron 表达式（标准五段）。留空表示不做定时巡检，
 	// 只能在界面上手动触发。
 	CertCheckSpec string
@@ -295,6 +311,11 @@ func Load() (*Config, error) {
 		InstanceLeaseSec:   envInt("OPS_INSTANCE_LEASE_SEC", 45),
 		MetricsToken:       strings.TrimSpace(env("OPS_METRICS_TOKEN", "")),
 		EnablePprof:        envBool("OPS_PPROF", false),
+		LogFile:            strings.TrimSpace(env("OPS_LOG_FILE", "")),
+		LogJSON:            strings.EqualFold(strings.TrimSpace(env("OPS_LOG_FORMAT", "text")), "json"),
+		LogMaxMB:           envInt("OPS_LOG_MAX_MB", 64),
+		LogKeep:            envInt("OPS_LOG_KEEP", 7),
+		LogStderr:          envBool("OPS_LOG_STDERR", true),
 		CertCheckSpec:      strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 		AlertRuleSpec:      strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 		ProbeSpec:          strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),
@@ -340,6 +361,14 @@ func Load() (*Config, error) {
 		fail("OPS_INSTANCE_LEASE_SEC=%d 不合理，取值范围 15-600 秒 —— "+
 			"低于 15 秒时一次 GC 停顿或磁盘卡顿就会被误判成宕机，两个实例会同时认为自己该跑调度",
 			cfg.InstanceLeaseSec)
+	}
+	if cfg.LogFile != "" {
+		if cfg.LogMaxMB < 1 || cfg.LogMaxMB > 10240 {
+			fail("OPS_LOG_MAX_MB=%d 不合理，取值范围 1-10240", cfg.LogMaxMB)
+		}
+		if cfg.LogKeep < 0 || cfg.LogKeep > 365 {
+			fail("OPS_LOG_KEEP=%d 不合理，取值范围 0-365（0 表示切完就删，不留历史）", cfg.LogKeep)
+		}
 	}
 	if cfg.BackupSpec != "" && cfg.BackupDir == "" {
 		fail("开了自动备份（OPS_BACKUP_SPEC）就必须给 OPS_BACKUP_DIR")

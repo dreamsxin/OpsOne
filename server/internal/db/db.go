@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -16,12 +17,26 @@ import (
 	"ops-platform/server/internal/model"
 )
 
-func Open(dsn string, debug bool) (*gorm.DB, error) {
+// Open 打开数据库。
+//
+// out 是日志去向：传 nil 用 GORM 默认（stdout）。传进来是有必要的 ——
+// GORM 自带的 logger 写的是 **stdout**，不经过标准库的 log 包，
+// 所以 `log.SetOutput` 管不到它。落文件时不把它接过来，
+// 「record not found」与慢查询这类最该留档的行会留在终端里，日志文件只有一半。
+func Open(dsn string, debug bool, out io.Writer) (*gorm.DB, error) {
 	level := logger.Warn
 	if debug {
 		level = logger.Info
 	}
-	g, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(level)})
+	gormLog := logger.Default.LogMode(level)
+	if out != nil {
+		gormLog = logger.New(log.New(out, "", log.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  false,
+		}).LogMode(level)
+	}
+	g, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormLog})
 	if err != nil {
 		return nil, err
 	}

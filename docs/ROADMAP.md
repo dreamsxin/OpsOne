@@ -167,7 +167,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 版本号 — `ops version` 与 `/healthz`、`/readyz` 都带构建版本（`make` 用 `git describe` 注入）
 - [~] 多实例 / 高可用 — **不是 HA**：前端流量不会自动切、终端与隧道不会迁移、SQLite 仍是单机文件。做到的是把「悄悄跑两遍」变成显式的：第二个实例**默认拒绝启动**并说清后果，`OPS_ALLOW_MULTI_INSTANCE=true` 才允许它以 **standby** 起来（**一个调度任务都不跑**）；leader 心跳过期时 standby **真的接管调度**（实测 kill -9 后一个租约周期内开始跑）。顺带修了两个并发老毛病：定时任务改成 `SkipIfStillRunning`（原来上一次没跑完下一次照样起，同一条命令会重复下发），`run_count` 改成 SQL 自增（原来是读值 +1 回写，并发触发互相覆盖）
 - [x] 平台自身指标 — `/metrics`（Prometheus 文本格式，**自己写的暴露层，零依赖**）+ `/debug/pprof`，两个都**默认不注册**，靠 `OPS_METRICS_TOKEN` 开；pprof 还要额外 `OPS_PPROF=true`（heap 是进程内存快照，里面有 SSH 私钥与主机口令）。指标按**路由模板**聚合而不是实际路径，避免基数爆炸
-- [ ] 结构化日志与轮转 — 只往 stdout/stderr 写，交给 journald / docker log driver
+- [x] 结构化日志与轮转 — 默认仍只写 stderr（systemd/docker 下那才是对的）；`OPS_LOG_FILE` 一设才落文件，支持按大小轮转、保留 N 份、可选 JSON（从 `[module]` 前缀机械提字段）。**刻意不产出 level 字段**：228 处 `log.Printf` 不带级别信息，猜出来的字段是不准的
 - [x] 版本化迁移 — `schema_migrations` 表 + 有序步骤 + **降级拒绝启动** + 陈旧列报告 + `ops migrate status|up`；**没有 down/回滚**（SQLite 下自动生成的回滚往往是错的），回滚路径仍是 `ops restore`，所以升级流程强制「先备份」
 
 ## 建议实现顺序
@@ -1984,6 +1984,74 @@ pprof 白名单外的 cmdline 404 且无令牌 401）。真后端跑通：
 **仍然没有的**：SSH 建连与批量执行的逐台成败指标（那要在执行链路里埋点，
 埋不好会把敏感的主机标签带进时序）、告警规则评估耗时、
 Grafana 面板 JSON（做了也没法保证跟得上指标改动）。
+
+
+## 已落地：日志落文件与轮转（以及一个 Windows 上的真坑）
+
+这是 ROADMAP 里最后一个 `[ ]`。平台有 **228 处 `log.Printf`**，全写 stderr。
+在 systemd / docker 下这其实是对的 —— journald 与 log driver 负责收集与轮转，
+应用自己做反而更差。所以这一轮做的是**可选**的一层：
+`OPS_LOG_FILE` 一设才落文件，不设则与以前一字不差。
+
+### 两条刻意不做的
+
+1. **不做日志级别**。那 228 处调用里没有任何级别信息。按文本里有没有「失败」
+   去猜一个 level，会造出一个看起来精确、实则不准的字段 —— 与指标那一轮
+   拒绝给内置任务猜 ok/failed 是同一条原则。JSON 里只有 `time` / `module` / `msg`。
+   真要级别得改调用点，那是另一件事，不该靠猜糊过去。
+2. **不改 228 处调用点**。`log.SetOutput` 把标准库输出接过来即可；
+   `module` 字段从现成的 `[scheduler]` / `[instance]` 前缀**机械提取** ——
+   这个前缀本来就是全仓统一的约定，提取它不需要任何猜测。
+
+### 三个容易漏的出口
+
+落文件时如果只接 `log.SetOutput`，日志文件里会**只有一半**：
+
+- `gin.DefaultWriter` / `gin.DefaultErrorWriter`：访问日志走的是 gin 自己的 writer。
+- **GORM 的 logger 写的是 stdout，不经过标准库 log 包** —— `log.SetOutput` 管不到它。
+  所以 `db.Open` 多了一个 `io.Writer` 参数，把慢查询与 `record not found` 也接过来
+  （实测：不接的话 stdout 里留着一堆 SQL 行，而日志文件里一条都没有）。
+- 配置校验的那几行 warn 发生在 logx 初始化**之前**，只会写 stderr。
+  这是刻意的：为了让几行 warn 进文件而在配置还没校验完时就建日志文件，是本末倒置。
+
+### 轮转：小、且能自愈
+
+按大小切、保留 N 份，就这两件事。有 systemd/logrotate 的话**别用它** ——
+外面在「切文件时不丢行」「按时间切」「压缩归档」上都做得更好，
+这里是给「裸进程 + 没有 logrotate」那种最小部署兜底的。
+
+两个实现细节：
+
+- **先关再改名再重开**。Windows 上重命名一个仍被打开的文件会失败
+  （Go 的 `os.OpenFile` 没设 `FILE_SHARE_DELETE`），所以不能照 Unix 的
+  「先 rename 再 reopen」写。
+- **文件被外部挪走/删掉后自动重建**。fd 仍然可写，但写进去的东西没人看得到 ——
+  「以为在记日志其实没记」比不记日志更糟，所以每次写前 Stat 一下当前路径。
+
+### 顺带修掉的一个 Windows 真坑
+
+上一轮加的「同机器 PID 存活判断」在 Windows 上**是错的**，这一轮实测撞上了：
+杀掉后端再起，新进程仍然被实例互斥拦住。原因是
+**句柄能打开不等于进程还活着** —— 只要还有人持着那个进程的句柄
+（PowerShell 的 `Start-Process -PassThru` 就会持着），`OpenProcess` 一直成功，
+于是 `os.FindProcess` 判定「还活着」，僵尸记录清不掉。
+
+正确的判断是**等它 0 秒**：已退出的进程对象处于已触发状态，
+`WaitForSingleObject(h, 0)` 立刻返回 `WAIT_OBJECT_0`。改完之后
+「杀掉再起」当场可用（实测 leader 直接登记成功，不再等 45 秒租约）。
+查不出来时仍按「还活着」处理：宁可这次起不来，也不要两个实例同时跑调度。
+
+**验证**：logx 包 7 条 —— 不配文件时磁盘上不留东西、落文件同时写 stderr、
+JSON 提 module 且**不产出 level**、超限切且只留 Keep 份、Keep=0 不留历史、
+文件被外部删掉后重建、并发 400 行写入无一行被切碎（长度逐行核对）。
+真后端跑通：JSON 模式下 stdout **0 行**（GORM 也被接过来了）、
+日志文件 286 行**全部是合法 JSON**、`module` 分别提出 `logx`/`instance`/`GIN`、
+`OPS_LOG_STDERR=false` 时 stderr 只剩 logx 初始化之前那 9 行 warn。
+全量 `go test` / `go vet` / `gofmt` 干净。
+
+**仍然没有的**：按时间轮转与压缩归档（交给 logrotate 更合适）、
+日志级别（要改调用点）、把审计日志也往这里写（审计有自己的表，两套语义不该混）。
+
 
 
 
