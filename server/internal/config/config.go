@@ -86,6 +86,17 @@ type Config struct {
 	// 太长则真宕机后接管很慢。
 	InstanceLeaseSec int
 
+	// MetricsToken /metrics 的访问令牌。**留空则连路由都不注册**（访问是 404），
+	// 因为指标里有路由清单、请求量、实例主机名与版本号 —— 单看都不敏感，合起来是侦察材料。
+	MetricsToken string
+
+	// EnablePprof 是否开 /debug/pprof。默认关，而且**还要有 MetricsToken**。
+	//
+	// 比 /metrics 严格一档的理由很实际：heap profile 是进程内存快照，
+	// 而这个进程内存里有 SSH 私钥、主机口令、解密后的凭据。能拉 heap 等于能拿走它们。
+	// 只在排查性能问题时临时开，查完关掉。
+	EnablePprof bool
+
 	// CertCheckSpec 证书巡检的 cron 表达式（标准五段）。留空表示不做定时巡检，
 	// 只能在界面上手动触发。
 	CertCheckSpec string
@@ -282,6 +293,8 @@ func Load() (*Config, error) {
 		SSHStrictHostKey:   envBool("OPS_SSH_STRICT_HOST_KEY", false),
 		AllowMultiInstance: envBool("OPS_ALLOW_MULTI_INSTANCE", false),
 		InstanceLeaseSec:   envInt("OPS_INSTANCE_LEASE_SEC", 45),
+		MetricsToken:       strings.TrimSpace(env("OPS_METRICS_TOKEN", "")),
+		EnablePprof:        envBool("OPS_PPROF", false),
 		CertCheckSpec:      strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 		AlertRuleSpec:      strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 		ProbeSpec:          strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),

@@ -229,7 +229,19 @@ Docker 方式：`docker compose exec opsone ops backup` → `docker compose pull
 
 - **不支持多实例 / 水平扩展**：进程内 cron 无选主；转发隧道与扫码登录 ticket 都是进程内状态；SQLite 是本地文件。**第二个实例默认会拒绝启动**（连同原因一起打在日志里）——以前是不报错然后把所有定时任务各跑一遍。确实要短暂双开（升级时重叠几秒）设 `OPS_ALLOW_MULTI_INSTANCE=true`，那样第二个实例以 standby 起来、**不跑任何调度**；leader 心跳超过 `OPS_INSTANCE_LEASE_SEC`（默认 45 秒）没更新时 standby 会接管调度。**这不是 HA**：流量不会自动切，终端与隧道不会迁移。
 - **只支持 SQLite**：代码里写死了驱动，换 MySQL/PG 需要改 `server/internal/db/db.go` 并处理方言差异。
-- **不产出 Prometheus 指标、没有 pprof 端点**：平台自身可观测性靠「平台健康」页与日志。
+- **不产出 Prometheus 指标、没有 pprof 端点**：~~平台自身可观测性靠「平台健康」页与日志。~~ 已改：设 `OPS_METRICS_TOKEN` 后 `/metrics` 可用（不设则连路由都没有），`OPS_PPROF=true` 且有令牌时 `/debug/pprof` 可用。Prometheus 侧：
+
+  ```yaml
+  scrape_configs:
+    - job_name: opsone
+      bearer_token: '<OPS_METRICS_TOKEN>'
+      static_configs:
+        - targets: ['127.0.0.1:8080']
+  ```
+
+  最值得先配的两条告警：`opsone_up` 消失（`absent(opsone_up)`）、内置任务不跑了
+  （`time() - opsone_fixed_task_last_run_timestamp_seconds > 21600`）。
+  **pprof 查完就关**：heap profile 是进程内存快照，里面有 SSH 私钥与主机口令。
 - **日志不结构化、不轮转**：交给 journald / docker log driver。
 - **转发隧道端口不做认证**：能连到 `OPS_FORWARD_BIND:端口` 的人等同于能访问被转发的服务，详见 `docs/SECURITY.md` 第 16 节。
 - **审计只记写操作、不记请求体**：查得到「谁 PUT 了 /hosts/3」，查不到改了哪个字段（`docs/SECURITY.md` 第 5 节）。

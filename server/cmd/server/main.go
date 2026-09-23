@@ -23,6 +23,7 @@ import (
 	"ops-platform/server/internal/db"
 	"ops-platform/server/internal/handler"
 	"ops-platform/server/internal/instance"
+	"ops-platform/server/internal/metrics"
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
@@ -588,6 +589,11 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		log.Fatalf("OPS_TRUSTED_PROXIES 配置无效: %v", err)
 	}
 	r.Use(gin.Logger(), gin.Recovery())
+	// 指标中间件要在业务路由之前、CORS 之后：CORS 的预检请求也算请求量，
+	// 但它不该把耗时直方图拉低（预检永远很快）—— 所以预检由 route=unmatched 兜着
+	reg := metrics.Default()
+	h.InstallMetrics(reg, version)
+	r.Use(metrics.Middleware(reg))
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -603,6 +609,24 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 	// 就绪探针：真查一次数据库。这里刻意用原生 HTTP 状态码（503）而不是统一响应体，
 	// 负载均衡与 k8s 探针看的是状态码。
 	r.GET("/readyz", func(c *gin.Context) { readyz(c, gormDB) })
+
+	// 指标与 pprof：令牌为空时**连路由都不注册**，访问是 404 而不是 401 ——
+	// 不告诉外面「这里有个被保护的端点」
+	if cfg.MetricsToken != "" {
+		r.GET("/metrics", handler.MetricsHandler(reg, cfg.MetricsToken))
+		log.Println("[metrics] /metrics 已启用（需要 OPS_METRICS_TOKEN 令牌）")
+		if cfg.EnablePprof {
+			r.GET("/debug/pprof/:profile", handler.PprofHandler(cfg.MetricsToken))
+			log.Println("[metrics] /debug/pprof 已启用 —— heap profile 是进程内存快照，" +
+				"里面有 SSH 私钥与主机口令，查完请关掉（OPS_PPROF=false）")
+		}
+	} else {
+		log.Println("[metrics] /metrics 未启用（OPS_METRICS_TOKEN 为空），平台不产出 Prometheus 指标")
+		if cfg.EnablePprof {
+			log.Println("[metrics] OPS_PPROF=true 但没有 OPS_METRICS_TOKEN，pprof 仍然不会开 —— " +
+				"不给一个能拉进程内存快照的端点留免鉴权入口")
+		}
+	}
 
 	api := r.Group("/api/v1")
 	api.POST("/auth/login", h.Login)

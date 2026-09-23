@@ -269,7 +269,12 @@ func (m *Manager) promote() error {
 	return nil
 }
 
-// aliveOthers 心跳还新鲜的其它实例
+// aliveOthers 心跳还新鲜的其它实例。
+//
+// 除了看心跳，**同一台机器上的记录还要看 PID 是否真的还在**：
+// 被 `kill -9`（或 IDE 直接停止）的进程来不及注销，它的心跳会在租约内一直显示新鲜，
+// 于是「杀掉再起」在一个租约周期内起不来 —— 这是开发与紧急重启时最常见的动作。
+// 跨主机不做这个判断：没法知道对面那台机器上的进程还在不在，那种情况只能等租约。
 func (m *Manager) aliveOthers(lease int) ([]model.PlatformInstance, error) {
 	deadline := time.Now().Add(-time.Duration(lease) * time.Second)
 	var rows []model.PlatformInstance
@@ -278,7 +283,22 @@ func (m *Manager) aliveOthers(lease int) ([]model.PlatformInstance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读实例表失败: %w", err)
 	}
-	return rows, nil
+
+	out := make([]model.PlatformInstance, 0, len(rows))
+	for _, row := range rows {
+		if row.Hostname == m.self.Hostname && !processAlive(row.PID) {
+			log.Printf("[instance] 清掉一条僵尸记录：%s pid=%d 在本机已经不存在了"+
+				"（上次大概是被 kill -9 停的，没来得及注销）", row.ID[:8], row.PID)
+			if err := m.db.Delete(&model.PlatformInstance{}, "id = ?", row.ID).Error; err != nil {
+				// 删不掉就当它还活着：宁可这次起不来，也不要两个实例同时跑调度
+				log.Printf("[instance] 僵尸记录删除失败，按「还活着」处理: %v", err)
+				out = append(out, row)
+			}
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // SoleInstance 当前是不是唯一活着的实例。

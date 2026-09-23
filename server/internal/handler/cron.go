@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"ops-platform/server/internal/metrics"
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
@@ -266,6 +267,7 @@ func (h *Handler) ExecuteCronJob(job model.CronJob) {
 			"last_status": "failed", "last_run_at": &now,
 			"run_count": gorm.Expr("run_count + 1"),
 		})
+		metrics.MarkCronTrigger(metrics.Default(), "failed")
 		return
 	}
 	h.finishCronRun(&job, execJob)
@@ -280,6 +282,7 @@ func (h *Handler) finishCronRun(job *model.CronJob, execJob *model.ExecJob) {
 	case execJob.SuccessNum == 0:
 		status = "failed"
 	}
+	metrics.MarkCronTrigger(metrics.Default(), status)
 
 	now := time.Now()
 	err := h.DB.Model(&model.CronJob{ID: job.ID}).Updates(map[string]any{

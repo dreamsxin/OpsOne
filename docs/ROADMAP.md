@@ -166,7 +166,7 @@ OpsOne 的目标是把主机与资产、运维执行、容器、监控告警、�
 - [x] 备份与恢复 — `ops backup` / `ops restore` 子命令（SQLite `VACUUM INTO` + 录像 tar.gz、保留份数、`--env-file`），默认每天 03:00 自动备份且早于数据留存清理；备份前校验「这确实是 OpsOne 的库」，避免产出空快照
 - [x] 版本号 — `ops version` 与 `/healthz`、`/readyz` 都带构建版本（`make` 用 `git describe` 注入）
 - [~] 多实例 / 高可用 — **不是 HA**：前端流量不会自动切、终端与隧道不会迁移、SQLite 仍是单机文件。做到的是把「悄悄跑两遍」变成显式的：第二个实例**默认拒绝启动**并说清后果，`OPS_ALLOW_MULTI_INSTANCE=true` 才允许它以 **standby** 起来（**一个调度任务都不跑**）；leader 心跳过期时 standby **真的接管调度**（实测 kill -9 后一个租约周期内开始跑）。顺带修了两个并发老毛病：定时任务改成 `SkipIfStillRunning`（原来上一次没跑完下一次照样起，同一条命令会重复下发），`run_count` 改成 SQL 自增（原来是读值 +1 回写，并发触发互相覆盖）
-- [ ] 平台自身指标 — 不产出 Prometheus 指标、没有 pprof；自监控只有「平台健康」页，需要外部监控轮询 `/readyz`
+- [x] 平台自身指标 — `/metrics`（Prometheus 文本格式，**自己写的暴露层，零依赖**）+ `/debug/pprof`，两个都**默认不注册**，靠 `OPS_METRICS_TOKEN` 开；pprof 还要额外 `OPS_PPROF=true`（heap 是进程内存快照，里面有 SSH 私钥与主机口令）。指标按**路由模板**聚合而不是实际路径，避免基数爆炸
 - [ ] 结构化日志与轮转 — 只往 stdout/stderr 写，交给 journald / docker log driver
 - [x] 版本化迁移 — `schema_migrations` 表 + 有序步骤 + **降级拒绝启动** + 陈旧列报告 + `ops migrate status|up`；**没有 down/回滚**（SQLite 下自动生成的回滚往往是错的），回滚路径仍是 `ops restore`，所以升级流程强制「先备份」
 
@@ -1903,6 +1903,88 @@ standby 真的接管 —— 实测 `kill -9` 掉 leader 之后，standby 在一�
 
 **仍然没有的**：真正的 HA（要先把 SQLite 换掉，并把隧道/终端/ticket 挪到共享存储）、
 standby 主动把请求转给 leader、实例列表的页面（目前只在健康页给一条摘要）。
+
+
+## 已落地：平台自身指标与 pprof
+
+在这之前平台的自监控只有「平台健康」页 —— 一个要人点开才看得到的页面。
+外部监控能做的只有轮询 `/readyz`，也就是只能回答「进程还活着吗」，
+回答不了「接口是不是变慢了」「定时任务还在跑吗」「调度在哪个实例上」。
+
+### 自己写暴露层，不引 client_golang
+
+与「不引 client-go 手写 K8s 客户端」同一个口径：需要的只是**四类指标 + 一种文本格式**，
+而 client_golang 会带进 protobuf、expvar 桥接、进程/Go collector 一整套。
+`internal/metrics` 全部加起来两百多行，依赖是零。代价照实写在包注释里：
+没有 exemplar、没有 native histogram、不做多进程聚合（平台本来就单实例跑调度）。
+
+### 每个指标对着一个具体问题
+
+- 接口慢了/在报错：`opsone_http_requests_total`、`opsone_http_request_duration_seconds`
+- 定时任务还在跑吗：`opsone_fixed_task_last_run_timestamp_seconds`、`opsone_cron_triggers_total`
+- 调度在哪个进程上：`opsone_instance_leader`、`opsone_instances`
+- 告警积压：`opsone_alerts{status}`
+- 库会不会撑爆磁盘：`opsone_db_size_bytes`
+- 会话/隧道泄漏：`opsone_goroutines`、`opsone_active_sessions`、`opsone_forward_tunnels`
+
+两个刻意的取舍：
+
+- **`opsone_fixed_task_runs_total` 不带 result 标签**。这些内置任务没有结构化的成败，
+  只有一句给人看的描述（"共 3 个集群，健康 3 个" / "失败: ..."）。
+  按文本前缀猜出一个 ok/failed 会造出一个**看起来精确、实则不准**的指标。
+  真正该拿来告警的是那个时间戳：`time() - opsone_fixed_task_last_run_timestamp_seconds > 21600`
+  —— 任务悄悄不跑了是更常见也更危险的故障。
+- **gauge 取不到值时整族不输出**，不写 0。「库大小 0 字节」和「读不到库文件」
+  是两件完全不同的事，而 0 会被读成前者（有测试守这条）。
+
+### 基数：按路由模板，不按实际路径
+
+标签用 `c.FullPath()`（`/api/v1/hosts/:id`）而不是 `c.Request.URL.Path`（`/api/v1/hosts/17`）。
+用实际路径的话，每台主机、每条告警都会生成一组新时序，几天就能把抓取端的内存吃掉 ——
+Prometheus 最常见的一种自伤。没匹配到路由的请求（404、扫描器）统一记成 `unmatched`，同理。
+状态码只记族（2xx/4xx/5xx）：足够回答「在报错吗」，而完整状态码让时序数乘一个常数
+却几乎不增加信息。
+
+耗时直方图的上界给到 30 秒，因为平台里有几个**同步的长请求**（批量执行、
+真机防火墙对账、磁盘占用分析）；按默认的 10 秒收尾会让它们全挤进 `+Inf`，
+那个直方图就回答不了「是慢了还是挂了」。
+
+### 两个端点都默认不存在
+
+`OPS_METRICS_TOKEN` 为空时**连路由都不注册**，访问是 404 而不是 401 ——
+不告诉外面「这里有个被保护的端点」。pprof 还要额外 `OPS_PPROF=true`，
+而且没有令牌时即使开了也不注册（日志会说明为什么）。令牌用
+`subtle.ConstantTimeCompare` 比，支持 `Authorization: Bearer`（Prometheus 的
+`bearer_token` 直接可用）与 `?token=`（curl 手看一眼时方便）。
+pprof 只认白名单里的 profile 名，**不做通配转发** —— 通配会把 `cmdline`
+（进程启动参数，可能带令牌）也放出去。
+
+### 顺带修掉的一个真实踩坑
+
+这一轮里我自己踩了上一轮埋的雷：`Stop-Process -Force`（等于 kill -9）停掉后端，
+那个进程来不及注销实例记录，于是**一个租约周期内重启不了**。
+「杀掉再起」是开发与紧急重启时最常见的动作，45 秒起不来是不可接受的。
+修法不是放宽租约，而是加一条**真实的存活判断**：同一台机器上的记录，
+如果那个 PID 的进程已经不在了，就认定它是僵尸记录并删掉
+（Windows 用 `os.FindProcess`，Unix 用 0 号信号，两个 build tag 文件）。
+跨主机不做这个判断 —— 没法知道对面那台机器上的进程还在不在，那种情况只能等租约。
+删不掉的时候按「还活着」处理：宁可这次起不来，也不要两个实例同时跑调度。
+
+**验证**：metrics 包 8 条（累加、未登记指标不 panic、桶是累积且边界值归本桶、
+标签转义不能双重转义、取不到的 gauge 整族不输出、输出顺序稳定、
+中间件按模板聚合且实际路径不出现在标签里、重复 Install 幂等）、
+handler 侧 3 条（没令牌时 404 而不是 401、错令牌与令牌前缀都拒、
+pprof 白名单外的 cmdline 404 且无令牌 401）。真后端跑通：
+`/metrics` 无令牌 401、带令牌输出全部指标族（`opsone_instance_leader{instance="1f29e8a9"} 1`、
+`scheduler_entries{kind="fixed"} 19`、`db_size_bytes 1.88e+06`、
+`http_requests_total{route="/healthz"} 3` 与 `{route="/api/v1/auth/login",status="4xx"} 1`）、
+`pprof/heap` 200 且 9KB、`pprof/cmdline` 404、无令牌 401。
+全量 `go test` / `go vet` / `gofmt` 干净。
+
+**仍然没有的**：SSH 建连与批量执行的逐台成败指标（那要在执行链路里埋点，
+埋不好会把敏感的主机标签带进时序）、告警规则评估耗时、
+Grafana 面板 JSON（做了也没法保证跟得上指标改动）。
+
 
 
 

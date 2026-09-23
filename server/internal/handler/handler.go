@@ -11,6 +11,7 @@ import (
 	"ops-platform/server/internal/config"
 	"ops-platform/server/internal/cryptox"
 	"ops-platform/server/internal/instance"
+	"ops-platform/server/internal/metrics"
 	"ops-platform/server/internal/scheduler"
 )
 
@@ -68,9 +69,23 @@ func New(g *gorm.DB, cfg *config.Config) *Handler {
 // markFixedRun 记录一次内置定时任务的运行结果
 func (h *Handler) markFixedRun(key, info string) {
 	h.fixedRunMu.Lock()
-	defer h.fixedRunMu.Unlock()
 	h.fixedRunAt[key] = time.Now()
 	h.fixedRunInfo[key] = info
+	h.fixedRunMu.Unlock()
+	// 这里是所有内置任务的唯一汇合点，指标打在这儿就漏不掉
+	metrics.MarkFixedTask(metrics.Default(), key)
+}
+
+// fixedRunSnapshot 已经跑过的内置任务及其最近运行时间，给指标用。
+// 只含**本进程启动后**跑过的 —— 这些任务不落库，重启后就归零，与健康页同一个口径
+func (h *Handler) fixedRunSnapshot() map[string]time.Time {
+	h.fixedRunMu.RLock()
+	defer h.fixedRunMu.RUnlock()
+	out := make(map[string]time.Time, len(h.fixedRunAt))
+	for key, at := range h.fixedRunAt {
+		out[key] = at
+	}
+	return out
 }
 
 func (h *Handler) lastFixedRun(key string) (time.Time, string) {
