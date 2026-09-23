@@ -18,6 +18,69 @@ import (
 // 避免一次下发几百台把本机文件描述符打满
 const defaultExecConcurrency = 10
 
+// execOverallCap 一次下发的整体上限。
+//
+// 原来手动下发**没有整体超时**：只有单台超时，而整体墙钟是
+// `ceil(台数/并发) × 单台超时`。200 台 × 600 秒最坏能让一个同步 HTTP 请求挂三小时，
+// 中间任何反向代理的 proxy_read_timeout 都会先断，而作业还在跑 ——
+// 表现是「页面报错了但命令其实执行了」，这是最糟的一种不确定。
+// 现在按台数算出预期上限并卡在 1 小时：超了就按超时收尾，记录写 canceled 而不是 finished。
+const execOverallCap = time.Hour
+
+// execCancelRegistry 正在跑的作业 → 取消函数。
+//
+// 以前没有「停止这次下发」：唯一的中断方式是关浏览器（请求 ctx 被取消），
+// 而那样别人看到「有人往生产刷了个错命令」时束手无策，记录里也照样写成 finished。
+type execCancelRegistry struct {
+	mu    sync.Mutex
+	items map[uint]context.CancelFunc
+}
+
+func newExecCancelRegistry() *execCancelRegistry {
+	return &execCancelRegistry{items: map[uint]context.CancelFunc{}}
+}
+
+func (r *execCancelRegistry) add(jobID uint, cancel context.CancelFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.items[jobID] = cancel
+}
+
+func (r *execCancelRegistry) remove(jobID uint) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.items, jobID)
+}
+
+// cancel 取消指定作业。返回 false 表示这个作业不在本进程里跑
+// （已经结束，或者是另一个实例发起的 —— 取消是进程内的，这一点写在页面上）
+func (r *execCancelRegistry) cancel(jobID uint) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cancel, ok := r.items[jobID]
+	if !ok {
+		return false
+	}
+	cancel()
+	delete(r.items, jobID)
+	return true
+}
+
+// overallTimeout 按台数与并发度推出整体上限
+func (h *Handler) overallTimeout(hostCount, perHost int) time.Duration {
+	concurrency := h.configInt(CfgExecConcurr, defaultExecConcurrency)
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	rounds := (hostCount + concurrency - 1) / concurrency
+	// +60 秒给建连、落库这些固定开销留余量
+	total := time.Duration(rounds*perHost+60) * time.Second
+	if total > execOverallCap {
+		return execOverallCap
+	}
+	return total
+}
+
 // ExecRequest 一次批量执行的入参，手动下发与定时任务共用
 type ExecRequest struct {
 	Name      string
@@ -77,6 +140,7 @@ func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJ
 		Source: source, CronJobID: req.CronJobID,
 		CreatedBy: req.UserID, Operator: req.Operator,
 		Total: len(hosts), StartedAt: time.Now(),
+		TargetIDs:  uintsJSON(req.HostIDs),
 		RiskStatus: decision.Status, RiskHits: hitsJSON(decision.Hits),
 		ProdCount: len(decision.ProdHosts), ProdConfirmed: req.ConfirmProd,
 	}
@@ -84,7 +148,13 @@ func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJ
 		return nil, err
 	}
 
-	results := h.fanOut(ctx, hosts, req.Command, timeout, job.ID)
+	// 整体超时 + 可取消：两者共用一个 ctx，取消注册表让别人也能停掉这次下发
+	runCtx, cancel := context.WithTimeout(ctx, h.overallTimeout(len(hosts), timeout))
+	defer cancel()
+	h.execCancels.add(job.ID, cancel)
+	defer h.execCancels.remove(job.ID)
+
+	results := h.fanOut(runCtx, hosts, req.Command, timeout, job.ID)
 	for _, r := range results {
 		if r.Status == "success" {
 			job.SuccessNum++
@@ -96,7 +166,15 @@ func (h *Handler) RunOnHosts(ctx context.Context, req ExecRequest) (*model.ExecJ
 	finished := time.Now()
 	job.FinishedAt = &finished
 	job.Status = "finished"
-	h.DB.Model(&job).Select("status", "success_num", "failed_num", "finished_at").Updates(job)
+	// 被取消或整体超时的作业不能写成 finished —— 那会让「这次是被打断的」
+	// 在记录上完全看不出来，而后面有人按这条记录判断「命令已经全部执行过」
+	if runCtx.Err() != nil {
+		job.Status = "canceled"
+		if job.CanceledBy == "" {
+			job.CanceledBy = "整体超时或被中断"
+		}
+	}
+	h.DB.Model(&job).Select("status", "success_num", "failed_num", "finished_at", "canceled_by").Updates(job)
 
 	if len(results) > 0 {
 		h.DB.Create(&results)
@@ -127,6 +205,10 @@ func (h *Handler) RunExecJob(c *gin.Context) {
 	allowed := h.filterVisibleHostIDs(user, req.HostIDs)
 	if len(allowed) == 0 {
 		response.Forbidden(c, "目标主机不在你的数据权限范围内")
+		return
+	}
+	// 生产主机要单独的权限码：原来只靠前端回传的 confirmProd，直接调接口就能绕过
+	if !h.ensureProdPerm(c, allowed) {
 		return
 	}
 

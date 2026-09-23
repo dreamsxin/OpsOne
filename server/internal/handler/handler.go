@@ -26,6 +26,10 @@ type Handler struct {
 	// 单元测试里是 nil —— 平台健康页要按 nil 处理，不能因此 panic
 	Instance *instance.Manager
 
+	// execCancels 正在跑的批量下发 → 取消函数，供「停止这次下发」用。
+	// 进程内的，所以多实例时取消不了别人发起的作业（接口会如实说明）
+	execCancels *execCancelRegistry
+
 	// StartedAt 进程启动时间，平台健康页展示运行时长
 	StartedAt time.Time
 
@@ -62,6 +66,7 @@ func New(g *gorm.DB, cfg *config.Config) *Handler {
 		forwards:     newForwardRegistry(),
 		terminals:    newTerminalRegistry(),
 		imLogins:     newImLoginStore(),
+		execCancels:  newExecCancelRegistry(),
 		Crypto:       cryptox.New(secretKey),
 	}
 }

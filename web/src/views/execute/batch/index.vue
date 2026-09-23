@@ -3,12 +3,16 @@ import { onActivated, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  cancelExecJob,
   listExecJobs,
   listHosts,
   precheckExec,
+  rerunFailedExecJob,
+  resolveExecHosts,
   runExecJob,
   type ExecJob,
   type ExecPrecheckResult,
+  type ExecResolveResult,
   type Host
 } from '@/api'
 import Pagination from '@/components/Pagination.vue'
@@ -22,8 +26,16 @@ const current = ref<ExecJob | null>(null)
 const detailVisible = ref(false)
 const precheck = ref<ExecPrecheckResult | null>(null)
 
+// 按条件选主机：原来只能在一个拉了前 200 台、不带筛选的下拉里勾，
+// 第 201 台主机根本选不到，也没法按标签选
+const selectVisible = ref(false)
+const selecting = ref(false)
+const selectForm = reactive({ keyword: '', env: '', tags: '' })
+const resolved = ref<ExecResolveResult | null>(null)
+
 const form = reactive({ name: '', command: '', hostIds: [] as number[], timeout: 60 })
 const jobQuery = reactive({ page: 1, pageSize: 10 })
+
 
 const route = useRoute()
 // 剧本的「去执行这一步」会带 ?command=&name=&hosts= 跳进来。本页会被页签缓存，
@@ -123,6 +135,71 @@ function openDetail(job: ExecJob) {
   detailVisible.value = true
 }
 
+async function doResolve() {
+  selecting.value = true
+  try {
+    resolved.value = await resolveExecHosts({
+      keyword: selectForm.keyword || undefined,
+      env: selectForm.env || undefined,
+      tags: selectForm.tags
+        .split(/[,，\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+    })
+  } finally {
+    selecting.value = false
+  }
+}
+
+function applyResolved() {
+  if (!resolved.value?.hostIds.length) {
+    ElMessage.warning('没有可执行的主机')
+    return
+  }
+  form.hostIds = [...resolved.value.hostIds]
+  // 把选中的主机并进下拉的候选里，否则回到表单会显示成一串 ID
+  const known = new Set(hosts.value.map((x) => x.id))
+  for (const item of resolved.value.hosts) {
+    if (!known.has(item.id)) {
+      hosts.value.push(item as unknown as Host)
+    }
+  }
+  selectVisible.value = false
+  precheck.value = null
+  ElMessage.success(`已选中 ${form.hostIds.length} 台（按条件匹配 ${resolved.value.matched} 台）`)
+}
+
+async function rerunFailed(job: ExecJob) {
+  await ElMessageBox.confirm(
+    `只对这次失败的主机重跑同一条命令（成功的机器不会再执行一次）。确认继续？`,
+    `重跑失败主机 #${job.id}`,
+    { type: 'warning' }
+  )
+  running.value = true
+  try {
+    const result = await rerunFailedExecJob(job.id)
+    current.value = result.job
+    detailVisible.value = true
+    ElMessage.success(`已重跑 ${result.reran} 台，跳过 ${result.skipped} 台（权限已变化）`)
+    loadJobs()
+  } finally {
+    running.value = false
+  }
+}
+
+async function cancelJob(job: ExecJob) {
+  await ElMessageBox.confirm(
+    '会向已经在跑的主机发出 SIGKILL 尝试，但**远端进程不保证被杀掉**' +
+      '（无 PTY 会话的信号转发不可靠，nohup / & / 已 fork 的子进程不受影响）。确认停止？',
+    `停止下发 #${job.id}`,
+    { type: 'warning' }
+  )
+  const result = await cancelExecJob(job.id)
+  ElMessage.warning(result.note)
+  loadJobs()
+}
+
+
 const statusType: Record<string, 'success' | 'danger' | 'warning'> = {
   success: 'success',
   failed: 'danger',
@@ -157,6 +234,12 @@ onActivated(() => {
                   :value="host.id"
                 />
               </el-select>
+              <div style="margin-top: 6px">
+                <el-button size="small" @click="selectVisible = true">按条件选主机</el-button>
+                <span style="margin-left: 8px; color: #909399; font-size: 12px">
+                  已选 {{ form.hostIds.length }} 台；下拉只加载了前 200 台，多于这个数请用条件选
+                </span>
+              </div>
             </el-form-item>
             <el-form-item label="超时(秒)">
               <el-input-number v-model="form.timeout" :min="5" :max="600" />
@@ -214,9 +297,27 @@ onActivated(() => {
               </template>
             </el-table-column>
             <el-table-column prop="startedAt" label="开始时间" min-width="170" />
-            <el-table-column label="操作" width="80" fixed="right">
+            <el-table-column label="操作" width="190" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  v-perm="'exec:run'"
+                  link
+                  type="danger"
+                  @click="cancelJob(row)"
+                >
+                  停止
+                </el-button>
+                <el-button
+                  v-if="row.failedNum > 0 && row.status !== 'running'"
+                  v-perm="'exec:run'"
+                  link
+                  type="warning"
+                  @click="rerunFailed(row)"
+                >
+                  重跑失败 {{ row.failedNum }} 台
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -251,6 +352,59 @@ onActivated(() => {
       </el-collapse>
       <el-empty v-else description="暂无结果明细，可从历史列表进入查看" />
     </el-drawer>
+
+    <el-dialog v-model="selectVisible" title="按条件选主机" width="720px">
+      <el-alert type="info" :closable="false" style="margin-bottom: 10px">
+        <template #title>
+          标签是<strong>全部命中</strong>而不是任一命中——放大范围的方向正好是危险的那一侧。
+          结果已按数据范围与资源授权过滤，「不可执行」的主机会列出来但不进下发清单
+          （否则「我明明选了 20 台怎么只跑了 12 台」没法解释）。
+        </template>
+      </el-alert>
+      <div class="page-toolbar" style="flex-wrap: wrap; gap: 8px">
+        <el-input v-model="selectForm.keyword" placeholder="名称 / 地址 / 标签" style="width: 200px" />
+        <el-select v-model="selectForm.env" clearable placeholder="环境" style="width: 120px">
+          <el-option value="prod" label="prod" />
+          <el-option value="stage" label="stage" />
+          <el-option value="test" label="test" />
+          <el-option value="dev" label="dev" />
+        </el-select>
+        <el-input v-model="selectForm.tags" placeholder="标签，逗号分隔（全部命中）" style="width: 220px" />
+        <el-button type="primary" :loading="selecting" @click="doResolve">匹配</el-button>
+      </div>
+
+      <template v-if="resolved">
+        <div style="margin: 8px 0">
+          匹配 <strong>{{ resolved.matched }}</strong> 台，其中可执行
+          <strong>{{ resolved.usable }}</strong> 台，生产
+          <el-tag v-if="resolved.prod > 0" type="danger" size="small">{{ resolved.prod }}</el-tag>
+          <span v-else>0</span>
+        </div>
+        <el-table :data="resolved.hosts" border stripe size="small" max-height="320">
+          <el-table-column prop="name" label="主机" min-width="140" />
+          <el-table-column prop="address" label="地址" width="140" />
+          <el-table-column prop="env" label="环境" width="80" />
+          <el-table-column prop="tags" label="标签" min-width="120" show-overflow-tooltip />
+          <el-table-column label="可执行" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.canExec ? 'success' : 'info'" size="small">
+                {{ row.canExec ? '可' : '未授权' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <ul style="margin-top: 8px; color: #909399; font-size: 12px; line-height: 1.7">
+          <li v-for="(note, idx) in resolved.notes" :key="idx">{{ note }}</li>
+        </ul>
+      </template>
+
+      <template #footer>
+        <el-button @click="selectVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!resolved?.usable" @click="applyResolved">
+          选中这 {{ resolved?.usable ?? 0 }} 台
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 

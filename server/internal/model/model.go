@@ -611,6 +611,16 @@ type ExecJob struct {
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt"`
 
+	// TargetIDs 本次下发提交的目标主机 ID（JSON 数组）。
+	//
+	// 以前不存，作业目标只能从 ExecResult 行反推 —— 那有两个问题：
+	// 主机被删掉后那台就彻底不在记录里；而「提交了 100 台、只查到 98 台」
+	// 这种差异也看不出来（Total 记的是查到的台数，不是提交的台数）。
+	TargetIDs string `gorm:"type:text" json:"targetIds"`
+	// CanceledBy 被谁取消的。非空表示这次下发是人为中断的 ——
+	// 以前中断（关浏览器）之后记录照样写成 finished，看不出发生过什么
+	CanceledBy string `gorm:"size:64" json:"canceledBy"`
+
 	// 下发闸门的判定结果（见 handler/exec_guard.go）
 	RiskStatus    string `gorm:"size:16" json:"riskStatus"` // pass | warn（blocked 不会产生作业）
 	RiskHits      string `gorm:"type:text" json:"riskHits"` // 命中的命令规则 JSON

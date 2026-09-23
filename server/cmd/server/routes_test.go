@@ -249,6 +249,10 @@ var routeLine = regexp.MustCompile(`^\s+auth\.(GET|POST|PUT|DELETE|PATCH)\("([^"
 //
 // 用扫源码而不是遍历 gin 的路由树，是因为路由树上拿不到「这条路由挂了哪个中间件」——
 // gin 把中间件合并进 HandlersChain 之后只剩函数指针，认不出是哪个权限码。
+//
+// 另外会拒绝「注释后面出现路由注册」的行。这一条是踩出来的：
+// 用脚本插入路由时换行没生效，三条路由全落到了一行注释后面 ——
+// **编译能过、这条测试当时也过了，但接口在运行时是 404**。
 func TestEveryAuthRouteIsGatedOrExempted(t *testing.T) {
 	raw, err := os.ReadFile("main.go")
 	if err != nil {
@@ -266,7 +270,16 @@ func TestEveryAuthRouteIsGatedOrExempted(t *testing.T) {
 
 	seen := make(map[string]bool, len(allowed))
 	var gated, exempted int
-	for _, line := range strings.Split(string(raw), "\n") {
+	for lineNo, line := range strings.Split(string(raw), "\n") {
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			for _, verb := range []string{"auth.GET(", "auth.POST(", "auth.PUT(", "auth.DELETE("} {
+				if strings.Contains(line[idx:], verb) {
+					t.Errorf("main.go:%d 注释后面出现了路由注册，这条路由实际不会生效：\n\t%s",
+						lineNo+1, strings.TrimSpace(line))
+					break
+				}
+			}
+		}
 		m := routeLine.FindStringSubmatch(line)
 		if m == nil {
 			continue

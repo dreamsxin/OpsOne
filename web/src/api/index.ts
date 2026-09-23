@@ -698,6 +698,52 @@ export const listExecJobs = (params: Record<string, any>) =>
   request<PageData<ExecJob>>({ url: '/exec/jobs', params })
 export const getExecJob = (id: number) => request<ExecJob>({ url: `/exec/jobs/${id}` })
 
+/* ---------- 按条件选主机 / 重跑失败 / 取消下发 ---------- */
+
+export interface ExecResolvedHost {
+  id: number
+  name: string
+  address: string
+  env: string
+  status: string
+  tags: string
+  /** false 表示可见但未授权执行，不会进入下发清单 */
+  canExec: boolean
+}
+
+export interface ExecResolveResult {
+  hostIds: number[]
+  hosts: ExecResolvedHost[]
+  /** 条件匹配到的台数 */
+  matched: number
+  /** 其中真正可执行的台数 */
+  usable: number
+  /** 其中生产主机台数 */
+  prod: number
+  notes: string[]
+}
+
+export const resolveExecHosts = (data: {
+  keyword?: string
+  env?: string
+  status?: string
+  deptId?: number
+  tags?: string[]
+}) => request<ExecResolveResult>({ url: '/exec/resolve-hosts', method: 'POST', data })
+
+export const rerunFailedExecJob = (id: number) =>
+  request<{ job: ExecJob; reran: number; skipped: number; note: string }>({
+    url: `/exec/jobs/${id}/rerun-failed`,
+    method: 'POST'
+  })
+
+export const cancelExecJob = (id: number) =>
+  request<{ canceled: boolean; note: string }>({
+    url: `/exec/jobs/${id}/cancel`,
+    method: 'POST'
+  })
+
+
 // ---------- 下发闸门（命令规则 + 生产确认） ----------
 
 export interface ExecPrecheckHit {

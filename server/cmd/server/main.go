@@ -820,6 +820,12 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/exec/jobs", middleware.RequirePerm("exec:run"), h.RunExecJob)
 		// 下发闸门：预检与拦截流水
 		auth.POST("/exec/precheck", middleware.RequirePerm("exec:run"), h.PrecheckExec)
+		// 按条件选主机：原来只能勾 ID 列表，而且前端硬上限 200 台
+		auth.POST("/exec/resolve-hosts", middleware.RequirePerm("exec:run"), h.ResolveExecHosts)
+		// 只重跑上次失败的主机（成功的不再执行一次 —— 很多运维命令不是幂等的）
+		auth.POST("/exec/jobs/:id/rerun-failed", middleware.RequirePerm("exec:run"), h.RerunFailedExecJob)
+		// 停掉正在跑的下发。取消是进程内的，接口会如实说明
+		auth.POST("/exec/jobs/:id/cancel", middleware.RequirePerm("exec:run"), h.CancelExecJob)
 		auth.GET("/exec/guard-logs", middleware.RequirePerm("audit:view"), h.ListExecGuardLogs)
 
 		auth.GET("/sessions", middleware.RequirePerm("session:view"), h.ListSessions)
