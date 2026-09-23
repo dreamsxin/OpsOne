@@ -25,11 +25,32 @@ type Scheduler struct {
 
 func New(db *gorm.DB, run RunFunc) *Scheduler {
 	return &Scheduler{
-		db:      db,
-		cron:    cron.New(),
+		db: db,
+		// SkipIfStillRunning：上一次还没跑完就跳过这一次，而不是再起一个 goroutine。
+		//
+		// robfig/cron 的默认行为是每次触发都新开 goroutine。一条 `* * * * *` 的任务
+		// 如果实际要跑 5 分钟，就会有 5 份叠着跑 —— 表现是同一条命令在目标机器上
+		// 被重复下发，而 `run_count` 还会互相覆盖。
+		// 跳过是这两种错法里明显更安全的那个：漏跑一次下一分钟还有机会，
+		// 重复下发一条命令可能已经把事情做坏了。跳过会打一行日志，不是静默的。
+		cron:    cron.New(cron.WithChain(cron.SkipIfStillRunning(cronLogger{}))),
 		run:     run,
 		entries: make(map[uint]cron.EntryID),
 	}
+}
+
+// cronLogger 把 cron 库内部的日志接到标准 log 上。
+//
+// 只实现它要的两个方法；主要是为了让 SkipIfStillRunning 的「跳过」被记下来 ——
+// 一次静默的跳过和一次没触发看起来是一样的。
+type cronLogger struct{}
+
+func (cronLogger) Info(msg string, keysAndValues ...any) {
+	log.Printf("[scheduler] %s %v", msg, keysAndValues)
+}
+
+func (cronLogger) Error(err error, msg string, keysAndValues ...any) {
+	log.Printf("[scheduler] %s: %v %v", msg, err, keysAndValues)
 }
 
 // Start 载入所有启用中的任务并开始调度

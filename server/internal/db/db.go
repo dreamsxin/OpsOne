@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -20,7 +21,20 @@ func Open(dsn string, debug bool) (*gorm.DB, error) {
 	if debug {
 		level = logger.Info
 	}
-	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(level)})
+	g, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(level)})
+	if err != nil {
+		return nil, err
+	}
+	// busy_timeout：写锁被占时等一会儿再报错，而不是立刻 `database is locked`。
+	//
+	// SQLite 同一时刻只允许一个写者。平台自己就有二十来个定时任务在并发写，
+	// 再加上升级时可能短暂双开（OPS_ALLOW_MULTI_INSTANCE），默认的「立刻失败」
+	// 会表现成随机的接口 500 —— 而重试一下就能成功。5 秒是个保守值：
+	// 真有一个写事务卡住超过 5 秒，那是另一个问题，不该靠无限等待掩盖。
+	if err := g.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		return nil, fmt.Errorf("设置 busy_timeout 失败: %w", err)
+	}
+	return g, nil
 }
 
 // Models 平台自身的全部表。
@@ -78,6 +92,7 @@ func Models() []any {
 		&model.Signature{},
 		&model.SecurityEvent{}, &model.SecurityEventLog{}, &model.SecurityEventMute{},
 		&model.SchemaMigration{},
+		&model.PlatformInstance{},
 	}
 }
 

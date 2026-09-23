@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
@@ -260,7 +261,10 @@ func (h *Handler) ExecuteCronJob(job model.CronJob) {
 		log.Printf("[scheduler] 任务 %d(%s) 执行失败: %v", job.ID, job.Name, err)
 		now := time.Now()
 		h.DB.Model(&model.CronJob{ID: job.ID}).Updates(map[string]any{
-			"last_status": "failed", "last_run_at": &now, "run_count": job.RunCount + 1,
+			// run_count 用 SQL 自增而不是「读到的值 +1」：后者在并发触发
+			// （或者手动「立即执行」与调度撞上）时会互相覆盖，计数越跑越少
+			"last_status": "failed", "last_run_at": &now,
+			"run_count": gorm.Expr("run_count + 1"),
 		})
 		return
 	}
@@ -282,7 +286,7 @@ func (h *Handler) finishCronRun(job *model.CronJob, execJob *model.ExecJob) {
 		"last_status": status,
 		"last_run_at": &now,
 		"last_job_id": execJob.ID,
-		"run_count":   job.RunCount + 1,
+		"run_count":   gorm.Expr("run_count + 1"),
 	}).Error
 	if err != nil {
 		log.Printf("[scheduler] 任务 %d 状态回写失败: %v", job.ID, err)

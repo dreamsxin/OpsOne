@@ -10,6 +10,7 @@ import (
 
 	"ops-platform/server/internal/config"
 	"ops-platform/server/internal/cryptox"
+	"ops-platform/server/internal/instance"
 	"ops-platform/server/internal/scheduler"
 )
 
@@ -19,6 +20,10 @@ type Handler struct {
 	Cfg *config.Config
 	// Sched 定时任务调度器，由 main 在构造后注入（调度回调需要 Handler 自身）
 	Sched *scheduler.Scheduler
+
+	// Instance 本进程在实例表里的那一行，由 main 注入。
+	// 单元测试里是 nil —— 平台健康页要按 nil 处理，不能因此 panic
+	Instance *instance.Manager
 
 	// StartedAt 进程启动时间，平台健康页展示运行时长
 	StartedAt time.Time

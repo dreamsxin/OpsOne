@@ -22,6 +22,7 @@ import (
 	"ops-platform/server/internal/config"
 	"ops-platform/server/internal/db"
 	"ops-platform/server/internal/handler"
+	"ops-platform/server/internal/instance"
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
@@ -69,15 +70,32 @@ func main() {
 		log.Fatalf("初始化数据失败: %v", err)
 	}
 
+	// 实例登记必须在任何「假设自己是唯一实例」的收尾动作之前：
+	// ResetForwards / FinishShutdown 会把库里「运行中」的隧道与会话标成已结束，
+	// 而那些可能正属于另一个活着的实例
+	inst, err := instance.Claim(gormDB, instance.Options{
+		Addr: cfg.Addr, Version: version,
+		AllowMulti: cfg.AllowMultiInstance, LeaseSeconds: cfg.InstanceLeaseSec,
+	})
+	if err != nil {
+		log.Fatalf("实例登记失败: %v", err)
+	}
+
 	h := handler.New(gormDB, cfg)
+	h.Instance = inst
 	// 库里有密文但进程没密钥时提前喊一声，别等到有人点「连接主机」才发现
 	h.WarnSealedWithoutKey()
 	// 内置剧本是 db 层种的，那里拿不到命令规则预检；进程起来补一次
 	h.PrecheckPendingRunbooks()
-	// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
-	h.ResetForwards()
-	// 同理：上一轮没来得及收尾的会话不该一直显示「进行中」
-	h.FinishShutdown("平台重启，会话已随进程结束")
+	if inst.SoleInstance() {
+		// 上一轮进程的转发隧道已经随进程消失，档案里别继续写「运行中」
+		h.ResetForwards()
+		// 同理：上一轮没来得及收尾的会话不该一直显示「进行中」
+		h.FinishShutdown("平台重启，会话已随进程结束")
+	} else {
+		log.Printf("[instance] 还有别的实例活着，跳过「把运行中的隧道与会话标成已结束」——" +
+			"那些记录可能正属于对方")
+	}
 
 	sched := scheduler.New(gormDB, h.ExecuteCronJob)
 	h.Sched = sched
@@ -247,9 +265,24 @@ func main() {
 	} else {
 		log.Println("[backup] 自动备份未启用（OPS_BACKUP_SPEC 为空），只能手动执行 `ops backup`")
 	}
-	if err := sched.Start(); err != nil {
-		log.Fatalf("定时任务加载失败: %v", err)
+	// 只有 leader 跑调度。standby 上面那二十来个 AddFixed 已经注册进 cron 对象了，
+	// 但 cron 没有 Start 就一个都不会触发 —— 接管时直接 Start 即可。
+	if inst.Role() == instance.RoleLeader {
+		if err := sched.Start(); err != nil {
+			log.Fatalf("定时任务加载失败: %v", err)
+		}
+	} else {
+		log.Printf("[instance] standby：定时任务**一个都不跑**（含 %d 个内置固定任务）。"+
+			"leader 心跳过期时会自动接管", func() int { _, fixed, _ := sched.Stats(); return fixed }())
 	}
+	// 心跳，并在接过 leader 时把调度起起来
+	inst.Start(func() {
+		if err := sched.Start(); err != nil {
+			log.Printf("[instance] 接管后启动调度失败: %v", err)
+			return
+		}
+		log.Printf("[instance] 接管完成，定时任务已在本实例开始调度")
+	})
 
 	// 启动时按配置清理过期录像
 	h.CleanupRecordings()
@@ -281,13 +314,15 @@ func main() {
 	// 最后等在跑的普通请求（批量执行是同步请求）结束。
 	sched.Stop()
 	h.Shutdown("平台正在停机，连接已断开")
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutSec)*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("[shutdown] HTTP 服务未能在超时内停完: %v", err)
 	}
 	h.FinishShutdown("平台停机，会话已结束")
+	// 注销实例：必须在关库之前。留着那行的话，下次启动会被自己的上一条记录挡住，
+	// 而「重启失败，说已经有实例在跑」是最让人恼火的一类故障
+	inst.Release()
 	if sqlDB, err := gormDB.DB(); err == nil {
 		if err := sqlDB.Close(); err != nil {
 			log.Printf("[shutdown] 关闭数据库失败: %v", err)

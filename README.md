@@ -201,6 +201,8 @@ Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 - SIGTERM 会走**优雅退出**：停调度 → 通知并断开 Web 终端 → 关闭转发隧道并落库 → 等在跑的请求收尾 → 收尾会话状态
 - 自带**备份与恢复**：`ops backup` / `ops restore`（SQLite `VACUUM INTO` 快照 + 录像 tar.gz），默认每天 03:00 自动备份并早于数据留存清理
 - **版本化迁移**：`AutoMigrate` 负责加表加列，另有一套**有序的版本化步骤**负责改列与数据回填，已应用的记在 `schema_migrations` 表里，`ops migrate status` 能看到跑过哪些、各花了多久、哪个版本的程序跑的。三条关键行为：**用旧二进制起新库直接拒绝启动**（以前是看着正常、等到访问新字段才崩）；**新装库把步骤记为 baseline 而不执行**（空表上跑回填毫无意义，而且「跑过」和「新库跳过」在排查时不是一回事）；**AutoMigrate 留下的陈旧列只报告不自动删**，`ops migrate status` 打印可执行的 `DROP COLUMN` 让人备份后自己决定。**没有 down/回滚**——SQLite 下自动生成的回滚往往是错的，一个能跑但把数据弄坏的回滚比没有回滚更危险，所以回滚路径是 `ops restore`，升级流程里「先备份」不是建议而是前提
+- **实例互斥与调度选主**：在这之前平台**不知道自己有没有被开两份**，而开两份的后果是 20 个内置任务与全部用户定时任务各跑两遍——用户定时任务是在生产机器上执行命令，跑两遍是真事故。现在第二个实例**默认拒绝启动**并在日志里列出对方的主机名/PID/版本/心跳与三条后果；`OPS_ALLOW_MULTI_INSTANCE=true` 才允许它以 **standby** 起来（照常提供 HTTP，但**一个调度任务都不注册**），leader 心跳过期时 standby **真的接管调度**。**这不是 HA**：流量不会自动切、终端与隧道不会迁移、SQLite 仍是单机文件。顺带修了两个并发老毛病：定时任务改成上一次没跑完就跳过这一次（原来会叠着跑，同一条命令重复下发），`run_count` 改成 SQL 自增（原来读值 +1 回写会互相覆盖）；另外给 SQLite 设了 `busy_timeout`，写锁被占时等一会儿而不是立刻 `database is locked`
+
 
 - 交付物：`Dockerfile`、`docker-compose.yml`、`deploy/opsone.service`、`deploy/nginx.conf.example`、`deploy/opsone.env.example`、`Makefile`
 
@@ -220,6 +222,8 @@ Windows PowerShell 下设置环境变量用 `$env:OPS_JWT_SECRET="..."`。
 - `OPS_RECORD_DIR` — 会话录像目录，默认 `recordings`
 - `OPS_SHUTDOWN_TIMEOUT_SEC` — 优雅退出等待上限，默认 30；批量执行是同步请求，给小了会把作业截断
 - `OPS_SSH_STRICT_HOST_KEY` — 是否校验 SSH 主机指纹，默认 `false`；置 `true` 后首次连接记录指纹（TOFU），之后指纹变化即拒绝
+- `OPS_ALLOW_MULTI_INSTANCE` — 是否允许同一个库上再起一个实例，默认 `false`（第二个实例**拒绝启动**并打出原因）。置 `true` 时第二个实例以 standby 起来，**不跑任何定时任务**
+- `OPS_INSTANCE_LEASE_SEC` — 实例心跳租约秒数，默认 45（允许 15-600）；超过这个时间没更新心跳就认为那个实例死了，standby 会接管调度。给太小会把一次 GC 停顿误判成宕机
 - `OPS_SECRET_KEY` — 凭据字段的加密密钥（任意长度口令，内部派生 256 位），覆盖凭证库、主机凭据、kubeconfig、数据库口令与各类对外系统密钥（含 SMTP 口令）。**默认值是演示密钥 `demo`**，所以默认就是加密的、带演示数据的库文件开箱可用；`demo` 写在仓库里等于公开，**prod 模式下带着它启动会被直接拒绝**。要明文落库（被支持的选择）设 `OPS_SECRET_KEY=off`（也接受 none / plain / disabled），界面会标成「不加密存储」。换密钥或退回明文走「凭证库 → 密钥加密体检 → 更换密钥 / 取消加密」（先整库备份再逐行重写，并要求你把这个环境变量同步改掉），不要直接改这个变量
 - `OPS_AWARENESS_SPEC` — 安全意识逾期提醒的 cron 表达式，默认 `0 9 * * *`；置空则逾期未完成的必修项不会自动催办（功能仍可用，只是靠人去翻完成率）
 - `OPS_VAULT_SPEC` — 密码库口令轮换逾期检查的 cron 表达式，默认 `30 9 * * *`；置空则设了轮换周期的口令逾期也不会有人被提醒，那个周期就只是一行说明文字。只读本地库，一天一次够了；没设周期的条目本来就不参与
@@ -272,7 +276,9 @@ server/
   internal/config/     环境变量配置
   internal/dnsx/       DNS 解析封装（带超时、可指定 DNS 服务器，仅标准库）
   internal/db/         建表与种子数据（菜单、角色、内置规则）
+  internal/instance/    实例登记、心跳与调度选主（第二个实例默认拒绝启动）
   internal/migrate/    版本化迁移（schema_migrations、降级拒绝、陈旧列报告）
+
 
   internal/handler/    HTTP 处理器
   internal/middleware/ 认证、权限、审计

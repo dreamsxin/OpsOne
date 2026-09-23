@@ -72,6 +72,20 @@ type Config struct {
 	// 之后指纹变化即拒绝连接。默认关闭，便于批量纳管未预置指纹的内网主机。
 	SSHStrictHostKey bool
 
+	// AllowMultiInstance 允许在同一个库上再起一个实例（以 standby 身份，不跑任何调度）。
+	//
+	// 默认 false，第二个实例会**拒绝启动**并说清原因。这不是保守：两个实例连同一个
+	// SQLite 文件时，内置与用户定时任务会各跑两遍 —— 用户定时任务是在生产机器上
+	// 执行命令，跑两遍是真事故；转发隧道与扫码 ticket 是进程内状态，一半请求会报「已失效」；
+	// SQLite 并发写还会 database is locked。
+	// 真正的用途是升级期间的短暂重叠，或者一个只用来看页面的备用实例。
+	AllowMultiInstance bool
+
+	// InstanceLeaseSec 实例心跳租约秒数：超过这个时间没更新心跳就认为那个实例死了，
+	// standby 会接管调度。太短会把一次 GC 停顿误判成宕机（于是两个都当自己是 leader），
+	// 太长则真宕机后接管很慢。
+	InstanceLeaseSec int
+
 	// CertCheckSpec 证书巡检的 cron 表达式（标准五段）。留空表示不做定时巡检，
 	// 只能在界面上手动触发。
 	CertCheckSpec string
@@ -266,6 +280,8 @@ func Load() (*Config, error) {
 		RecordDir:          env("OPS_RECORD_DIR", "recordings"),
 		ShutdownTimeoutSec: envInt("OPS_SHUTDOWN_TIMEOUT_SEC", 30),
 		SSHStrictHostKey:   envBool("OPS_SSH_STRICT_HOST_KEY", false),
+		AllowMultiInstance: envBool("OPS_ALLOW_MULTI_INSTANCE", false),
+		InstanceLeaseSec:   envInt("OPS_INSTANCE_LEASE_SEC", 45),
 		CertCheckSpec:      strings.TrimSpace(env("OPS_CERT_CHECK_SPEC", "0 8 * * *")),
 		AlertRuleSpec:      strings.TrimSpace(env("OPS_ALERT_RULE_SPEC", "*/5 * * * *")),
 		ProbeSpec:          strings.TrimSpace(env("OPS_PROBE_SPEC", "*/5 * * * *")),
@@ -306,6 +322,11 @@ func Load() (*Config, error) {
 	}
 	if cfg.ShutdownTimeoutSec < 1 || cfg.ShutdownTimeoutSec > 600 {
 		fail("OPS_SHUTDOWN_TIMEOUT_SEC=%d 不合理，取值范围 1-600 秒", cfg.ShutdownTimeoutSec)
+	}
+	if cfg.InstanceLeaseSec < 15 || cfg.InstanceLeaseSec > 600 {
+		fail("OPS_INSTANCE_LEASE_SEC=%d 不合理，取值范围 15-600 秒 —— "+
+			"低于 15 秒时一次 GC 停顿或磁盘卡顿就会被误判成宕机，两个实例会同时认为自己该跑调度",
+			cfg.InstanceLeaseSec)
 	}
 	if cfg.BackupSpec != "" && cfg.BackupDir == "" {
 		fail("开了自动备份（OPS_BACKUP_SPEC）就必须给 OPS_BACKUP_DIR")

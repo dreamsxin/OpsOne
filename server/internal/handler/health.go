@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ops-platform/server/internal/db"
+	"ops-platform/server/internal/instance"
 	"ops-platform/server/internal/migrate"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
@@ -108,7 +109,60 @@ func (h *Handler) healthRuntime() []healthItem {
 			Detail: "OPS_DEBUG=true 会输出 SQL 日志并启用 gin 调试模式，正式环境建议关闭",
 		})
 	}
+	items = append(items, h.healthInstanceItem())
 	return items
+}
+
+// healthInstanceItem 本实例的角色，以及库上还有哪些实例活着。
+//
+// 这一条要回答的是「定时任务到底在哪个进程里跑」。以前答不出来 ——
+// 平台不知道自己有没有被开两份，而开两份的后果是所有定时任务各跑一遍。
+func (h *Handler) healthInstanceItem() healthItem {
+	item := healthItem{Key: "instance", Label: "实例与调度归属", Status: "ok"}
+	if h.Instance == nil {
+		item.Status = "warn"
+		item.Value = "未登记"
+		item.Detail = "进程没有登记到实例表（单元测试或旧版本启动方式）"
+		return item
+	}
+
+	lease := instance.DefaultLeaseSeconds
+	if h.Cfg != nil && h.Cfg.InstanceLeaseSec > 0 {
+		lease = h.Cfg.InstanceLeaseSec
+	}
+	alive, err := instance.Alive(h.DB, lease)
+	if err != nil {
+		item.Status = "warn"
+		item.Value = "未知"
+		item.Detail = "读实例表失败: " + err.Error()
+		return item
+	}
+
+	role := h.Instance.Role()
+	item.Value = role
+	if role == instance.RoleLeader {
+		item.Detail = fmt.Sprintf("本实例跑定时任务；当前活着的实例 %d 个；心跳租约 %d 秒",
+			len(alive), lease)
+	} else {
+		item.Status = "warn"
+		item.Detail = fmt.Sprintf("本实例是 standby，**不跑任何定时任务**；"+
+			"当前活着的实例 %d 个；leader 心跳超过 %d 秒没更新时本实例会接管",
+			len(alive), lease)
+	}
+	if len(alive) > 1 {
+		others := make([]string, 0, len(alive)-1)
+		for _, row := range alive {
+			if row.ID == h.Instance.ID() {
+				continue
+			}
+			others = append(others, fmt.Sprintf("%s@%s(%s)", row.ID[:8], row.Hostname, row.Role))
+		}
+		item.Status = "warn"
+		item.Detail += "；另有 " + strings.Join(others, "、") +
+			" —— 多实例连同一个 SQLite 库只适合升级期间的短暂重叠，"
+		item.Detail += "隧道与扫码登录是进程内状态，一半请求会落到另一个实例上"
+	}
+	return item
 }
 
 func (h *Handler) healthScheduler() []healthItem {

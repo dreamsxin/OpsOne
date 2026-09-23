@@ -3005,8 +3005,41 @@ type SecuritySuggestionDismissal struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// SchemaMigration 一条已应用的结构/数据迁移记录。
+// PlatformInstance 一个正在运行的平台进程。
 //
+// 加这张表是因为在它之前**平台完全不知道自己有没有被开两份**。两个进程连同一个
+// SQLite 文件时，后果不是「性能差一点」，而是：
+//
+//   - 20 个内置定时任务与全部用户定时任务**各跑两遍** ——
+//     数据留存会删两次、备份写两份、主机指标 SSH 两轮，
+//     而用户定时任务是**在生产机器上执行命令**，跑两遍是真的事故；
+//   - 转发隧道与扫码登录 ticket 都是进程内状态，谁接到请求谁认账，另一半必然报「已失效」；
+//   - SQLite 并发写会直接 `database is locked`。
+//
+// 所以默认行为是**第二个实例拒绝启动**并说清原因；显式开了
+// `OPS_ALLOW_MULTI_INSTANCE` 才允许它以 standby 起来（**不跑任何调度**）。
+// Role 只有两种取值，没有第三种：leader 跑调度，standby 不跑。
+//
+// 心跳过期（超过 LeaseSeconds）的行视为已死，standby 会接过 leader ——
+// 这一条是真的接管，不是摆设：leader 被 kill -9 之后 standby 会在一个租约周期内开始跑调度。
+type PlatformInstance struct {
+	// ID 进程唯一标识，启动时随机生成。**不用 hostname+pid**：
+	// 容器里 pid 常年是 1，hostname 又可能重复，撞上就会互相顶掉对方的租约
+	ID string `gorm:"primaryKey;size:40" json:"id"`
+	// Role leader | standby
+	Role     string `gorm:"size:16;index" json:"role"`
+	Hostname string `gorm:"size:128" json:"hostname"`
+	PID      int    `json:"pid"`
+	Addr     string `gorm:"size:64" json:"addr"`
+	Version  string `gorm:"size:32" json:"version"`
+	// LeaseSeconds 心跳超过这个秒数没更新就算这个实例死了
+	LeaseSeconds int       `json:"leaseSeconds"`
+	StartedAt    time.Time `json:"startedAt"`
+	HeartbeatAt  time.Time `gorm:"index" json:"heartbeatAt"`
+	// StoppedAt 优雅退出时写上。非空表示这个实例是正常停的，不是被 kill 的
+	StoppedAt *time.Time `json:"stoppedAt"`
+}
+
 // 在这张表出现之前，表结构完全靠 AutoMigrate（只加不减、无版本号、无顺序），
 // 数据回填靠在 sys_configs 里写一个键当标记 —— 也就是说「这个库跑过哪些变更」
 // 这个问题答不出来，而它恰恰是升级出问题时第一个要问的问题。
