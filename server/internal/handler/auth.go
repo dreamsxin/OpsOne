@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -26,10 +27,43 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	// 失败限速与留痕：以前这两件都没有，口令可以无限试，而且失败一次都不留痕
+	now := time.Now()
+	gateKey := loginGateKey(req.Username, c.ClientIP())
+	maxFail, lockFor := h.loginLockSettings()
+	if maxFail > 0 {
+		if left := loginGuard.check(gateKey, now); left > 0 {
+			h.auditLogin(c, req.Username, nil, false,
+				fmt.Sprintf("处于锁定期，还需等待 %d 秒", int(left.Seconds())))
+			response.Unauthorized(c, lockMessage(left))
+			return
+		}
+	}
+	// deny 统一走这里：计数 + 写审计 + 回错误，避免某条分支忘了记
+	deny := func(user *model.User, reason string, forbidden bool) {
+		detail := reason
+		if maxFail > 0 {
+			fails, locked := loginGuard.fail(gateKey, maxFail, lockFor, now)
+			if locked {
+				detail = fmt.Sprintf("%s；连续失败 %d 次，已锁定 %s",
+					reason, maxFail, lockFor.Truncate(time.Minute))
+			} else {
+				detail = fmt.Sprintf("%s（第 %d 次，满 %d 次锁定）", reason, fails, maxFail)
+			}
+		}
+		h.auditLogin(c, req.Username, user, false, detail)
+		if forbidden {
+			response.Forbidden(c, reason)
+			return
+		}
+		response.Unauthorized(c, "用户名或密码错误")
+	}
+
 	var user model.User
 	if err := h.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
-		// 不区分「用户不存在」与「密码错误」，避免账号枚举
-		response.Unauthorized(c, "用户名或密码错误")
+		// 不区分「用户不存在」与「密码错误」，避免账号枚举。
+		// 但审计里要记实话 —— 审计的读者是管理员，不是攻击者
+		deny(nil, "用户不存在", false)
 		return
 	}
 
@@ -38,19 +72,15 @@ func (h *Handler) Login(c *gin.Context) {
 	ldapResult := h.ldapAuthenticate(&user, req.Password)
 	if ldapResult.Handled {
 		if !ldapResult.OK {
-			if ldapResult.Reason == "用户名或密码错误" {
-				response.Unauthorized(c, ldapResult.Reason)
-			} else {
-				response.Forbidden(c, ldapResult.Reason)
-			}
+			deny(&user, ldapResult.Reason, ldapResult.Reason != "用户名或密码错误")
 			return
 		}
 	} else if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
-		response.Unauthorized(c, "用户名或密码错误")
+		deny(&user, "口令错误", false)
 		return
 	}
 	if user.Status != 1 {
-		response.Forbidden(c, "账号已被禁用")
+		deny(&user, "账号已被禁用", true)
 		return
 	}
 
@@ -59,6 +89,12 @@ func (h *Handler) Login(c *gin.Context) {
 	if user.TOTPEnabled {
 		ok, detail := h.verifyLoginTOTP(&user, req.Code)
 		if !ok {
+			// 动态码也计入失败次数：只挡口令不挡验证码的话，
+			// 拿到口令的人仍然可以对 6 位数字无限尝试
+			if maxFail > 0 {
+				loginGuard.fail(gateKey, maxFail, lockFor, now)
+			}
+			h.auditLogin(c, req.Username, &user, false, "双因子校验未通过: "+detail)
 			// 用 200 + totpRequired 表达「还缺一步」，避免与 401（口令错误，前端会清 token 跳登录）混在一起
 			response.OK(c, gin.H{"totpRequired": true, "detail": detail})
 			return
@@ -72,14 +108,15 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
 	h.DB.Model(&user).Update("last_login_at", &now)
+	loginGuard.success(gateKey)
 
 	loginBy := "local"
 	if ldapResult.Handled {
 		loginBy = "ldap"
 		h.markLdapLogin(ldapResult.Binding)
 	}
+	h.auditLogin(c, req.Username, &user, true, "登录成功（"+loginBy+"）")
 	response.OK(c, gin.H{
 		"token":     token,
 		"expiresAt": expire.Unix(),

@@ -41,8 +41,18 @@ func (h *Handler) loadHostScoped(c *gin.Context) (*model.Host, bool) {
 // 不可见一律按「不存在」处理，不泄露存在性；可见但动作未被授权时返回 403，
 // 让操作人知道是权限不足而不是资源不存在。
 func (h *Handler) loadHostForAction(c *gin.Context, action string) (*model.Host, bool) {
+	return h.loadHostIDForAction(c, idParam(c), action)
+}
+
+// loadHostIDForAction 与 loadHostForAction 相同，但主机 ID 由调用方给。
+//
+// 给「URL 里的 :id 不是主机」的场景用 —— 配置文件、构建任务这些资源自己有 ID，
+// 真正要落地的动作却发生在它挂的那台主机上。审计时发现配置文件的下发/回滚
+// 直接 `First(&host, file.HostID)`，**绕过了整套主机授权**：
+// 只要有 configfile:apply，就能往任意主机写文件并执行 reload 命令。
+func (h *Handler) loadHostIDForAction(c *gin.Context, hostID uint, action string) (*model.Host, bool) {
 	var host model.Host
-	if err := h.DB.First(&host, idParam(c)).Error; err != nil {
+	if err := h.DB.First(&host, hostID).Error; err != nil {
 		response.NotFound(c, "主机不存在")
 		return nil, false
 	}

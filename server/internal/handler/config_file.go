@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
@@ -448,9 +449,44 @@ func configFileView(file model.ConfigFile, hostName string, desired *model.Confi
 	return view
 }
 
+// loadConfigFileForAction 取配置文件，并**按它挂的那台主机**做授权。
+//
+// 审计发现的洞：原来这些接口一律 `First(&file, id)` + `First(&host, file.HostID)`，
+// 主机授权完全没参与。于是「配置文件」成了绕过主机授权的一条通路 ——
+// 有 configfile:apply 的人能往任意主机写文件并执行 reload。
+// 现在统一走这个口子：看不到那台主机的人，连这个配置文件的存在都不该知道（返回 404）。
+//
+// action 取 model.ActionFile（读写文件内容）或 model.ActionManage（改登记信息）。
+func (h *Handler) loadConfigFileForAction(c *gin.Context, action string) (*model.ConfigFile, *model.Host, bool) {
+	var file model.ConfigFile
+	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
+		response.NotFound(c, "配置文件不存在")
+		return nil, nil, false
+	}
+	host, ok := h.loadHostIDForAction(c, file.HostID, action)
+	if !ok {
+		return nil, nil, false
+	}
+	return &file, host, true
+}
+
+// scopeConfigByHost 把查询限制在当前用户可见的主机上。
+//
+// 一台都看不到时拼 `WHERE 1=0` 而不是「不加条件」—— 与 scope.go 同一条口径：
+// 配错了要表现为看不到东西，不能表现为看到全部。
+func (h *Handler) scopeConfigByHost(c *gin.Context, q *gorm.DB) *gorm.DB {
+	var ids []uint
+	h.applyScopeWithGrants(h.DB.Model(&model.Host{}), middleware.CurrentUser(c), "host").
+		Pluck("id", &ids)
+	if len(ids) == 0 {
+		return q.Where("1 = 0")
+	}
+	return q.Where("host_id IN ?", ids)
+}
+
 func (h *Handler) ListConfigFiles(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.DB.Model(&model.ConfigFile{})
+	q := h.scopeConfigByHost(c, h.DB.Model(&model.ConfigFile{}))
 	if hostID := c.Query("hostId"); hostID != "" {
 		q = q.Where("host_id = ?", parseUint(hostID))
 	}
@@ -708,11 +744,11 @@ type configFileUpdateReq struct {
 }
 
 func (h *Handler) UpdateConfigFile(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, _, ok := h.loadConfigFileForAction(c, model.ActionManage)
+	if !ok {
 		return
 	}
+	file := *filePtr
 	var req configFileUpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数格式有误")
@@ -762,11 +798,11 @@ func (h *Handler) UpdateConfigFile(c *gin.Context) {
 
 // DeleteConfigFile 取消登记。版本与下发留痕一并删掉 —— 版本只对这个文件有意义。
 func (h *Handler) DeleteConfigFile(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, _, ok := h.loadConfigFileForAction(c, model.ActionManage)
+	if !ok {
 		return
 	}
+	file := *filePtr
 	var applies int64
 	h.DB.Model(&model.ConfigApply{}).Where("file_id = ? AND action <> ?", file.ID, "capture").
 		Count(&applies)
@@ -792,13 +828,11 @@ func (h *Handler) DeleteConfigFile(c *gin.Context) {
 
 // GetConfigFile 详情：文件 + 版本列表（不含正文）+ 下发留痕
 func (h *Handler) GetConfigFile(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, hostPtr, ok := h.loadConfigFileForAction(c, model.ActionFile)
+	if !ok {
 		return
 	}
-	var host model.Host
-	h.DB.First(&host, file.HostID)
+	file, host := *filePtr, *hostPtr
 
 	var versions []model.ConfigVersion
 	h.DB.Select("id, file_id, version, source, hash, size, mode, note, operator, created_at").
@@ -813,11 +847,22 @@ func (h *Handler) GetConfigFile(c *gin.Context) {
 	})
 }
 
-// GetConfigVersion 取某一版的正文
+// GetConfigVersion 取某一版的正文。
+//
+// URL 里的 :id 是版本 ID，所以要先找到它属于哪个文件、再按那台主机授权 ——
+// 不然「拿不到文件详情但能猜版本 ID」就成了一条绕路。
 func (h *Handler) GetConfigVersion(c *gin.Context) {
 	var version model.ConfigVersion
 	if err := h.DB.First(&version, idParam(c)).Error; err != nil {
 		response.NotFound(c, "版本不存在")
+		return
+	}
+	var file model.ConfigFile
+	if err := h.DB.First(&file, version.FileID).Error; err != nil {
+		response.NotFound(c, "版本不存在")
+		return
+	}
+	if _, ok := h.loadHostIDForAction(c, file.HostID, model.ActionFile); !ok {
 		return
 	}
 	response.OK(c, version)
@@ -825,16 +870,11 @@ func (h *Handler) GetConfigVersion(c *gin.Context) {
 
 // CaptureConfigFile 抓一份真机现状。setDesired=1 时同时作为新基线。
 func (h *Handler) CaptureConfigFile(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, hostPtr, ok := h.loadConfigFileForAction(c, model.ActionFile)
+	if !ok {
 		return
 	}
-	var host model.Host
-	if err := h.DB.First(&host, file.HostID).Error; err != nil {
-		response.BadRequest(c, "主机不存在")
-		return
-	}
+	file, host := *filePtr, *hostPtr
 
 	operator := middleware.CurrentUser(c).Username
 	setDesired := c.Query("setDesired") == "1"
@@ -874,11 +914,11 @@ type configEditReq struct {
 // EditConfigVersion 在平台上编辑内容存成新版本（不下发）。
 // 编辑与下发刻意分成两步：写完先看 diff，再决定要不要真推到机器上。
 func (h *Handler) EditConfigVersion(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, _, ok := h.loadConfigFileForAction(c, model.ActionFile)
+	if !ok {
 		return
 	}
+	file := *filePtr
 	var req configEditReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数格式有误")
@@ -928,11 +968,11 @@ func (h *Handler) EditConfigVersion(c *gin.Context) {
 
 // DiffConfigFile 真机现状 vs 期望基线，或指定两版之间
 func (h *Handler) DiffConfigFile(c *gin.Context) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, _, ok := h.loadConfigFileForAction(c, model.ActionFile)
+	if !ok {
 		return
 	}
+	file := *filePtr
 
 	loadVersion := func(raw string) *model.ConfigVersion {
 		if raw == "" {
@@ -1023,16 +1063,11 @@ func (h *Handler) RollbackConfigFile(c *gin.Context) {
 }
 
 func (h *Handler) applyOrRollback(c *gin.Context, action string) {
-	var file model.ConfigFile
-	if err := h.DB.First(&file, idParam(c)).Error; err != nil {
-		response.NotFound(c, "配置文件不存在")
+	filePtr, hostPtr, ok := h.loadConfigFileForAction(c, model.ActionFile)
+	if !ok {
 		return
 	}
-	var host model.Host
-	if err := h.DB.First(&host, file.HostID).Error; err != nil {
-		response.BadRequest(c, "主机不存在")
-		return
-	}
+	file, host := *filePtr, *hostPtr
 	var req configApplyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数格式有误")
@@ -1346,7 +1381,8 @@ func (h *Handler) CheckConfigFiles(c *gin.Context) {
 
 func (h *Handler) ListConfigApplies(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.DB.Model(&model.ConfigApply{})
+	// 下发留痕里带着文件路径与执行的 reload 命令，同样按主机可见性过滤
+	q := h.scopeConfigByHost(c, h.DB.Model(&model.ConfigApply{}))
 	if fileID := c.Query("fileId"); fileID != "" {
 		q = q.Where("file_id = ?", parseUint(fileID))
 	}

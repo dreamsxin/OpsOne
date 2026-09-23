@@ -441,6 +441,14 @@ func (h *Handler) UpdateKubeGrant(c *gin.Context) {
 }
 
 func (h *Handler) DeleteKubeGrant(c *gin.Context) {
+	// 同 DeleteResourceGrant：删完就查不到删的是什么了，先写进审计
+	var grant model.KubeGrant
+	if err := h.DB.First(&grant, idParam(c)).Error; err == nil {
+		middleware.SetAuditDetail(c, fmt.Sprintf(
+			"删除容器授权：%s#%d → 集群 %d 命名空间 %q kinds %q（日志 %v / 写 %v / 转发 %v）",
+			grant.SubjectType, grant.SubjectID, grant.ClusterID,
+			grant.Namespaces, grant.Kinds, grant.AllowLogs, grant.AllowWrite, grant.AllowForward))
+	}
 	if err := h.DB.Delete(&model.KubeGrant{}, idParam(c)).Error; err != nil {
 		response.Error(c, "删除失败")
 		return

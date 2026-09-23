@@ -18,10 +18,16 @@ func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	// PROCESS_QUERY_LIMITED_INFORMATION：只要能查状态就够，不需要更高权限，
-	// 这样对不同用户跑起来的进程也判断得了
-	const processQueryLimitedInformation = 0x1000
-	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
+	// 两个权限都要：
+	//   PROCESS_QUERY_LIMITED_INFORMATION 才能对别的用户跑起来的进程查状态；
+	//   **SYNCHRONIZE 才能 WaitForSingleObject** —— 少了它 Wait 会失败，
+	//   于是走到「查不出来按还活着处理」，僵尸记录又清不掉了（这一条是实测踩出来的：
+	//   只申请 QUERY_LIMITED_INFORMATION 时重启仍然被实例互斥拦住）。
+	const (
+		processQueryLimitedInformation = 0x1000
+		synchronize                    = 0x00100000
+	)
+	handle, err := syscall.OpenProcess(processQueryLimitedInformation|synchronize, false, uint32(pid))
 	if err != nil {
 		return false // 连句柄都打不开：进程不存在
 	}

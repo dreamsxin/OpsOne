@@ -705,14 +705,23 @@ type AuditLog struct {
 	Username string `gorm:"size:64" json:"username"`
 	// TokenID / TokenName 非零表示这次调用来自 API 令牌而不是人工登录。
 	// 令牌归属人仍记在 UserID 上，所以「谁的令牌干了什么」两头都查得到。
-	TokenID   uint      `gorm:"index;default:0" json:"tokenId"`
-	TokenName string    `gorm:"size:64" json:"tokenName"`
-	Method    string    `gorm:"size:8" json:"method"`
-	Path      string    `gorm:"size:255" json:"path"`
-	Action    string    `gorm:"size:64" json:"action"`
-	Status    int       `json:"status"`
-	IP        string    `gorm:"size:64" json:"ip"`
-	CostMs    int64     `json:"costMs"`
+	TokenID   uint   `gorm:"index;default:0" json:"tokenId"`
+	TokenName string `gorm:"size:64" json:"tokenName"`
+	Method    string `gorm:"size:8" json:"method"`
+	Path      string `gorm:"size:255" json:"path"`
+	Action    string `gorm:"size:64" json:"action"`
+	Status    int    `json:"status"`
+	IP        string `gorm:"size:64" json:"ip"`
+	CostMs    int64  `json:"costMs"`
+	// Body 脱敏后的请求体（只有写操作有）。
+	//
+	// 不记的话「有人改过」和「改成了什么」就分不开 —— 追责时问的恰好是后者。
+	// 口令/私钥/AK 这类字段在**落库之前**按字段名换成固定占位串，键名保留：
+	// 「这次改了 password」本身就是有用的信息。超过 4KB 截断（正文另有版本表在存）。
+	Body string `gorm:"type:text" json:"body"`
+	// Detail handler 补的一句人话，给「请求体答不出问题」的场景用。
+	// 典型是 DELETE：body 是空的，而 path 里那个 ID 删完就查不到对应的东西了。
+	Detail    string    `gorm:"size:500" json:"detail"`
 	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 

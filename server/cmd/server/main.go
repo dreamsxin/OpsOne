@@ -607,7 +607,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("OPS_TRUSTED_PROXIES 配置无效: %v", err)
 	}
-	r.Use(gin.Logger(), gin.Recovery())
+	// 访问日志用自己的 formatter：gin 默认会把 raw query 拼进 path，
+	// 而 WebSocket 放行了 ?access_token=<JWT> —— 那等于把一个有效令牌写进日志文件
+	r.Use(middleware.AccessLog(gin.DefaultWriter), gin.Recovery())
 	// 指标中间件要在业务路由之前、CORS 之后：CORS 的预检请求也算请求量，
 	// 但它不该把耗时直方图拉低（预检永远很快）—— 所以预检由 route=unmatched 兜着
 	reg := metrics.Default()
@@ -698,12 +700,12 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/hosts/:id/services/discover", middleware.RequirePerm("service:manage"), h.DiscoverHostServices)
 
 		// 配置文件：登记 → 抓基线 → 巡检漂移 → 编辑 → diff → 下发（备份+原子替换+回读）→ 回滚
-		auth.GET("/config-files", h.ListConfigFiles)
-		auth.GET("/config-files/stats", h.ConfigStats)
-		auth.GET("/config-files/applies", h.ListConfigApplies)
-		auth.GET("/config-files/:id", h.GetConfigFile)
-		auth.GET("/config-files/:id/diff", h.DiffConfigFile)
-		auth.GET("/config-versions/:id", h.GetConfigVersion)
+		auth.GET("/config-files", middleware.RequirePerm("configfile:manage"), h.ListConfigFiles)
+		auth.GET("/config-files/stats", middleware.RequirePerm("configfile:manage"), h.ConfigStats)
+		auth.GET("/config-files/applies", middleware.RequirePerm("configfile:manage"), h.ListConfigApplies)
+		auth.GET("/config-files/:id", middleware.RequirePerm("configfile:manage"), h.GetConfigFile)
+		auth.GET("/config-files/:id/diff", middleware.RequirePerm("configfile:manage"), h.DiffConfigFile)
+		auth.GET("/config-versions/:id", middleware.RequirePerm("configfile:manage"), h.GetConfigVersion)
 		auth.POST("/config-files", middleware.RequirePerm("configfile:manage"), h.CreateConfigFile)
 		auth.PUT("/config-files/:id", middleware.RequirePerm("configfile:manage"), h.UpdateConfigFile)
 		auth.DELETE("/config-files/:id", middleware.RequirePerm("configfile:manage"), h.DeleteConfigFile)
@@ -714,9 +716,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/config-files/:id/rollback", middleware.RequirePerm("configfile:apply"), h.RollbackConfigFile)
 
 		// 凭证库：共享登录凭据。密钥永不出接口，轮换一次即对所有引用主机生效
-		auth.GET("/credentials", h.ListCredentials)
-		auth.GET("/credentials/state", h.GetCredentialState)
-		auth.GET("/credentials/:id/hosts", h.ListCredentialHosts)
+		auth.GET("/credentials", middleware.RequirePerm("credential:manage"), h.ListCredentials)
+		auth.GET("/credentials/state", middleware.RequirePerm("credential:manage"), h.GetCredentialState)
+		auth.GET("/credentials/:id/hosts", middleware.RequirePerm("credential:manage"), h.ListCredentialHosts)
 		auth.POST("/credentials", middleware.RequirePerm("credential:manage"), h.CreateCredential)
 		auth.PUT("/credentials/:id", middleware.RequirePerm("credential:manage"), h.UpdateCredential)
 		auth.DELETE("/credentials/:id", middleware.RequirePerm("credential:manage"), h.DeleteCredential)
@@ -726,15 +728,15 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		// 账号密码库 / 2FA 验证码库：明文是给人取走用的，所以「取用」单独一个权限，
 		// 且每次取用都留痕（留痕写不进去就不给明文）
-		auth.GET("/vault/state", h.GetVaultState)
-		auth.GET("/vault/accounts", h.ListVaultAccounts)
+		auth.GET("/vault/state", middleware.RequirePerm("vault:manage"), h.GetVaultState)
+		auth.GET("/vault/accounts", middleware.RequirePerm("vault:manage"), h.ListVaultAccounts)
 		auth.POST("/vault/accounts", middleware.RequirePerm("vault:manage"), h.CreateVaultAccount)
 		auth.PUT("/vault/accounts/:id", middleware.RequirePerm("vault:manage"), h.UpdateVaultAccount)
 		auth.DELETE("/vault/accounts/:id", middleware.RequirePerm("vault:manage"), h.DeleteVaultAccount)
 		auth.POST("/vault/accounts/:id/reveal", middleware.RequirePerm("vault:reveal"), h.RevealVaultAccount)
 		auth.POST("/vault/accounts/:id/rotate", middleware.RequirePerm("vault:manage"), h.RotateVaultAccount)
-		auth.GET("/vault/accesses", h.ListVaultAccesses)
-		auth.GET("/vault/totps", h.ListVaultTOTPs)
+		auth.GET("/vault/accesses", middleware.RequirePerm("vault:manage"), h.ListVaultAccesses)
+		auth.GET("/vault/totps", middleware.RequirePerm("vault:manage"), h.ListVaultTOTPs)
 		auth.POST("/vault/totps", middleware.RequirePerm("vault:manage"), h.CreateVaultTOTP)
 		auth.PUT("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.UpdateVaultTOTP)
 		auth.DELETE("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.DeleteVaultTOTP)
@@ -781,7 +783,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/security/event-mutes", h.ListSecurityMutes)
 		auth.DELETE("/security/event-mutes/:id", middleware.RequirePerm("secevent:manage"), h.DeleteSecurityMute)
 		// 原始数据视图：按 RefTable/RefID 取回没被摘要截断的原始流水行
-		auth.GET("/security/events/:id/raw", h.GetSecurityEventRaw)
+		auth.GET("/security/events/:id/raw", middleware.RequirePerm("secevent:manage"), h.GetSecurityEventRaw)
 		// 升格为事件工单 —— 平台里「派发」唯一诚实的落法（没有对接外部工单系统）
 		auth.POST("/security/events/:id/escalate", middleware.RequirePerm("secevent:respond"), h.EscalateSecurityEvent)
 
@@ -794,7 +796,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/security/suggestion-dismissals/:id", middleware.RequirePerm("suggestion:apply"), h.DeleteSuggestionDismissal)
 
 		// 密钥体检与迁移（凭证库页面里的「加密存量数据」走的就是这里）
-		auth.GET("/secrets/audit", h.GetSecretAudit)
+		auth.GET("/secrets/audit", middleware.RequirePerm("config:manage"), h.GetSecretAudit)
 		auth.POST("/secrets/migrate", middleware.RequirePerm("credential:manage"), h.MigrateSecrets)
 		// 换密钥 / 取消加密：解开再写回，并把进程内存里的密钥一起切过去
 		auth.POST("/secrets/rekey", middleware.RequirePerm("credential:manage"), h.RekeySecrets)
@@ -805,56 +807,56 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/hosts/:id/files/mkdir", middleware.RequirePerm("file:write"), h.MakeDir)
 		auth.POST("/hosts/:id/files/rename", middleware.RequirePerm("file:write"), h.RenameFile)
 		auth.DELETE("/hosts/:id/files", middleware.RequirePerm("file:delete"), h.DeleteFile)
-		auth.GET("/file-audits", h.ListFileAudits)
+		auth.GET("/file-audits", middleware.RequirePerm("audit:view"), h.ListFileAudits)
 
-		auth.GET("/scheduler/jobs", h.ListCronJobs)
+		auth.GET("/scheduler/jobs", middleware.RequirePerm("cron:manage"), h.ListCronJobs)
 		auth.POST("/scheduler/jobs", middleware.RequirePerm("cron:manage"), h.CreateCronJob)
 		auth.PUT("/scheduler/jobs/:id", middleware.RequirePerm("cron:manage"), h.UpdateCronJob)
 		auth.DELETE("/scheduler/jobs/:id", middleware.RequirePerm("cron:manage"), h.DeleteCronJob)
 		auth.POST("/scheduler/jobs/:id/run", middleware.RequirePerm("cron:run"), h.RunCronJobNow)
 
-		auth.GET("/exec/jobs", h.ListExecJobs)
-		auth.GET("/exec/jobs/:id", h.GetExecJob)
+		auth.GET("/exec/jobs", middleware.RequirePerm("exec:run"), h.ListExecJobs)
+		auth.GET("/exec/jobs/:id", middleware.RequirePerm("exec:run"), h.GetExecJob)
 		auth.POST("/exec/jobs", middleware.RequirePerm("exec:run"), h.RunExecJob)
 		// 下发闸门：预检与拦截流水
 		auth.POST("/exec/precheck", middleware.RequirePerm("exec:run"), h.PrecheckExec)
-		auth.GET("/exec/guard-logs", h.ListExecGuardLogs)
+		auth.GET("/exec/guard-logs", middleware.RequirePerm("audit:view"), h.ListExecGuardLogs)
 
-		auth.GET("/sessions", h.ListSessions)
-		auth.GET("/sessions/commands", h.SearchSessionCommands)
-		auth.GET("/sessions/commands/export", h.ExportSessionCommands)
-		auth.GET("/sessions/:id", h.GetSession)
-		auth.GET("/sessions/:id/commands", h.ListSessionCommands)
+		auth.GET("/sessions", middleware.RequirePerm("session:view"), h.ListSessions)
+		auth.GET("/sessions/commands", middleware.RequirePerm("session:view"), h.SearchSessionCommands)
+		auth.GET("/sessions/commands/export", middleware.RequirePerm("session:view"), h.ExportSessionCommands)
+		auth.GET("/sessions/:id", middleware.RequirePerm("session:view"), h.GetSession)
+		auth.GET("/sessions/:id/commands", middleware.RequirePerm("session:view"), h.ListSessionCommands)
 		auth.GET("/sessions/:id/replay", middleware.RequirePerm("session:replay"), h.ReplaySession)
 
-		auth.GET("/system/command-rules", h.ListCommandRules)
+		auth.GET("/system/command-rules", middleware.RequirePerm("rule:manage"), h.ListCommandRules)
 		auth.POST("/system/command-rules/test", h.TestCommandRule)
 		auth.POST("/system/command-rules", middleware.RequirePerm("rule:manage"), h.CreateCommandRule)
 		auth.PUT("/system/command-rules/:id", middleware.RequirePerm("rule:manage"), h.UpdateCommandRule)
 		auth.DELETE("/system/command-rules/:id", middleware.RequirePerm("rule:manage"), h.DeleteCommandRule)
 
-		auth.GET("/system/users", h.ListUsers)
+		auth.GET("/system/users", middleware.RequirePerm("user:update"), h.ListUsers)
 		auth.POST("/system/users", middleware.RequirePerm("user:create"), h.CreateUser)
 		auth.PUT("/system/users/:id", middleware.RequirePerm("user:update"), h.UpdateUser)
 		auth.DELETE("/system/users/:id", middleware.RequirePerm("user:delete"), h.DeleteUser)
 
-		auth.GET("/system/roles", h.ListRoles)
+		auth.GET("/system/roles", middleware.RequirePerm("role:manage"), h.ListRoles)
 		auth.POST("/system/roles", middleware.RequirePerm("role:manage"), h.CreateRole)
 		auth.PUT("/system/roles/:id", middleware.RequirePerm("role:manage"), h.UpdateRole)
 		auth.DELETE("/system/roles/:id", middleware.RequirePerm("role:manage"), h.DeleteRole)
 
-		auth.GET("/system/menus/tree", h.MenuTree)
+		auth.GET("/system/menus/tree", middleware.RequireAnyPerm("menu:manage", "role:manage"), h.MenuTree)
 		auth.POST("/system/menus", middleware.RequirePerm("menu:manage"), h.CreateMenu)
 		auth.PUT("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.UpdateMenu)
 		auth.DELETE("/system/menus/:id", middleware.RequirePerm("menu:manage"), h.DeleteMenu)
-		auth.GET("/system/audit-logs", h.ListAuditLogs)
-		auth.GET("/system/audit-logs/operators", h.AuditOperators)
-		auth.GET("/system/audit-logs/export", h.ExportAuditLogs)
+		auth.GET("/system/audit-logs", middleware.RequirePerm("audit:view"), h.ListAuditLogs)
+		auth.GET("/system/audit-logs/operators", middleware.RequirePerm("audit:view"), h.AuditOperators)
+		auth.GET("/system/audit-logs/export", middleware.RequirePerm("audit:view"), h.ExportAuditLogs)
 
 		// 发件邮箱：把「用哪个邮箱发」从全局单例变成可选列表，
 		// 一个都没登记时仍走系统配置里那套（既有部署不受影响）
-		auth.GET("/notify/mail-state", h.GetMailState)
-		auth.GET("/notify/mail-accounts", h.ListMailAccounts)
+		auth.GET("/notify/mail-state", middleware.RequirePerm("mail:manage"), h.GetMailState)
+		auth.GET("/notify/mail-accounts", middleware.RequirePerm("mail:manage"), h.ListMailAccounts)
 		auth.POST("/notify/mail-accounts", middleware.RequirePerm("mail:manage"), h.CreateMailAccount)
 		auth.PUT("/notify/mail-accounts/:id", middleware.RequirePerm("mail:manage"), h.UpdateMailAccount)
 		auth.DELETE("/notify/mail-accounts/:id", middleware.RequirePerm("mail:manage"), h.DeleteMailAccount)
@@ -863,13 +865,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/notify/mail-accounts/import-global", middleware.RequirePerm("mail:manage"), h.ImportGlobalSMTP)
 
 		// 出口代理：检测是直连 + 走代理各一次的对比
-		auth.GET("/network/proxies", h.ListEgressProxies)
+		auth.GET("/network/proxies", middleware.RequireAnyPerm("proxy:manage", "probe:manage"), h.ListEgressProxies)
 		auth.POST("/network/proxies", middleware.RequirePerm("proxy:manage"), h.CreateEgressProxy)
 		auth.PUT("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.UpdateEgressProxy)
 		auth.DELETE("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.DeleteEgressProxy)
 		auth.POST("/network/proxies/:id/check", middleware.RequirePerm("proxy:manage"), h.CheckEgressProxy)
 		// 统一出口：哪些模块真的走代理、哪些不走，以及进程实际看到的 HTTP_PROXY
-		auth.GET("/network/proxy-egress", h.GetEgressPolicy)
+		auth.GET("/network/proxy-egress", middleware.RequirePerm("proxy:manage"), h.GetEgressPolicy)
 		auth.PUT("/network/proxy-egress", middleware.RequirePerm("proxy:manage"), h.UpdateEgressPolicy)
 
 		auth.GET("/site-links", h.ListSiteLinks)
@@ -877,7 +879,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/site-links/:id", middleware.RequirePerm("config:manage"), h.UpdateSiteLink)
 		auth.DELETE("/site-links/:id", middleware.RequirePerm("config:manage"), h.DeleteSiteLink)
 
-		auth.GET("/system/email-templates", h.ListEmailTemplates)
+		auth.GET("/system/email-templates", middleware.RequirePerm("mail:manage"), h.ListEmailTemplates)
 		auth.POST("/system/email-templates", middleware.RequirePerm("config:manage"), h.CreateEmailTemplate)
 		auth.PUT("/system/email-templates/:id", middleware.RequirePerm("config:manage"), h.UpdateEmailTemplate)
 		auth.DELETE("/system/email-templates/:id", middleware.RequirePerm("config:manage"), h.DeleteEmailTemplate)
@@ -896,7 +898,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/alert-sources/:id/rotate", middleware.RequirePerm("source:manage"), h.RotateAlertSourceToken)
 		auth.DELETE("/alert-sources/:id", middleware.RequirePerm("source:manage"), h.DeleteAlertSource)
 
-		auth.GET("/notify/channels", h.ListNotifyChannels)
+		auth.GET("/notify/channels", middleware.RequirePerm("channel:manage"), h.ListNotifyChannels)
 		auth.POST("/notify/channels", middleware.RequirePerm("channel:manage"), h.CreateNotifyChannel)
 		auth.PUT("/notify/channels/:id", middleware.RequirePerm("channel:manage"), h.UpdateNotifyChannel)
 		auth.DELETE("/notify/channels/:id", middleware.RequirePerm("channel:manage"), h.DeleteNotifyChannel)
@@ -916,7 +918,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.DeleteNotifyRoute)
 		auth.POST("/notify/routes/test", h.TestNotifyRoute)
 
-		auth.GET("/notify/records", h.ListNotifyRecords)
+		auth.GET("/notify/records", middleware.RequirePerm("channel:manage"), h.ListNotifyRecords)
 
 		auth.GET("/system/announcements", h.ListAnnouncements)
 		auth.POST("/system/announcements", middleware.RequirePerm("announcement:manage"), h.CreateAnnouncement)
@@ -952,7 +954,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/resource-grants/:id", middleware.RequirePerm("grant:manage"), h.DeleteResourceGrant)
 		auth.GET("/resource-grants/diagnose/:id", h.DiagnoseResourceGrants)
 
-		auth.GET("/system/configs", h.ListConfigs)
+		auth.GET("/system/configs", middleware.RequirePerm("config:manage"), h.ListConfigs)
 		auth.POST("/system/configs", middleware.RequirePerm("config:manage"), h.CreateConfig)
 		auth.PUT("/system/configs", middleware.RequirePerm("config:manage"), h.UpdateConfigs)
 		auth.DELETE("/system/configs/:id", middleware.RequirePerm("config:manage"), h.DeleteConfig)
@@ -981,7 +983,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/databases/:id/query", middleware.RequirePerm("db:query"), h.RunDBQuery)
 		auth.POST("/databases/:id/query/export", middleware.RequirePerm("db:query"), h.ExportDBQuery)
 		auth.POST("/databases/query/check", middleware.RequirePerm("db:query"), h.CheckDBQueryStatement)
-		auth.GET("/databases/query-logs", h.ListDBQueryLogs)
+		auth.GET("/databases/query-logs", middleware.RequirePerm("audit:view"), h.ListDBQueryLogs)
 
 		auth.GET("/fixed-assets", h.ListFixedAssets)
 		auth.GET("/fixed-assets/stats", h.FixedAssetStats)
@@ -989,7 +991,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.UpdateFixedAsset)
 		auth.DELETE("/fixed-assets/:id", middleware.RequirePerm("asset:manage"), h.DeleteFixedAsset)
 
-		auth.GET("/cloud-accounts", h.ListCloudAccounts)
+		auth.GET("/cloud-accounts", middleware.RequirePerm("cloud:manage"), h.ListCloudAccounts)
 		auth.POST("/cloud-accounts", middleware.RequirePerm("cloud:manage"), h.CreateCloudAccount)
 		auth.PUT("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.UpdateCloudAccount)
 		auth.DELETE("/cloud-accounts/:id", middleware.RequirePerm("cloud:manage"), h.DeleteCloudAccount)
@@ -1024,7 +1026,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/purchase/orders/:id", middleware.RequirePerm("purchase:manage"), h.DeletePurchaseOrder)
 		auth.POST("/purchase/orders/:id/receive", middleware.RequirePerm("purchase:manage"), h.ReceivePurchaseOrder)
 
-		auth.GET("/build/servers", h.ListBuildServers)
+		auth.GET("/build/servers", middleware.RequirePerm("build:manage"), h.ListBuildServers)
 		auth.POST("/build/servers", middleware.RequirePerm("build:manage"), h.CreateBuildServer)
 		auth.PUT("/build/servers/:id", middleware.RequirePerm("build:manage"), h.UpdateBuildServer)
 		auth.DELETE("/build/servers/:id", middleware.RequirePerm("build:manage"), h.DeleteBuildServer)
@@ -1049,19 +1051,19 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 
 		// 防火墙策略：读真机规则、平台登记、对账、预检、下发、回滚。
 		// 下发与回滚都走 RunOnHosts，命令规则拦截与生产二次确认自动继承。
-		auth.GET("/firewall/state", h.GetFirewallState)
-		auth.GET("/firewall/rules", h.ListFirewallRules)
+		auth.GET("/firewall/state", middleware.RequirePerm("firewall:manage"), h.GetFirewallState)
+		auth.GET("/firewall/rules", middleware.RequirePerm("firewall:manage"), h.ListFirewallRules)
 		auth.POST("/firewall/rules", middleware.RequirePerm("firewall:manage"), h.CreateFirewallRule)
 		auth.PUT("/firewall/rules/:id", middleware.RequirePerm("firewall:manage"), h.UpdateFirewallRule)
 		auth.DELETE("/firewall/rules/:id", middleware.RequirePerm("firewall:manage"), h.DeleteFirewallRule)
 		auth.POST("/firewall/rules/adopt", middleware.RequirePerm("firewall:manage"), h.AdoptFirewallRule)
 		auth.POST("/firewall/precheck", middleware.RequirePerm("firewall:manage"), h.PrecheckFirewall)
 		auth.POST("/firewall/apply", middleware.RequirePerm("firewall:apply"), h.ApplyFirewall)
-		auth.GET("/firewall/snapshots", h.ListFirewallSnapshots)
-		auth.GET("/firewall/snapshots/:id", h.GetFirewallSnapshot)
+		auth.GET("/firewall/snapshots", middleware.RequirePerm("firewall:manage"), h.ListFirewallSnapshots)
+		auth.GET("/firewall/snapshots/:id", middleware.RequirePerm("firewall:manage"), h.GetFirewallSnapshot)
 		auth.POST("/firewall/snapshots/:id/rollback", middleware.RequirePerm("firewall:apply"), h.RollbackFirewall)
-		auth.GET("/firewall/cleanup", h.FirewallCleanup)
-		auth.GET("/firewall/groups", h.ListFirewallGroups)
+		auth.GET("/firewall/cleanup", middleware.RequirePerm("firewall:manage"), h.FirewallCleanup)
+		auth.GET("/firewall/groups", middleware.RequirePerm("firewall:manage"), h.ListFirewallGroups)
 		auth.POST("/firewall/groups", middleware.RequirePerm("firewall:manage"), h.SaveFirewallGroup)
 		auth.PUT("/firewall/groups/:id", middleware.RequirePerm("firewall:manage"), h.SaveFirewallGroup)
 		auth.DELETE("/firewall/groups/:id", middleware.RequirePerm("firewall:manage"), h.DeleteFirewallGroup)
@@ -1131,11 +1133,11 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/kube/clusters/:id/namespaces", h.KubeNamespaces)
 		auth.GET("/kube/clusters/:id/workloads", h.KubeWorkloads)
 		auth.GET("/kube/clusters/:id/pods", h.KubePods)
-		auth.GET("/kube/clusters/:id/pod-logs", h.KubePodLogs)
+		auth.GET("/kube/clusters/:id/pod-logs", middleware.RequirePerm("kube:manage"), h.KubePodLogs)
 		auth.GET("/kube/clusters/:id/events", h.KubeEvents)
 		auth.GET("/kube/resource-kinds", h.KubeResourceKinds)
 		auth.GET("/kube/clusters/:id/resources", h.KubeResources)
-		auth.GET("/kube/clusters/:id/resource", h.KubeResourceDetail)
+		auth.GET("/kube/clusters/:id/resource", middleware.RequirePerm("kube:manage"), h.KubeResourceDetail)
 		auth.GET("/kube/clusters/:id/resource/events", h.KubeObjectEvents)
 		auth.GET("/kube/clusters/:id/resource/pods", h.KubeRelatedPods)
 		auth.GET("/kube/clusters/:id/pod", h.KubePodDetail)
@@ -1144,29 +1146,29 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/kube/clusters/:id/helm-releases", h.KubeHelmReleases)
 		auth.GET("/kube/clusters/:id/crds", h.KubeCRDs)
 		auth.GET("/kube/clusters/:id/crd-resources", h.KubeCRDResources)
-		auth.GET("/kube/clusters/:id/crd-resource", h.KubeCRDResourceDetail)
+		auth.GET("/kube/clusters/:id/crd-resource", middleware.RequirePerm("kube:manage"), h.KubeCRDResourceDetail)
 		auth.GET("/kube/clusters/:id/gateway-routes", h.KubeGatewayRoutes)
-		auth.GET("/kube/clusters/:id/rbac", h.KubeRBAC)
+		auth.GET("/kube/clusters/:id/rbac", middleware.RequirePerm("kube:manage"), h.KubeRBAC)
 		auth.GET("/kube/clusters/:id/node-inventory", h.KubeNodeInventory)
 		auth.GET("/kube/clusters/:id/namespace-inventory", h.KubeNamespaceInventory)
 		auth.POST("/kube/clusters/:id/resource/apply", middleware.RequirePerm("kube:write"), h.ApplyKubeResource)
 		auth.POST("/kube/clusters/:id/resource/scale", middleware.RequirePerm("kube:write"), h.ScaleKubeResource)
 		auth.POST("/kube/clusters/:id/resource/restart", middleware.RequirePerm("kube:write"), h.RestartKubeWorkload)
-		auth.GET("/kube/change-logs", h.ListKubeChangeLogs)
-		auth.GET("/kube/forwards", h.ListKubeForwards)
+		auth.GET("/kube/change-logs", middleware.RequirePerm("kube:manage"), h.ListKubeChangeLogs)
+		auth.GET("/kube/forwards", middleware.RequirePerm("kube:forward"), h.ListKubeForwards)
 		auth.POST("/kube/forwards", middleware.RequirePerm("kube:forward"), h.CreateKubeForward)
 		auth.DELETE("/kube/forwards/:id", middleware.RequirePerm("kube:forward"), h.CloseKubeForward)
 
-		auth.GET("/ai/upstreams", h.ListModelUpstreams)
+		auth.GET("/ai/upstreams", middleware.RequirePerm("model:manage"), h.ListModelUpstreams)
 		auth.POST("/ai/upstreams", middleware.RequirePerm("model:manage"), h.CreateModelUpstream)
 		auth.PUT("/ai/upstreams/:id", middleware.RequirePerm("model:manage"), h.UpdateModelUpstream)
 		auth.DELETE("/ai/upstreams/:id", middleware.RequirePerm("model:manage"), h.DeleteModelUpstream)
 		auth.POST("/ai/upstreams/:id/check", middleware.RequirePerm("model:manage"), h.CheckModelUpstream)
 		// 网关入口：调用方按 Alias 请求，平台转发到池子里的上游
 		auth.POST("/ai/chat/completions", middleware.RequirePerm("model:call"), h.ChatCompletion)
-		auth.GET("/ai/calls", h.ListModelCalls)
-		auth.GET("/ai/calls/export", h.ExportModelCalls)
-		auth.GET("/ai/usage", h.ModelUsage)
+		auth.GET("/ai/calls", middleware.RequirePerm("model:manage"), h.ListModelCalls)
+		auth.GET("/ai/calls/export", middleware.RequirePerm("model:manage"), h.ExportModelCalls)
+		auth.GET("/ai/usage", middleware.RequirePerm("model:manage"), h.ModelUsage)
 
 		auth.GET("/ai/agents", h.ListAgentConfigs)
 		auth.POST("/ai/agents", middleware.RequirePerm("agent:manage"), h.CreateAgentConfig)
@@ -1176,32 +1178,32 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/ai/agent-runs", h.ListAgentRuns)
 		auth.GET("/ai/agent-runs/:id", h.GetAgentRun)
 
-		auth.GET("/system/im/apps", h.ListImApps)
+		auth.GET("/system/im/apps", middleware.RequirePerm("im:manage"), h.ListImApps)
 		auth.POST("/system/im/apps", middleware.RequirePerm("im:manage"), h.CreateImApp)
 		auth.PUT("/system/im/apps/:id", middleware.RequirePerm("im:manage"), h.UpdateImApp)
 		auth.DELETE("/system/im/apps/:id", middleware.RequirePerm("im:manage"), h.DeleteImApp)
 		auth.POST("/system/im/apps/:id/check", middleware.RequirePerm("im:manage"), h.CheckImApp)
 		auth.POST("/system/im/apps/:id/sync", middleware.RequirePerm("im:sync"), h.SyncImApp)
-		auth.GET("/system/im/sync-runs", h.ListImSyncRuns)
-		auth.GET("/system/im/accounts", h.ListImAccounts)
+		auth.GET("/system/im/sync-runs", middleware.RequirePerm("im:manage"), h.ListImSyncRuns)
+		auth.GET("/system/im/accounts", middleware.RequirePerm("im:manage"), h.ListImAccounts)
 		auth.DELETE("/system/im/accounts/:id", middleware.RequirePerm("im:manage"), h.UnbindImAccount)
 
 		// LDAP / AD 账号接入
-		auth.GET("/system/ldap/servers", h.ListLdapServers)
+		auth.GET("/system/ldap/servers", middleware.RequirePerm("ldap:manage"), h.ListLdapServers)
 		auth.POST("/system/ldap/servers", middleware.RequirePerm("ldap:manage"), h.CreateLdapServer)
 		auth.PUT("/system/ldap/servers/:id", middleware.RequirePerm("ldap:manage"), h.UpdateLdapServer)
 		auth.DELETE("/system/ldap/servers/:id", middleware.RequirePerm("ldap:manage"), h.DeleteLdapServer)
 		auth.POST("/system/ldap/servers/:id/check", middleware.RequirePerm("ldap:manage"), h.CheckLdapServer)
 		auth.GET("/system/ldap/servers/:id/users", middleware.RequirePerm("ldap:manage"), h.SearchLdapUsers)
 		auth.POST("/system/ldap/try-login", middleware.RequirePerm("ldap:manage"), h.TryLdapLogin)
-		auth.GET("/system/ldap/accounts", h.ListLdapAccounts)
+		auth.GET("/system/ldap/accounts", middleware.RequirePerm("ldap:manage"), h.ListLdapAccounts)
 		auth.POST("/system/ldap/accounts", middleware.RequirePerm("ldap:manage"), h.BindLdapAccount)
 		auth.DELETE("/system/ldap/accounts/:id", middleware.RequirePerm("ldap:manage"), h.UnbindLdapAccount)
 
 		// API 令牌（服务账号）
 		auth.GET("/me/whoami", h.WhoAmI)
-		auth.GET("/system/api-tokens", h.ListApiTokens)
-		auth.GET("/system/api-tokens/scopes", h.ListApiTokenScopes)
+		auth.GET("/system/api-tokens", middleware.RequirePerm("token:manage"), h.ListApiTokens)
+		auth.GET("/system/api-tokens/scopes", middleware.RequirePerm("token:manage"), h.ListApiTokenScopes)
 		auth.POST("/system/api-tokens", middleware.RequirePerm("token:manage"), h.CreateApiToken)
 		auth.PUT("/system/api-tokens/:id", middleware.RequirePerm("token:manage"), h.UpdateApiToken)
 		auth.POST("/system/api-tokens/:id/rotate", middleware.RequirePerm("token:manage"), h.RotateApiToken)
@@ -1224,7 +1226,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/exposures/:id/scan", middleware.RequirePerm("exposure:manage"), h.ScanExposureTarget)
 		auth.GET("/monitor/exposure-scans", h.ListExposureScans)
 
-		auth.GET("/monitor/metric-sources", h.ListMetricSources)
+		auth.GET("/monitor/metric-sources", middleware.RequirePerm("source:manage"), h.ListMetricSources)
 		auth.POST("/monitor/metric-sources", middleware.RequirePerm("metric:manage"), h.CreateMetricSource)
 		auth.PUT("/monitor/metric-sources/:id", middleware.RequirePerm("metric:manage"), h.UpdateMetricSource)
 		auth.DELETE("/monitor/metric-sources/:id", middleware.RequirePerm("metric:manage"), h.DeleteMetricSource)
@@ -1236,7 +1238,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/monitor/metrics/saved", middleware.RequirePerm("metric:manage"), h.CreateSavedMetricQuery)
 		auth.DELETE("/monitor/metrics/saved/:id", middleware.RequirePerm("metric:manage"), h.DeleteSavedMetricQuery)
 
-		auth.GET("/monitor/log-sources", h.ListLogSources)
+		auth.GET("/monitor/log-sources", middleware.RequirePerm("source:manage"), h.ListLogSources)
 		auth.POST("/monitor/log-sources", middleware.RequirePerm("log:manage"), h.CreateLogSource)
 		auth.PUT("/monitor/log-sources/:id", middleware.RequirePerm("log:manage"), h.UpdateLogSource)
 		auth.DELETE("/monitor/log-sources/:id", middleware.RequirePerm("log:manage"), h.DeleteLogSource)
@@ -1244,7 +1246,7 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.GET("/monitor/logs/query", h.QueryLogs)
 		auth.GET("/monitor/logs/labels", h.ListLogLabels)
 
-		auth.GET("/monitor/trace-sources", h.ListTraceSources)
+		auth.GET("/monitor/trace-sources", middleware.RequirePerm("source:manage"), h.ListTraceSources)
 		auth.POST("/monitor/trace-sources", middleware.RequirePerm("trace:manage"), h.CreateTraceSource)
 		auth.PUT("/monitor/trace-sources/:id", middleware.RequirePerm("trace:manage"), h.UpdateTraceSource)
 		auth.DELETE("/monitor/trace-sources/:id", middleware.RequirePerm("trace:manage"), h.DeleteTraceSource)
@@ -1256,14 +1258,14 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		// 主机日志：不依赖 Loki，直接 SSH 读主机上的文件。全部是只读命令。
 		auth.GET("/monitor/host-logs/meta", h.HostLogMeta)
 		auth.POST("/monitor/host-logs/view", middleware.RequirePerm("hostlog:view"), h.ViewHostLog)
-		auth.GET("/monitor/host-log-targets", h.ListHostLogTargets)
+		auth.GET("/monitor/host-log-targets", middleware.RequirePerm("hostlog:view"), h.ListHostLogTargets)
 		auth.POST("/monitor/host-log-targets", middleware.RequirePerm("hostlog:manage"), h.CreateHostLogTarget)
 		auth.PUT("/monitor/host-log-targets/:id", middleware.RequirePerm("hostlog:manage"), h.UpdateHostLogTarget)
 		auth.DELETE("/monitor/host-log-targets/:id", middleware.RequirePerm("hostlog:manage"), h.DeleteHostLogTarget)
 		auth.POST("/monitor/host-log-targets/:id/scan", middleware.RequirePerm("hostlog:manage"), h.ScanHostLogTarget)
 		auth.POST("/monitor/host-log-targets/scan-all", middleware.RequirePerm("hostlog:manage"), h.ScanAllHostLogTargets)
-		auth.GET("/monitor/host-log-scans", h.ListHostLogScans)
-		auth.GET("/monitor/log-usage", h.ListLogUsage)
+		auth.GET("/monitor/host-log-scans", middleware.RequirePerm("hostlog:view"), h.ListHostLogScans)
+		auth.GET("/monitor/log-usage", middleware.RequirePerm("hostlog:view"), h.ListLogUsage)
 		auth.POST("/monitor/log-usage/collect", middleware.RequirePerm("hostlog:manage"), h.CollectLogUsage)
 
 		auth.GET("/monitor/aggregation/dimensions", h.ListAggregationDimensions)
@@ -1348,11 +1350,11 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/exec/scripts/:id/render", h.RenderScript)
 		auth.POST("/exec/scripts/:id/run", middleware.RequirePerm("exec:run"), h.RunScript)
 
-		auth.GET("/hosts/export", h.ExportHosts)
+		auth.GET("/hosts/export", middleware.RequirePerm("host:update"), h.ExportHosts)
 		auth.GET("/hosts/import-template", h.HostImportTemplate)
 		auth.POST("/hosts/import", middleware.RequirePerm("host:create"), h.ImportHosts)
 
-		auth.GET("/system/retention", h.RetentionStatus)
+		auth.GET("/system/retention", middleware.RequirePerm("config:manage"), h.RetentionStatus)
 		auth.POST("/system/retention/run", middleware.RequirePerm("retention:run"), h.RunRetentionCleanup)
 	}
 

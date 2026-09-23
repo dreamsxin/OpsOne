@@ -203,12 +203,18 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 202, ParentID: 201, Title: "登录终端", Type: "button", AuthCode: "terminal:connect", Sort: 1},
 		{ID: 206, ParentID: 230, Name: "SessionAudit", Title: "会话审计", Path: "/execute/session", Component: "/execute/session/index", Icon: "VideoCamera", Sort: 2},
 		{ID: 207, ParentID: 206, Title: "回放会话", Type: "button", AuthCode: "session:replay", Sort: 1},
+		// 「看会话与命令」单列成一个码：命令明细比录像更好搜，而且命令行里出现口令、
+		// token 是常事。以前这几个接口只要登录就能读，任何人都能翻别人敲过的每一条命令
+		{ID: 208, ParentID: 206, Title: "查看会话与命令", Type: "button", AuthCode: "session:view", Sort: 2},
 		{ID: 210, ParentID: 230, Name: "FileManager", Title: "文件管理", Path: "/execute/file", Component: "/execute/file/index", Icon: "Folder", Sort: 3},
 		{ID: 213, ParentID: 210, Title: "上传与新建", Type: "button", AuthCode: "file:write", Sort: 1},
 		{ID: 214, ParentID: 210, Title: "浏览与下载", Type: "button", AuthCode: "file:read", Sort: 2},
 		{ID: 215, ParentID: 210, Title: "删除文件", Type: "button", AuthCode: "file:delete", Sort: 3},
 		{ID: 203, ParentID: 200, Name: "BatchExec", Title: "批量执行", Path: "/execute/batch", Component: "/execute/batch/index", Icon: "Cpu", Sort: 2},
 		{ID: 204, ParentID: 203, Title: "下发命令", Type: "button", AuthCode: "exec:run", Sort: 1},
+		// 生产主机单列一个码。原来「生产确认」只是前端的一个布尔回传，
+		// 直接调 API 写死 confirmProd=true 就绕过了 —— 那是个提示，不是控制
+		{ID: 205, ParentID: 203, Title: "在生产主机上执行", Type: "button", AuthCode: "exec:prod", Sort: 2},
 		{ID: 211, ParentID: 200, Name: "Scheduler", Title: "定时任务", Path: "/execute/scheduler", Component: "/execute/scheduler/index", Icon: "Timer", Sort: 3},
 		{ID: 216, ParentID: 211, Title: "维护任务", Type: "button", AuthCode: "cron:manage", Sort: 1},
 		{ID: 217, ParentID: 211, Title: "立即执行", Type: "button", AuthCode: "cron:run", Sort: 2},
@@ -380,6 +386,8 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 820, ParentID: 800, Name: "CommandRule", Title: "命令规则", Path: "/system/command-rule", Component: "/system/command-rule/index", Icon: "WarningFilled", Sort: 13},
 		{ID: 821, ParentID: 820, Title: "维护规则", Type: "button", AuthCode: "rule:manage", Sort: 1},
 		{ID: 822, ParentID: 800, Name: "AuditLog", Title: "操作审计", Path: "/system/audit", Component: "/system/audit/index", Icon: "Document", Sort: 14},
+		// 审计日志本身以前是「登录即可读 + 可导出 CSV」，等于审计对被审计的人完全透明
+		{ID: 829, ParentID: 822, Title: "查看与导出审计", Type: "button", AuthCode: "audit:view", Sort: 1},
 		{ID: 817, ParentID: 800, Name: "DataRetention", Title: "数据留存", Path: "/system/retention", Component: "/system/retention/index", Icon: "DeleteFilled", Sort: 15},
 		{ID: 828, ParentID: 817, Title: "执行清理", Type: "button", AuthCode: "retention:run", Sort: 1},
 
@@ -746,8 +754,7 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "smtp", Key: "smtp.password", Value: "", Type: "string", Label: "SMTP 密码", Remark: "配了 OPS_SECRET_KEY 时加密落库；配置接口不回传取值，留空表示不修改", Builtin: true},
 		{Group: "smtp", Key: "smtp.from", Value: "", Type: "string", Label: "发件人地址", Remark: "留空则用 SMTP 账号", Builtin: true},
 		{Group: "smtp", Key: "smtp.tls", Value: "true", Type: "bool", Label: "使用 TLS 直连", Remark: "465 端口通常需要开启", Builtin: true},
-		{Group: "proxy", Key: "proxy.test_url", Value: "", Type: "string", Label: "代理检测地址",
-			Remark: "检测出口代理时请求的地址。默认留空——内网不一定有可用的回显服务，平台不替你决定这台机器可以访问公网。填一个会回显来源 IP 的地址才能看出出口 IP", Builtin: true},
+		{Group: "proxy", Key: "proxy.test_url", Value: "", Type: "string", Label: "代理检测地址", Remark: "检测出口代理时请求的地址。默认留空——内网不一定有可用的回显服务，平台不替你决定这台机器可以访问公网。填一个会回显来源 IP 的地址才能看出出口 IP", Builtin: true},
 		{Group: "proxy", Key: "proxy.egress_id", Value: "0", Type: "int", Label: "统一出口代理",
 			Remark: "云 API / IM / Webhook / 大模型 / Jenkins 的出网都走这条代理。0 表示不统一出口，此时这些模块仍然遵守进程的 HTTP_PROXY 环境变量。配了但那条代理被停用或删除时，走出口的请求会直接失败并点名代理，不会退回直连。建议在「网络 → 代理检测」页面上改，那里会先校验代理确实检测通过", Builtin: true},
 		{Group: "proxy", Key: "proxy.bypass", Value: model.DefaultProxyBypass, Type: "string", Label: "不走代理的目标",
@@ -755,6 +762,10 @@ func seedSysConfigs(g *gorm.DB) error {
 		{Group: "kube", Key: "kube.grant_enforce", Value: "false", Type: "bool", Label: "启用容器平台授权",
 			Remark: "默认关闭，此时任何登录用户都能看到所有集群的只读数据（含 Pod 日志、RBAC）。开启前请先在「容器平台 → 授权管理」把授权配好：没有任何授权的集群，开启后对非管理员立刻完全不可见。拥有 kube:manage 的人不受限制", Builtin: true},
 		{Group: "security", Key: "security.totp.mode", Value: "optional", Type: "string", Label: "双因子口令策略", Remark: "optional 自愿绑定；required 未绑定的账号除个人页与绑定接口外一律拒绝", Builtin: true},
+		{Group: "security", Key: "security.login_max_fail", Value: "5", Type: "int", Label: "登录失败锁定阈值",
+			Remark: "同一「用户名+来源 IP」连续失败这么多次就锁定一段时间。0 表示不限制（不建议：原来就是没有限制，口令可以无限试）。动态验证码错误同样计数——只挡口令不挡验证码的话，拿到口令的人仍能对 6 位数字无限尝试", Builtin: true},
+		{Group: "security", Key: "security.login_lock_minutes", Value: "15", Type: "int", Label: "登录锁定时长（分钟）",
+			Remark: "锁定期内该「用户名+IP」组合直接拒绝。计数放在内存里，**进程重启即归零**，多实例时各自计数；留痕不受影响，失败登录照样写审计表", Builtin: true},
 		{Group: "retention", Key: "retention.exec_job_days", Value: "90", Type: "int", Label: "执行记录保留天数", Remark: "批量执行/脚本/定时任务的作业与逐台结果；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.probe_record_days", Value: "7", Type: "int", Label: "拨测记录保留天数", Remark: "拨测频率高、增长快，建议保持较短；0 表示永久保留", Builtin: true},
 		{Group: "retention", Key: "retention.exposure_scan_days", Value: "180", Type: "int", Label: "暴露面扫描记录保留天数", Remark: "留着才能回答「这个端口是什么时候开的」；0 表示永久保留", Builtin: true},

@@ -19,6 +19,10 @@ const (
 	CfgMaxUploadMB   = "file.max_upload_mb"
 	CfgExecConcurr   = "exec.concurrency"
 	CfgRecordKeepDay = "session.record_keep_days"
+	// CfgLoginMaxFail 连续失败多少次锁定登录；0 表示不限制（要显式配成 0 才生效）
+	CfgLoginMaxFail = "security.login_max_fail"
+	// CfgLoginLockMinutes 锁定多少分钟
+	CfgLoginLockMinutes = "security.login_lock_minutes"
 )
 
 // secretConfigKeys 值是密钥的配置项。

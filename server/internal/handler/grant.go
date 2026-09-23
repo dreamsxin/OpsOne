@@ -133,11 +133,28 @@ func (h *Handler) UpdateResourceGrant(c *gin.Context) {
 }
 
 func (h *Handler) DeleteResourceGrant(c *gin.Context) {
+	// 先把要删的内容读出来写进审计：删完之后 path 里那个 ID 就查不到对应的东西了，
+	// 「谁把张三对生产数据库的授权删了」这种问题只有这里能答
+	var grant model.ResourceGrant
+	if err := h.DB.First(&grant, idParam(c)).Error; err == nil {
+		middleware.SetAuditDetail(c, fmt.Sprintf(
+			"删除授权：%s#%d(%s) → %s#%d(%s) 动作 %s，有效期 %s",
+			grant.SubjectType, grant.SubjectID, grant.SubjectName,
+			grant.ResourceType, grant.ResourceID, grant.ResourceName,
+			grant.Actions, expiresText(grant.ExpiresAt)))
+	}
 	if err := h.DB.Delete(&model.ResourceGrant{}, idParam(c)).Error; err != nil {
 		response.Error(c, "授权删除失败")
 		return
 	}
 	response.OK(c, nil)
+}
+
+func expiresText(at *time.Time) string {
+	if at == nil {
+		return "长期"
+	}
+	return at.Format("2006-01-02 15:04")
 }
 
 // canDiagnoseUser 诊断自己不需要权限，诊断别人需要对应的管理权限。

@@ -137,6 +137,24 @@ func RequirePerm(code string) gin.HandlerFunc {
 	}
 }
 
+// RequireAnyPerm 命中任意一个码即可放行。
+//
+// 给「一个接口被多个角色的正当流程共用」的情况用，例如菜单树既是菜单管理页要读的，
+// 也是角色配菜单的弹窗要读的 —— 只认一个码会让只有 role:manage 的人配不了角色。
+// 不要拿它当放宽手段：列出来的每个码都应该是「持有它的人本来就该看到这些数据」。
+func RequireAnyPerm(codes ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		perms := Perms(c)
+		for _, code := range codes {
+			if _, ok := perms[code]; ok {
+				c.Next()
+				return
+			}
+		}
+		response.Forbidden(c, "无权执行该操作，需要其中之一: "+strings.Join(codes, " / "))
+	}
+}
+
 // CurrentUser 取当前登录用户
 func CurrentUser(c *gin.Context) *model.User {
 	if v, ok := c.Get(ctxUserKey); ok {
