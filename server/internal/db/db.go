@@ -142,9 +142,11 @@ func Migrate(g *gorm.DB, binaryVersion string) error {
 //
 // 菜单 ID 按模块分段：10 工作台 / 100 资产 / 200 运维执行 / 300 容器 / 400 监控告警 /
 // 500 安全合规 / 600 智能与成本 / 700 配置中心 / 800 系统管理 / 900 消息中心。
-// Component 指向 /placeholder/index 的条目表示模块规划已确定、功能尚未实现。
+//
+// **菜单 ID 不能重复**：upsertBuiltinMenus 按 ID upsert，清单里后写的会把前面
+// 整条覆盖掉，对应的权限码等于没种进去 —— 这踩过一次（exec:prod 与 audit:view
+// 都曾因此失效）。`TestSeedMenuIDsAreUnique` 现在守着这条。
 func Seed(g *gorm.DB, adminPwd string) error {
-	const todo = "/placeholder/index"
 
 	menus := []model.Menu{
 		// ---------- 工作台 ----------
@@ -215,6 +217,11 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		// 生产主机单列一个码。原来「生产确认」只是前端的一个布尔回传，
 		// 直接调 API 写死 confirmProd=true 就绕过了 —— 那是个提示，不是控制
 		{ID: 209, ParentID: 203, Title: "在生产主机上执行", Type: "button", AuthCode: "exec:prod", Sort: 2},
+		// 「看别人的执行历史」单列一个码。复核时发现的口径不一致：会话里敲的命令
+		// 单列了 session:view，而批量下发的 stdout 往往更敏感（cat 一个配置文件、
+		// 证书会整份出现在输出里），却只要 exec:run 就能看全平台的。
+		// 没有这个码的人仍然看得到**自己**下发的历史，不是一刀砍掉
+		{ID: 223, ParentID: 203, Title: "查看他人执行历史", Type: "button", AuthCode: "exec:view", Sort: 3},
 		{ID: 211, ParentID: 200, Name: "Scheduler", Title: "定时任务", Path: "/execute/scheduler", Component: "/execute/scheduler/index", Icon: "Timer", Sort: 3},
 		{ID: 216, ParentID: 211, Title: "维护任务", Type: "button", AuthCode: "cron:manage", Sort: 1},
 		{ID: 217, ParentID: 211, Title: "立即执行", Type: "button", AuthCode: "cron:run", Sort: 2},
@@ -328,7 +335,12 @@ func Seed(g *gorm.DB, adminPwd string) error {
 		{ID: 525, ParentID: 523, Title: "取用明文", Type: "button", AuthCode: "vault:reveal", Sort: 2},
 		{ID: 526, ParentID: 500, Name: "VaultTOTP", Title: "2FA 验证码库", Path: "/security/vault-totp", Component: "/security/vault-totp/index", Icon: "Iphone", Sort: 11},
 		{ID: 527, ParentID: 526, Title: "维护种子", Type: "button", AuthCode: "vault:manage", Sort: 1},
-		{ID: 528, ParentID: 526, Title: "出验证码", Type: "button", AuthCode: "vault:reveal", Sort: 2},
+		// 出验证码单列一个码。平台刻意把口令和 2FA 种子分成两个库存，
+		// 但取用权限原来合成了一个 vault:reveal —— 能看密码的人必然能出验证码、
+		// 反之亦然，双因子的分离在权限层面被抹掉了。所以拆开。
+		// 老库升级会自动改过来：upsertBuiltinMenus 强制覆盖 auth_code，
+		// 原来绑了这个按钮的角色会自然得到 totp:reveal
+		{ID: 528, ParentID: 526, Title: "出验证码", Type: "button", AuthCode: "totp:reveal", Sort: 2},
 
 		// ---------- 智能与成本 ----------
 		{ID: 600, Name: "Intelligence", Title: "智能与成本", Path: "/ai", Icon: "MagicStick", Sort: 70},

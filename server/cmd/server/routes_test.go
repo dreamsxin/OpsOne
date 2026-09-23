@@ -339,6 +339,11 @@ func TestSensitiveReadsAreGated(t *testing.T) {
 		// 配置文件正文
 		`auth.GET("/config-files/:id"`:    "configfile:manage",
 		`auth.GET("/config-versions/:id"`: "configfile:manage",
+		// 2FA 库的取用要独立的码：平台把口令和 2FA 种子分两个库存，
+		// 取用权限却曾经合成一个 vault:reveal —— 双因子的分离在权限层面被抹掉了
+		`auth.POST("/vault/totps/:id/code"`:      "totp:reveal",
+		`auth.POST("/vault/totps/:id/uri"`:       "totp:reveal",
+		`auth.POST("/vault/accounts/:id/reveal"`: "vault:reveal",
 	}
 	for needle, code := range mustGate {
 		idx := strings.Index(text, needle)

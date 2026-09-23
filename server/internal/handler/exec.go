@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
@@ -254,10 +255,56 @@ func (h *Handler) fanOut(ctx context.Context, hosts []model.Host, command string
 	return results
 }
 
+// execJobsVisible 能不能看别人的执行历史。
+//
+// 复核时发现的口径不一致：会话里敲的命令单列了 session:view（理由是命令行里
+// 出现口令是常事），而**批量下发的输出往往更敏感** —— `cat` 一个配置文件、
+// 证书、`/etc/shadow` 会整份出现在 stdout 里 —— 却只要 exec:run 就能看全平台的。
+//
+// 现在分两层：有 `exec:view` 的人看全部；只有 `exec:run` 的人**只看自己下发的**。
+// 不是直接 403 —— 那样「下发完看不到自己刚跑的结果」，等于把功能砍掉一半。
+func (h *Handler) execJobsVisible(c *gin.Context) bool {
+	_, ok := middleware.Perms(c)["exec:view"]
+	return ok
+}
+
+// scopeExecJobs 没有 exec:view 时把查询收窄到自己创建的作业
+func (h *Handler) scopeExecJobs(c *gin.Context, q *gorm.DB) *gorm.DB {
+	if h.execJobsVisible(c) {
+		return q
+	}
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		// 取不到登录者时给空结果，而不是「不加条件」——与 scope.go 同一条口径
+		return q.Where("1 = 0")
+	}
+	return q.Where("created_by = ?", user.ID)
+}
+
+// loadExecJobScoped 取一个作业并按可见性判断。
+//
+// 看不到别人的作业时返回 **404 而不是 403**：403 等于告诉对方「这个 ID 存在」，
+// 那就成了一个能用来数别人下发量的探针。
+func (h *Handler) loadExecJobScoped(c *gin.Context) (*model.ExecJob, bool) {
+	var job model.ExecJob
+	if err := h.DB.First(&job, idParam(c)).Error; err != nil {
+		response.NotFound(c, "执行记录不存在")
+		return nil, false
+	}
+	if !h.execJobsVisible(c) {
+		user := middleware.CurrentUser(c)
+		if user == nil || job.CreatedBy != user.ID {
+			response.NotFound(c, "执行记录不存在")
+			return nil, false
+		}
+	}
+	return &job, true
+}
+
 // ListExecJobs 执行历史，可按来源或定时任务过滤
 func (h *Handler) ListExecJobs(c *gin.Context) {
 	page, size := pageParams(c)
-	q := h.DB.Model(&model.ExecJob{})
+	q := h.scopeExecJobs(c, h.DB.Model(&model.ExecJob{}))
 	if source := c.Query("source"); source != "" {
 		q = q.Where("source = ?", source)
 	}
@@ -280,8 +327,12 @@ func (h *Handler) ListExecJobs(c *gin.Context) {
 
 // GetExecJob 执行详情含每台主机输出
 func (h *Handler) GetExecJob(c *gin.Context) {
-	var job model.ExecJob
-	if err := h.DB.Preload("Results").First(&job, idParam(c)).Error; err != nil {
+	job, ok := h.loadExecJobScoped(c)
+	if !ok {
+		return
+	}
+	// 输出明细单独查：loadExecJobScoped 只负责可见性，不关心要不要带结果
+	if err := h.DB.Preload("Results").First(job, job.ID).Error; err != nil {
 		response.NotFound(c, "作业不存在")
 		return
 	}

@@ -2853,14 +2853,10 @@ export const listTopologyResources = () =>
   })
 export const createTopology = (data: { name: string; remark?: string }) =>
   request<TopologySummary>({ url: '/monitor/topologies', method: 'POST', data })
-export const updateTopology = (id: number, data: { name: string; remark?: string }) =>
-  request({ url: `/monitor/topologies/${id}`, method: 'PUT', data })
 export const deleteTopology = (id: number) =>
   request<{ detail: string }>({ url: `/monitor/topologies/${id}`, method: 'DELETE' })
 export const createTopologyNode = (id: number, data: Record<string, any>) =>
   request<TopologyNode>({ url: `/monitor/topologies/${id}/nodes`, method: 'POST', data })
-export const updateTopologyNode = (id: number, nodeId: number, data: Record<string, any>) =>
-  request({ url: `/monitor/topologies/${id}/nodes/${nodeId}`, method: 'PUT', data })
 export const deleteTopologyNode = (id: number, nodeId: number) =>
   request<{ detail: string }>({ url: `/monitor/topologies/${id}/nodes/${nodeId}`, method: 'DELETE' })
 export const saveTopologyLayout = (id: number, nodes: { id: number; x: number; y: number }[]) =>
@@ -5567,15 +5563,7 @@ export type RuleVersionTarget =
   | 'resource_grant'
   | 'kube_grant'
 
-export interface RuleVersionTargetSpec {
-  target: RuleVersionTarget
-  label: string
-  fields: { key: string; label: string }[]
-  runtimeNote: string
-}
 
-export const listRuleVersionTargets = () =>
-  request<RuleVersionTargetSpec[]>({ url: '/monitor/rule-version-targets' })
 export const listRuleVersions = (target: RuleVersionTarget, params?: Record<string, any>) =>
   request<{
     target: string
@@ -5585,12 +5573,7 @@ export const listRuleVersions = (target: RuleVersionTarget, params?: Record<stri
     limit: number
     notes: string[]
   }>({ url: '/monitor/rule-versions', params: { ...params, target } })
-export const getRuleVersion = (id: number) =>
-  request<{
-    version: RuleVersion
-    label: string
-    fields: { key: string; label: string; value: string }[]
-  }>({ url: `/monitor/rule-versions/${id}` })
+
 export const diffRuleVersions = (from: number, to: number) =>
   request<{
     target: string
@@ -5715,10 +5698,6 @@ export const runCloudSync = (id: number, resourceType?: string) =>
   request<CloudSyncRun[]>({ url: `/cloud-accounts/${id}/sync`, method: 'POST', data: { resourceType } })
 export const listCloudResources = (params?: Record<string, any>) =>
   request<PageData<CloudResource>>({ url: '/cloud-resources', params })
-export const cloudResourceStats = () =>
-  request<{ resourceType: string; status: string; gone: boolean; count: number }[]>({
-    url: '/cloud-resources/stats'
-  })
 export const cloudDrift = () => request<CloudDrift>({ url: '/cloud-resources/drift' })
 export const adoptCloudResource = (id: number, data: Record<string, any>) =>
   request<Host>({ url: `/cloud-resources/${id}/adopt`, method: 'POST', data })

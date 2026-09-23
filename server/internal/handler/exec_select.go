@@ -147,11 +147,12 @@ func (h *Handler) ResolveExecHosts(c *gin.Context) {
 // 不是「复制作业再跑一遍」：那会把已经成功的机器再执行一次，
 // 而很多运维命令不是幂等的（追加配置、重启服务、扩容）。
 func (h *Handler) RerunFailedExecJob(c *gin.Context) {
-	var job model.ExecJob
-	if err := h.DB.First(&job, idParam(c)).Error; err != nil {
-		response.NotFound(c, "执行记录不存在")
+	// 重跑别人的作业要能先看到它：没有 exec:view 时只能重跑自己下发的
+	jobPtr, ok := h.loadExecJobScoped(c)
+	if !ok {
 		return
 	}
+	job := *jobPtr
 	if job.Status == "running" {
 		response.BadRequest(c, "这次下发还在跑，先等它结束或者取消它")
 		return
@@ -208,6 +209,10 @@ func (h *Handler) RerunFailedExecJob(c *gin.Context) {
 
 // CancelExecJob 停掉正在跑的下发。
 //
+// **刻意允许停别人的**：这个功能存在的场景就是「有人往生产刷了个错命令」，
+// 那时候要求"只能本人停"等于没有这个功能。代价是要把「谁停了谁的」记清楚，
+// 所以审计明细里带上原作业的操作人。
+//
 // 取消是**进程内**的：作业的取消函数存在发起它的那个进程里。
 // 多实例部署时在另一个实例上发起的作业取消不了 —— 这一点如实返回，
 // 不假装成功（假装成功会让人以为命令已经停了）。
@@ -228,10 +233,10 @@ func (h *Handler) CancelExecJob(c *gin.Context) {
 			"也可能是另一个实例发起的（取消是进程内的）。刷新看看状态")
 		return
 	}
-	// 记谁停的：这一行是事后复盘时的关键信息
+	// 记谁停的 + 停的是谁的：事后复盘时这两个都要
 	h.DB.Model(&model.ExecJob{ID: job.ID}).Update("canceled_by", user.Username)
-	middleware.SetAuditDetail(c, fmt.Sprintf("取消下发 #%d（%s），命令：%s",
-		job.ID, job.Name, truncate(job.Command, 200)))
+	middleware.SetAuditDetail(c, fmt.Sprintf("取消下发 #%d（%s，由 %s 发起），命令：%s",
+		job.ID, job.Name, job.Operator, truncate(job.Command, 200)))
 	response.OK(c, gin.H{
 		"canceled": true,
 		"note": "已发出取消。已经在跑的那几台会收到 SIGKILL 尝试，" +

@@ -740,8 +740,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.POST("/vault/totps", middleware.RequirePerm("vault:manage"), h.CreateVaultTOTP)
 		auth.PUT("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.UpdateVaultTOTP)
 		auth.DELETE("/vault/totps/:id", middleware.RequirePerm("vault:manage"), h.DeleteVaultTOTP)
-		auth.POST("/vault/totps/:id/code", middleware.RequirePerm("vault:reveal"), h.CodeVaultTOTP)
-		auth.POST("/vault/totps/:id/uri", middleware.RequirePerm("vault:reveal"), h.URIVaultTOTP)
+		auth.POST("/vault/totps/:id/code", middleware.RequirePerm("totp:reveal"), h.CodeVaultTOTP)
+		auth.POST("/vault/totps/:id/uri", middleware.RequirePerm("totp:reveal"), h.URIVaultTOTP)
 
 		// 安全意识：学员侧（人人可用，只能看/做自己的那份）
 		auth.GET("/security/awareness/my", h.ListMyAwareness)
@@ -815,8 +815,8 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.DELETE("/scheduler/jobs/:id", middleware.RequirePerm("cron:manage"), h.DeleteCronJob)
 		auth.POST("/scheduler/jobs/:id/run", middleware.RequirePerm("cron:run"), h.RunCronJobNow)
 
-		auth.GET("/exec/jobs", middleware.RequirePerm("exec:run"), h.ListExecJobs)
-		auth.GET("/exec/jobs/:id", middleware.RequirePerm("exec:run"), h.GetExecJob)
+		auth.GET("/exec/jobs", middleware.RequireAnyPerm("exec:run", "exec:view"), h.ListExecJobs)
+		auth.GET("/exec/jobs/:id", middleware.RequireAnyPerm("exec:run", "exec:view"), h.GetExecJob)
 		auth.POST("/exec/jobs", middleware.RequirePerm("exec:run"), h.RunExecJob)
 		// 下发闸门：预检与拦截流水
 		auth.POST("/exec/precheck", middleware.RequirePerm("exec:run"), h.PrecheckExec)
