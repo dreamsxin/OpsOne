@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -600,6 +601,91 @@ func mapJenkinsResult(result string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// ---------- Jenkins 只读透传：构建历史与控制台日志 ----------
+//
+// 平台不轮询、不代管 Jenkins 的数据，只做「按需代读」：人在平台里点开一次，
+// 才去 Jenkins 拉一次。凭据复用构建服务器登记的那份，走统一出口。
+
+// jenkinsBuildInfo 构建任务与所属服务器（历史/日志两个透传共用）
+func (h *Handler) jenkinsBuildInfo(c *gin.Context) (*model.BuildJob, *model.BuildServer, bool) {
+	job, ok := h.loadBuildJobScoped(c)
+	if !ok {
+		return nil, nil, false
+	}
+	var server model.BuildServer
+	if err := h.DB.First(&server, job.ServerID).Error; err != nil {
+		response.BadRequest(c, "构建服务器不存在")
+		return nil, nil, false
+	}
+	if !server.Enabled {
+		response.BadRequest(c, "构建服务器已停用")
+		return nil, nil, false
+	}
+	return job, &server, true
+}
+
+// JenkinsBuildHistory 最近构建列表：tree 查询限定字段与条数，Jenkins 侧最多算 30 个
+func (h *Handler) JenkinsBuildHistory(c *gin.Context) {
+	job, server, ok := h.jenkinsBuildInfo(c)
+	if !ok {
+		return
+	}
+	path := jobAPIPath(job.JobPath) +
+		"/api/json?tree=builds[number,result,timestamp,duration,building]{0,30}"
+	_, body, err := h.jenkinsRequest(server, http.MethodGet, path, nil)
+	if err != nil {
+		response.BadRequest(c, "读取构建历史失败: "+err.Error())
+		return
+	}
+	var data struct {
+		Builds []struct {
+			Number    int    `json:"number"`
+			Result    string `json:"result"`
+			Timestamp int64  `json:"timestamp"`
+			Duration  int64  `json:"duration"`
+			Building  bool   `json:"building"`
+		} `json:"builds"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		response.Error(c, "构建历史解析失败")
+		return
+	}
+	list := make([]gin.H, 0, len(data.Builds))
+	for _, b := range data.Builds {
+		status := mapJenkinsResult(b.Result)
+		if b.Building {
+			status = "running"
+		}
+		list = append(list, gin.H{
+			"buildNo": b.Number, "status": status, "result": b.Result,
+			"startedAt": time.Unix(b.Timestamp/1000, 0).Format("01-02 15:04:05"),
+			"durationMs": b.Duration, "building": b.Building,
+		})
+	}
+	response.OK(c, gin.H{"list": list})
+}
+
+// JenkinsBuildConsole 某次构建的控制台日志（consoleText 原样返回，最多 1MB）
+func (h *Handler) JenkinsBuildConsole(c *gin.Context) {
+	job, server, ok := h.jenkinsBuildInfo(c)
+	if !ok {
+		return
+	}
+	buildNo, err := strconv.Atoi(c.Param("buildNo"))
+	if err != nil || buildNo <= 0 {
+		response.BadRequest(c, "构建号必须是正整数")
+		return
+	}
+	// 构建号只允许数字，杜绝把路径参数拼成别的 Jenkins API
+	path := jobAPIPath(job.JobPath) + "/" + strconv.Itoa(buildNo) + "/consoleText"
+	_, body, err := h.jenkinsRequest(server, http.MethodGet, path, nil)
+	if err != nil {
+		response.BadRequest(c, "读取构建日志失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"buildNo": buildNo, "text": string(body)})
 }
 
 func validateJSONObject(raw string) error {

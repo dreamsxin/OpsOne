@@ -6,6 +6,8 @@ import {
   createBuildServer,
   deleteBuildJob,
   deleteBuildServer,
+  jenkinsBuildConsole,
+  jenkinsBuildHistory,
   listBuildJobs,
   listBuildRecords,
   listBuildServers,
@@ -22,6 +24,57 @@ import Pagination from '@/components/Pagination.vue'
 
 
 const tab = ref('jobs')
+
+// ---------- Jenkins 只读透传：构建历史与控制台日志 ----------
+// 平台不轮询不代管 Jenkins，点开一次才去拉一次，失败原因不用再切 Jenkins 界面查
+const historyVisible = ref(false)
+const historyJob = ref<BuildJob | null>(null)
+const historyLoading = ref(false)
+const historyRows = ref<{ buildNo: number; status: string; startedAt: string; durationMs: number; building: boolean }[]>([])
+
+const consoleVisible = ref(false)
+const consoleLoading = ref(false)
+const consoleText = ref('')
+const consoleBuildNo = ref(0)
+
+async function openHistory(row: BuildJob) {
+  historyJob.value = row
+  historyVisible.value = true
+  historyLoading.value = true
+  try {
+    const res = await jenkinsBuildHistory(row.id)
+    historyRows.value = res.list || []
+  } catch (err: any) {
+    ElMessage.error(err?.message || '读取构建历史失败')
+    historyRows.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function openConsole(buildNo: number) {
+  if (!historyJob.value) return
+  consoleBuildNo.value = buildNo
+  consoleVisible.value = true
+  consoleLoading.value = true
+  consoleText.value = ''
+  try {
+    const res = await jenkinsBuildConsole(historyJob.value.id, buildNo)
+    consoleText.value = res.text || '（日志为空）'
+  } catch (err: any) {
+    ElMessage.error(err?.message || '读取构建日志失败')
+  } finally {
+    consoleLoading.value = false
+  }
+}
+
+const historyStatusMeta: Record<string, 'success' | 'danger' | 'warning' | 'info'> = {
+  success: 'success',
+  failure: 'danger',
+  unstable: 'warning',
+  aborted: 'info',
+  running: 'warning'
+}
 
 // ---------- 构建任务 ----------
 const jobLoading = ref(false)
@@ -309,9 +362,10 @@ onMounted(() => {
             </el-table-column>
             <el-table-column prop="lastBuildNo" label="构建号" width="90" />
             <el-table-column prop="lastRunAt" label="最近触发" min-width="180" />
-            <el-table-column label="操作" width="200" fixed="right">
+            <el-table-column label="操作" width="240" fixed="right">
               <template #default="{ row }">
                 <el-button v-perm="'build:run'" link type="primary" @click="openTrigger(row)">构建</el-button>
+                <el-button link type="primary" @click="openHistory(row)">历史</el-button>
                 <el-button v-perm="'build:manage'" link type="primary" @click="openJobEdit(row)">编辑</el-button>
                 <el-button v-perm="'build:manage'" link type="danger" @click="removeJob(row)">删除</el-button>
               </template>
@@ -507,6 +561,42 @@ onMounted(() => {
         <el-button type="primary" @click="submitTrigger">开始构建</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="historyVisible" :title="`构建历史 · ${historyJob?.name || ''}`" size="60%">
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="按需从 Jenkins 代读，平台不轮询不落库；点某一次构建可看控制台日志，排查失败不用再切 Jenkins 界面"
+      />
+      <el-table v-loading="historyLoading" :data="historyRows" border stripe size="small" empty-text="Jenkins 返回空历史，或该 job 还没构建过">
+        <el-table-column prop="buildNo" label="构建号" width="80" />
+        <el-table-column label="结果" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="historyStatusMeta[row.status] || 'info'">
+              {{ statusMeta[row.status]?.text || row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="startedAt" label="开始时间" min-width="150" />
+        <el-table-column label="耗时" width="110">
+          <template #default="{ row }">
+            {{ row.building ? '进行中' : row.durationMs ? `${Math.round(row.durationMs / 1000)}s` : '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openConsole(row.buildNo)">日志</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
+
+    <el-drawer v-model="consoleVisible" :title="`控制台日志 · #${consoleBuildNo}`" size="70%">
+      <div v-loading="consoleLoading">
+        <pre v-if="consoleText" class="console-box">{{ consoleText }}</pre>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -516,5 +606,19 @@ onMounted(() => {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+.console-box {
+  margin: 0;
+  padding: 10px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 6px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
 }
 </style>

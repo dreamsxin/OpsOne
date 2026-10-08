@@ -589,7 +589,12 @@ export interface SiteLink {
   description: string
   sort: number
   enabled: boolean
+  /** 内嵌打开：平台内以 iframe 呈现，而不是跳新窗口 */
+  embed?: boolean
 }
+
+export const getSiteLink = (id: number) =>
+  request<SiteLink>({ url: `/site-links/${id}` })
 
 export interface EmailTemplate {
   id: number
@@ -1214,6 +1219,32 @@ export const triggerBuildJob = (id: number, data: { params?: Record<string, stri
     method: 'POST',
     data
   })
+
+/** Jenkins 只读透传：构建历史与控制台日志，平台不轮询不落库 */
+export const jenkinsBuildHistory = (id: number) =>
+  request<{ list: { buildNo: number; status: string; result: string; startedAt: string; durationMs: number; building: boolean }[] }>({
+    url: `/build/jobs/${id}/history`
+  })
+export const jenkinsBuildConsole = (id: number, buildNo: number) =>
+  request<{ buildNo: number; text: string }>({
+    url: `/build/jobs/${id}/builds/${buildNo}/console`
+  })
+
+// ---------- 通知路由版本快照 ----------
+
+export interface RouteSnapshot {
+  id: number
+  routeCount: number
+  operation: 'create' | 'update' | 'delete' | 'rollback'
+  username: string
+  createdAt: string
+}
+export const listRouteSnapshots = () =>
+  request<RouteSnapshot[]>({ url: '/notify/routes/snapshots' })
+export const getRouteSnapshot = (id: number) =>
+  request<{ snapshot: RouteSnapshot; routes: NotifyRoute[] }>({ url: `/notify/routes/snapshots/${id}` })
+export const rollbackRouteSnapshot = (id: number) =>
+  request<{ restored: number }>({ url: `/notify/routes/snapshots/${id}/rollback`, method: 'POST' })
 
 export const listBuildRecords = (params: Record<string, any>) =>
   request<PageData<BuildRecord>>({ url: '/build/records', params })
@@ -3819,12 +3850,14 @@ export interface AgentConfig {
   id: number
   name: string
   alias: string
-  dataSource: 'none' | 'alert' | 'host_metric' | 'exec_job' | 'session_command'
+  dataSource: 'none' | 'alert' | 'host_metric' | 'exec_job' | 'session_command' | 'alert_detail'
   maxItems: number
   systemPrompt: string
   promptTemplate: string
   temperature: number
   maxTokens: number
+  autoRun: boolean
+  autoSeverity: string
   enabled: boolean
   remark: string
   createdAt: string
@@ -4880,6 +4913,26 @@ export const deleteEgressProxy = (id: number) =>
 export const checkEgressProxy = (id: number, testUrl?: string) =>
   request<ProxyCheckResult>({
     url: `/network/proxies/${id}/check`,
+    method: 'POST',
+    data: { testUrl: testUrl || '' }
+  })
+
+/** 批量检测全部启用的代理：巡检视角，回答「哪条该换」 */
+export interface ProxyBatchItem {
+  id: number
+  name: string
+  status: string
+  verdict?: string
+  directOK?: boolean
+  viaProxyOK?: boolean
+  costMs?: number
+  exitIp?: string
+  error?: string
+  reason?: string
+}
+export const checkAllEgressProxies = (testUrl?: string) =>
+  request<{ list: ProxyBatchItem[]; total: number; skipped: number }>({
+    url: '/network/proxies/check-all',
     method: 'POST',
     data: { testUrl: testUrl || '' }
   })

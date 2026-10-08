@@ -17,6 +17,7 @@ package handler
 import (
 	"fmt"
 	"io"
+	"sync"
 	"net"
 	"net/http"
 	"net/url"
@@ -190,38 +191,33 @@ type proxyCheckReq struct {
 	TestURL string `json:"testUrl"`
 }
 
-// CheckEgressProxy 直连一次 + 走代理一次，把两个结果摆在一起。
-//
-// 两次都打同一个地址，否则对比没有意义。
-func (h *Handler) CheckEgressProxy(c *gin.Context) {
-	var item model.EgressProxy
-	if err := h.DB.First(&item, idParam(c)).Error; err != nil {
-		response.NotFound(c, "代理不存在")
-		return
-	}
-	var req proxyCheckReq
-	_ = c.ShouldBindJSON(&req)
-
-	target := strings.TrimSpace(req.TestURL)
+// resolveProxyTestURL 解析这条代理的测试地址：请求参数 > 单条配置 > 全局配置。
+// 返回空串表示没有可用测试地址。
+func (h *Handler) resolveProxyTestURL(item *model.EgressProxy, override string) string {
+	target := strings.TrimSpace(override)
 	if target == "" {
 		target = strings.TrimSpace(item.TestURL)
 	}
 	if target == "" {
-		target = h.configString(CfgProxyTestURL, "")
+		target = strings.TrimSpace(h.configString(CfgProxyTestURL, ""))
 	}
+	return target
+}
+
+// probeProxy 直连一次 + 走代理一次，写回检测痕迹，返回可直接给前端的 payload。
+// target 为空或不合法时返回 error（提示语面向单条检测的页面）。
+func (h *Handler) probeProxy(item *model.EgressProxy, target string) (gin.H, error) {
 	if target == "" {
-		response.BadRequest(c, "没有测试地址：请在这条代理上填一个，或在系统配置里设 proxy.test_url。"+
+		return nil, fmt.Errorf("没有测试地址：请在这条代理上填一个，或在系统配置里设 proxy.test_url。"+
 			"平台不替你默认填一个公网地址 —— 那等于替你决定了这台机器可以访问公网")
-		return
 	}
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		response.BadRequest(c, "测试地址必须是 http:// 或 https:// 开头")
-		return
+		return nil, fmt.Errorf("测试地址必须是 http:// 或 https:// 开头")
 	}
 
 	direct := tryURL(&http.Client{Timeout: proxyCheckTimeout}, target)
 
-	client, err := h.proxyClient(item, proxyCheckTimeout)
+	client, err := h.proxyClient(*item, proxyCheckTimeout)
 	var viaProxy probeAttempt
 	if err != nil {
 		viaProxy = probeAttempt{Error: err.Error()}
@@ -239,7 +235,7 @@ func (h *Handler) CheckEgressProxy(c *gin.Context) {
 		"last_cost_ms": viaProxy.CostMs, "last_error": truncate(viaProxy.Error, 240),
 		"exit_ip": viaProxy.ExitIP,
 	}
-	h.DB.Model(&item).Updates(updates)
+	h.DB.Model(item).Updates(updates)
 
 	// 结论是这一页的价值所在：把两个结果的组合翻译成一句人能直接照着做的话
 	verdict := ""
@@ -265,7 +261,96 @@ func (h *Handler) CheckEgressProxy(c *gin.Context) {
 	} else if direct.ExitIP != "" && direct.ExitIP == viaProxy.ExitIP {
 		payload["exitIPNote"] = "出口 IP 与直连相同：代理可能是透明代理，也可能与本机共用出口"
 	}
+	return payload, nil
+}
+
+// CheckEgressProxy 单条检测
+func (h *Handler) CheckEgressProxy(c *gin.Context) {
+	var item model.EgressProxy
+	if err := h.DB.First(&item, idParam(c)).Error; err != nil {
+		response.NotFound(c, "代理不存在")
+		return
+	}
+	var req proxyCheckReq
+	_ = c.ShouldBindJSON(&req)
+
+	payload, err := h.probeProxy(&item, h.resolveProxyTestURL(&item, req.TestURL))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 	response.OK(c, payload)
+}
+
+// proxyCheckBatchConcurrent 批量检测的并发上限：代理通常就几条到几十条，
+// 开小并发既快又不会把测试地址打挂
+const proxyCheckBatchConcurrent = 4
+
+// CheckAllEgressProxies 批量检测全部启用的代理：巡检视角，回答「哪条该换」。
+// 没配测试地址的条目跳过并说明原因，绝不静默。
+func (h *Handler) CheckAllEgressProxies(c *gin.Context) {
+	var req proxyCheckReq
+	_ = c.ShouldBindJSON(&req)
+
+	var items []model.EgressProxy
+	if err := h.DB.Where("enabled = ?", true).Order("id asc").Find(&items).Error; err != nil {
+		response.Error(c, "读取代理列表失败")
+		return
+	}
+	if len(items) == 0 {
+		response.BadRequest(c, "没有启用中的代理可检测")
+		return
+	}
+
+	type result struct {
+		id      uint
+		payload gin.H
+		err     error
+	}
+	results := make(chan result, len(items))
+	sem := make(chan struct{}, proxyCheckBatchConcurrent)
+	var wg sync.WaitGroup
+	for i := range items {
+		item := items[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			payload, err := h.probeProxy(&item, h.resolveProxyTestURL(&item, req.TestURL))
+			results <- result{id: item.ID, payload: payload, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	out := make([]gin.H, 0, len(items))
+	skipped := 0
+	byID := map[uint]model.EgressProxy{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	for r := range results {
+		item := byID[r.id]
+		if r.err != nil {
+			skipped++
+			out = append(out, gin.H{
+				"id": item.ID, "name": item.Name, "status": "skipped",
+				"reason": r.err.Error(),
+			})
+			continue
+		}
+		direct := r.payload["direct"].(probeAttempt)
+		via := r.payload["viaProxy"].(probeAttempt)
+		out = append(out, gin.H{
+			"id": item.ID, "name": item.Name,
+			"status": r.payload["status"], "verdict": r.payload["verdict"],
+			"directOK": direct.OK, "viaProxyOK": via.OK,
+			"costMs": via.CostMs, "exitIp": via.ExitIP,
+			"error": via.Error,
+		})
+	}
+	response.OK(c, gin.H{"list": out, "total": len(items), "skipped": skipped})
 }
 
 // ---------- CRUD ----------

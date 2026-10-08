@@ -141,6 +141,7 @@ type siteLinkReq struct {
 	Description string `json:"description"`
 	Sort        int    `json:"sort"`
 	Enabled     *bool  `json:"enabled"`
+	Embed       *bool  `json:"embed"`
 }
 
 func (h *Handler) ListSiteLinks(c *gin.Context) {
@@ -155,6 +156,16 @@ func (h *Handler) ListSiteLinks(c *gin.Context) {
 		return
 	}
 	response.OK(c, list)
+}
+
+// GetSiteLink 单条导航：iframe 内嵌页按 ID 取（列表对普通用户是全部，这里只放已启用的）
+func (h *Handler) GetSiteLink(c *gin.Context) {
+	var item model.SiteLink
+	if err := h.DB.First(&item, idParam(c)).Error; err != nil {
+		response.NotFound(c, "导航项不存在")
+		return
+	}
+	response.OK(c, item)
 }
 
 func (h *Handler) CreateSiteLink(c *gin.Context) {
@@ -174,6 +185,9 @@ func (h *Handler) CreateSiteLink(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled
+	}
+	if req.Embed != nil {
+		item.Embed = *req.Embed
 	}
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, "创建失败")
@@ -203,6 +217,9 @@ func (h *Handler) UpdateSiteLink(c *gin.Context) {
 	item.Description, item.Sort = req.Description, req.Sort
 	if req.Enabled != nil {
 		item.Enabled = *req.Enabled
+	}
+	if req.Embed != nil {
+		item.Embed = *req.Embed
 	}
 	if err := h.DB.Save(&item).Error; err != nil {
 		response.Error(c, "更新失败")

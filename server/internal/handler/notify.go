@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
+	"ops-platform/server/internal/middleware"
 	"ops-platform/server/internal/model"
 	"ops-platform/server/internal/response"
 )
@@ -545,6 +547,7 @@ func (h *Handler) CreateNotifyRoute(c *gin.Context) {
 		return
 	}
 	h.ensureSingleDefault(&route)
+	h.snapshotRoutes("create", middleware.CurrentUser(c))
 	response.OK(c, routeView{NotifyRoute: route, ChannelIDs: req.ChannelIDs})
 }
 
@@ -583,6 +586,7 @@ func (h *Handler) UpdateNotifyRoute(c *gin.Context) {
 		return
 	}
 	h.ensureSingleDefault(&route)
+	h.snapshotRoutes("update", middleware.CurrentUser(c))
 	response.OK(c, routeView{NotifyRoute: route, ChannelIDs: req.ChannelIDs})
 }
 
@@ -591,7 +595,120 @@ func (h *Handler) DeleteNotifyRoute(c *gin.Context) {
 		response.Error(c, "路由删除失败")
 		return
 	}
+	h.snapshotRoutes("delete", middleware.CurrentUser(c))
 	response.OK(c, nil)
+}
+
+// ---------- 路由版本快照 ----------
+//
+// 每次增删改（含回滚）都把整张路由表存一份 JSON 快照。误删兜底路由、改乱优先级
+// 这类生产事故靠「单条历史」救不回来，整表快照一个版本就能完整还原。
+// 保留最近 routeSnapshotKeep 份。
+
+const routeSnapshotKeep = 20
+
+// snapshotRoutes 落一份整表快照并裁掉旧版本。快照失败不影响主流程（打日志即可），
+// 但也绝不吞掉——这里存的是出事后唯一的恢复手段。
+func (h *Handler) snapshotRoutes(op string, operator *model.User) {
+	var routes []model.NotifyRoute
+	if err := h.DB.Order("priority asc, id asc").Find(&routes).Error; err != nil {
+		log.Printf("[route-snapshot] 读取路由表失败: %v", err)
+		return
+	}
+	raw, err := json.Marshal(routes)
+	if err != nil {
+		log.Printf("[route-snapshot] 序列化失败: %v", err)
+		return
+	}
+	snap := model.NotifyRouteSnapshot{Snapshot: string(raw), RouteCount: len(routes), Operation: op}
+	if operator != nil {
+		snap.Username = operator.Username
+	}
+	if err := h.DB.Create(&snap).Error; err != nil {
+		log.Printf("[route-snapshot] 快照写入失败: %v", err)
+		return
+	}
+	var count int64
+	h.DB.Model(&model.NotifyRouteSnapshot{}).Count(&count)
+	if count > routeSnapshotKeep {
+		var old []uint
+		h.DB.Model(&model.NotifyRouteSnapshot{}).Order("id desc").
+			Offset(routeSnapshotKeep).Limit(int(count - routeSnapshotKeep)).Pluck("id", &old)
+		if len(old) > 0 {
+			h.DB.Where("id IN ?", old).Delete(&model.NotifyRouteSnapshot{})
+		}
+	}
+}
+
+// ListRouteSnapshots 版本列表（不带正文）
+func (h *Handler) ListRouteSnapshots(c *gin.Context) {
+	var list []model.NotifyRouteSnapshot
+	if err := h.DB.Omit("snapshot").Order("id desc").Limit(routeSnapshotKeep).Find(&list).Error; err != nil {
+		response.Error(c, "查询快照列表失败")
+		return
+	}
+	response.OK(c, list)
+}
+
+// GetRouteSnapshot 单个版本：把 JSON 展开成 routeView 数组，前端不用再解一遍
+func (h *Handler) GetRouteSnapshot(c *gin.Context) {
+	var snap model.NotifyRouteSnapshot
+	if err := h.DB.First(&snap, idParam(c)).Error; err != nil {
+		response.NotFound(c, "快照不存在")
+		return
+	}
+	var routes []model.NotifyRoute
+	_ = json.Unmarshal([]byte(snap.Snapshot), &routes)
+	views := make([]routeView, 0, len(routes))
+	for _, route := range routes {
+		views = append(views, routeView{NotifyRoute: route, ChannelIDs: parseIDList(route.ChannelIDs)})
+	}
+	response.OK(c, gin.H{"snapshot": gin.H{
+		"id": snap.ID, "routeCount": snap.RouteCount, "operation": snap.Operation,
+		"username": snap.Username, "createdAt": snap.CreatedAt,
+	}, "routes": views})
+}
+
+// RollbackRouteSnapshot 用某个版本整表还原路由表。还原本身也落一份快照，
+// 所以「回滚错了」再回滚一次就行，不存在不可逆的操作。
+func (h *Handler) RollbackRouteSnapshot(c *gin.Context) {
+	var snap model.NotifyRouteSnapshot
+	if err := h.DB.First(&snap, idParam(c)).Error; err != nil {
+		response.NotFound(c, "快照不存在")
+		return
+	}
+	var routes []model.NotifyRoute
+	if err := json.Unmarshal([]byte(snap.Snapshot), &routes); err != nil {
+		response.Error(c, "快照内容损坏，无法回滚")
+		return
+	}
+
+	operator := middleware.CurrentUser(c)
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("1 = 1").Delete(&model.NotifyRoute{}).Error; err != nil {
+			return err
+		}
+		for _, route := range routes {
+			// 保留原 ID：回滚要回到「当时的样子」，通知流水里的 routeId 才对得上
+			if err := tx.Create(&route).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		response.Error(c, "回滚失败: "+err.Error())
+		return
+	}
+	// 快照若带多条兜底（老数据），修成单条兜底
+	var defaults []model.NotifyRoute
+	h.DB.Where("is_default = ?", true).Order("id asc").Find(&defaults)
+	for i := range defaults {
+		h.ensureSingleDefault(&defaults[i])
+	}
+
+	h.snapshotRoutes("rollback", operator)
+	response.OK(c, gin.H{"restored": len(routes)})
 }
 
 // TestNotifyRoute 用一条样例告警做选路预演，不真正外发

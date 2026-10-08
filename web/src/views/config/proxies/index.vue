@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
+  checkAllEgressProxies,
   checkEgressProxy,
   deleteEgressProxy,
   getEgressPolicy,
@@ -10,6 +11,7 @@ import {
   saveEgressProxy,
   type EgressPolicy,
   type EgressProxy,
+  type ProxyBatchItem,
   type ProxyCheckResult
 } from '@/api'
 
@@ -144,6 +146,39 @@ function openCheck(row: EgressProxy) {
   checkVisible.value = true
 }
 
+// ---------- 批量检测：巡检视角，回答「哪条该换」 ----------
+
+const batchVisible = ref(false)
+const batchLoading = ref(false)
+const batchItems = ref<ProxyBatchItem[]>([])
+const batchSkipped = ref(0)
+
+const batchStatusMeta: Record<string, { label: string; type: 'success' | 'danger' | 'warning' | 'info' }> = {
+  ok: { label: '可用', type: 'success' },
+  fail: { label: '不可用', type: 'danger' },
+  skipped: { label: '已跳过', type: 'warning' }
+}
+
+/** 有问题的排前面：巡检列表要一眼看到「哪条该换」 */
+const batchSorted = () =>
+  [...batchItems.value].sort((a, b) => {
+    const rank = (x: ProxyBatchItem) => (x.status === 'ok' ? 2 : x.status === 'skipped' ? 1 : 0)
+    return rank(a) - rank(b)
+  })
+
+async function doCheckAll() {
+  batchVisible.value = true
+  batchLoading.value = true
+  try {
+    const res = await checkAllEgressProxies(globalTestUrl.value)
+    batchItems.value = res.list || []
+    batchSkipped.value = res.skipped
+    load()
+  } finally {
+    batchLoading.value = false
+  }
+}
+
 async function doCheck() {
   if (!checkRow.value) return
   checking.value = true
@@ -275,6 +310,7 @@ onMounted(async () => {
       <div class="page-toolbar">
         <el-tag v-if="globalTestUrl" type="info">默认测试地址：{{ globalTestUrl }}</el-tag>
         <el-tag v-else type="warning">未设默认测试地址（系统配置 proxy.test_url）</el-tag>
+        <el-button v-perm="'proxy:manage'" :disabled="!rows.length" @click="doCheckAll">全部检测</el-button>
         <div class="grow"></div>
         <el-button v-perm="'proxy:manage'" type="primary" @click="openCreate">新增代理</el-button>
       </div>
@@ -434,6 +470,56 @@ onMounted(async () => {
         <el-button @click="checkVisible = false">关闭</el-button>
         <el-button type="primary" :loading="checking" @click="doCheck">
           {{ checkResult ? '再测一次' : '开始检测' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchVisible" title="代理批量检测" width="760px">
+      <el-table v-loading="batchLoading" :data="batchSorted()" border stripe size="small" empty-text="没有启用的代理">
+        <el-table-column prop="name" label="代理" min-width="130" />
+        <el-table-column label="结果" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="batchStatusMeta[row.status]?.type || 'info'">
+              {{ batchStatusMeta[row.status]?.label || row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="直连" width="70">
+          <template #default="{ row }">
+            <span v-if="row.directOK !== undefined" :style="{ color: row.directOK ? 'var(--el-color-success)' : 'var(--el-color-danger)' }">
+              {{ row.directOK ? '通' : '不通' }}
+            </span>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="走代理" width="70">
+          <template #default="{ row }">
+            <span v-if="row.viaProxyOK !== undefined" :style="{ color: row.viaProxyOK ? 'var(--el-color-success)' : 'var(--el-color-danger)' }">
+              {{ row.viaProxyOK ? '通' : '不通' }}
+            </span>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="耗时" width="80">
+          <template #default="{ row }">{{ row.costMs !== undefined ? row.costMs + 'ms' : '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="exitIp" label="出口 IP" width="130">
+          <template #default="{ row }">
+            <span v-if="row.exitIp">{{ row.exitIp }}</span>
+            <span v-else style="color: #909399">未读到</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="结论 / 原因" min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.verdict || row.reason || row.error || '—' }}</template>
+        </el-table-column>
+      </el-table>
+      <el-text v-if="batchSkipped" type="warning" size="small" style="display: block; margin-top: 8px">
+        {{ batchSkipped }} 条因没有可用测试地址被跳过：给对应代理填测试地址，或在系统配置里设 proxy.test_url
+      </el-text>
+      <template #footer>
+        <el-button @click="batchVisible = false">关闭</el-button>
+        <el-button v-perm="'proxy:manage'" type="primary" :loading="batchLoading" @click="doCheckAll">
+          再测一轮
         </el-button>
       </template>
     </el-dialog>

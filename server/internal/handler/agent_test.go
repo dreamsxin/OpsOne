@@ -467,7 +467,7 @@ func TestAgentDataSourceMetaExposed(t *testing.T) {
 	body := getModelJSON(t, engine, "/ai/agents")
 	data, _ := body["data"].(map[string]any)
 	sources, _ := data["dataSources"].([]any)
-	if len(sources) != 5 {
+	if len(sources) != 6 {
 		t.Fatalf("数据来源数量不对: %d", len(sources))
 	}
 	// 界面要靠 needsTarget 决定是否显示目标选择框

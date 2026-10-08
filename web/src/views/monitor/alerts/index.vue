@@ -6,9 +6,14 @@ import {
   ackAlert,
   getAlert,
   getAlertStats,
+  listAgentConfigs,
+  listAgentRuns,
   listAlertSources,
   listAlerts,
   resolveAlert,
+  runAgent,
+  type AgentConfig,
+  type AgentRun,
   type Alert,
   type AlertSource,
   type AlertStats,
@@ -158,6 +163,52 @@ async function openDetail(row: Alert) {
   current.value = data.alert
   records.value = data.records || []
   detailVisible.value = true
+  loadDiagnoses()
+}
+
+// ---------- AI 诊断（回贴到详情抽屉） ----------
+// 新告警的自动诊断在这里回看；也可以对这条告警手动再跑一次只读分析。
+
+const diagAgents = ref<AgentConfig[]>([])
+const diagRuns = ref<AgentRun[]>([])
+const diagAgentId = ref<number | null>(null)
+const diagRunning = ref(false)
+const diagExpanded = ref<number | null>(null)
+
+async function loadDiagnoses() {
+  if (!current.value) return
+  const id = current.value.id
+  try {
+    if (!diagAgents.value.length) {
+      const res = await listAgentConfigs({ dataSource: 'alert_detail' })
+      diagAgents.value = (res.list || []).filter((a) => a.enabled)
+      if (diagAgents.value.length && diagAgentId.value == null) {
+        diagAgentId.value = diagAgents.value[0].id
+      }
+    }
+    const runs = await listAgentRuns({ dataSource: 'alert_detail', targetId: id })
+    diagRuns.value = runs.list || []
+  } catch {
+    // 诊断记录拉不到不影响详情主体
+  }
+}
+
+async function runDiagnosis() {
+  if (!current.value || !diagAgentId.value) return
+  diagRunning.value = true
+  try {
+    await runAgent(diagAgentId.value, { targetId: current.value.id, input: '告警详情手动诊断' })
+    ElMessage.success('诊断完成')
+    await loadDiagnoses()
+  } catch (err: any) {
+    ElMessage.error(err?.message || '诊断失败')
+  } finally {
+    diagRunning.value = false
+  }
+}
+
+function diagTime(run: AgentRun) {
+  return String(run.createdAt).slice(5, 19).replace('T', ' ')
 }
 
 function parseLabels(raw: string): Record<string, string> {
@@ -572,6 +623,52 @@ onMounted(() => {
         </div>
       </div>
 
+      <el-divider content-position="left">AI 诊断</el-divider>
+      <div class="diag-bar">
+        <el-select
+          v-model="diagAgentId"
+          size="small"
+          placeholder="选择只读分析器"
+          style="width: 220px"
+        >
+          <el-option v-for="a in diagAgents" :key="a.id" :label="a.name" :value="a.id" />
+        </el-select>
+        <el-button
+          v-perm="'agent:run'"
+          size="small"
+          type="primary"
+          :loading="diagRunning"
+          :disabled="!diagAgentId"
+          @click="runDiagnosis"
+        >
+          立即诊断
+        </el-button>
+        <el-button size="small" link @click="loadDiagnoses">刷新</el-button>
+        <span v-if="!diagAgents.length" class="advanced-note">
+          还没有「单条告警深查」类型的只读分析器，可在「智能与成本 → Agent 配置」创建并开启自动诊断
+        </span>
+      </div>
+      <el-empty
+        v-if="!diagRuns.length"
+        description="暂无诊断记录；开启「新告警自动诊断」后，新告警会自动跑一次"
+        :image-size="50"
+      />
+      <div v-for="run in diagRuns" :key="run.id" class="diag-run">
+        <div class="diag-run__head" @click="diagExpanded = diagExpanded === run.id ? null : run.id">
+          <el-tag size="small" :type="run.status === 'success' ? 'success' : 'danger'">
+            {{ run.status === 'success' ? '成功' : '失败' }}
+          </el-tag>
+          <span class="diag-run__who">{{ run.username }} · {{ run.agentName }}</span>
+          <span class="diag-run__time">{{ diagTime(run) }}</span>
+          <span class="diag-run__meta" v-if="run.status === 'success'">
+            {{ run.totalTokens }} token · {{ run.latencyMs }}ms
+          </span>
+        </div>
+        <div v-if="run.status !== 'success'" class="diag-run__error">{{ run.errorMsg }}</div>
+        <pre v-else-if="diagExpanded === run.id" class="diag-run__body">{{ run.output }}</pre>
+        <div v-else class="diag-run__preview">{{ run.output?.slice(0, 160) }}…</div>
+      </div>
+
       <el-divider content-position="left">通知投递</el-divider>
       <el-table :data="records" size="small" border empty-text="没有产生通知，可能是未命中路由或没有兜底路由">
         <el-table-column prop="routeName" label="路由" min-width="120" />
@@ -614,5 +711,61 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 4px 16px;
   padding: 4px 0;
+}
+.diag-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.diag-run {
+  padding: 6px 8px;
+  border: 1px solid var(--ops-border, #e5e7eb);
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.diag-run__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.diag-run__who {
+  color: var(--ops-text-primary, #111827);
+  font-weight: 500;
+}
+.diag-run__time,
+.diag-run__meta {
+  color: var(--ops-text-muted, #9ca3af);
+}
+.diag-run__meta {
+  margin-left: auto;
+}
+.diag-run__preview {
+  margin-top: 4px;
+  color: var(--ops-text-secondary, #6b7280);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diag-run__error {
+  margin-top: 4px;
+  color: var(--el-color-danger);
+  font-size: 12px;
+}
+.diag-run__body {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
 }
 </style>

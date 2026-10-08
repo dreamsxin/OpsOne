@@ -876,11 +876,13 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.UpdateEgressProxy)
 		auth.DELETE("/network/proxies/:id", middleware.RequirePerm("proxy:manage"), h.DeleteEgressProxy)
 		auth.POST("/network/proxies/:id/check", middleware.RequirePerm("proxy:manage"), h.CheckEgressProxy)
+		auth.POST("/network/proxies/check-all", middleware.RequirePerm("proxy:manage"), h.CheckAllEgressProxies)
 		// 统一出口：哪些模块真的走代理、哪些不走，以及进程实际看到的 HTTP_PROXY
 		auth.GET("/network/proxy-egress", middleware.RequirePerm("proxy:manage"), h.GetEgressPolicy)
 		auth.PUT("/network/proxy-egress", middleware.RequirePerm("proxy:manage"), h.UpdateEgressPolicy)
 
 		auth.GET("/site-links", h.ListSiteLinks)
+		auth.GET("/site-links/:id", h.GetSiteLink)
 		auth.POST("/site-links", middleware.RequirePerm("config:manage"), h.CreateSiteLink)
 		auth.PUT("/site-links/:id", middleware.RequirePerm("config:manage"), h.UpdateSiteLink)
 		auth.DELETE("/site-links/:id", middleware.RequirePerm("config:manage"), h.DeleteSiteLink)
@@ -923,6 +925,10 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.UpdateNotifyRoute)
 		auth.DELETE("/notify/routes/:id", middleware.RequirePerm("route:manage"), h.DeleteNotifyRoute)
 		auth.POST("/notify/routes/test", h.TestNotifyRoute)
+		// 路由版本快照：列表/详情可读，回滚要 route:manage 权限
+		auth.GET("/notify/routes/snapshots", h.ListRouteSnapshots)
+		auth.GET("/notify/routes/snapshots/:id", h.GetRouteSnapshot)
+		auth.POST("/notify/routes/snapshots/:id/rollback", middleware.RequirePerm("route:manage"), h.RollbackRouteSnapshot)
 
 		auth.GET("/notify/records", middleware.RequirePerm("channel:manage"), h.ListNotifyRecords)
 
@@ -1043,6 +1049,9 @@ func buildRouter(h *handler.Handler, cfg *config.Config, gormDB *gorm.DB) *gin.E
 		auth.PUT("/build/jobs/:id", middleware.RequirePerm("build:manage"), h.UpdateBuildJob)
 		auth.DELETE("/build/jobs/:id", middleware.RequirePerm("build:manage"), h.DeleteBuildJob)
 		auth.POST("/build/jobs/:id/trigger", middleware.RequirePerm("build:run"), h.TriggerBuildJob)
+		// Jenkins 只读透传：按需代读，平台不轮询不落库
+		auth.GET("/build/jobs/:id/history", h.JenkinsBuildHistory)
+		auth.GET("/build/jobs/:id/builds/:buildNo/console", h.JenkinsBuildConsole)
 
 		auth.GET("/build/records", h.ListBuildRecords)
 		auth.POST("/build/records/:id/sync", middleware.RequirePerm("build:run"), h.SyncBuildRecord)

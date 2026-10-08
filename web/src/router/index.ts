@@ -40,6 +40,14 @@ const staticRoutes: RouteRecordRaw[] = [
         name: 'TwoFA',
         component: () => import('@/views/security/twofa/index.vue'),
         meta: { title: '双因子口令' }
+      },
+      {
+        // 站点导航的「内嵌打开」：按导航项 ID 以 iframe 呈现外部系统，
+        // 不进菜单（从导航卡片点进去），页签标题由组件按站点名回填
+        path: '/embed/site-link/:id',
+        name: 'SiteLinkEmbed',
+        component: () => import('@/views/config/site-navigation/Embed.vue'),
+        meta: { title: '外部系统' }
       }
     ]
   },

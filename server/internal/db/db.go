@@ -65,7 +65,7 @@ func Models() []any {
 		&model.CommandRule{}, &model.Session{}, &model.SessionCommand{},
 		&model.CronJob{}, &model.FileAudit{},
 		&model.AlertSource{}, &model.Alert{}, &model.NotifyChannel{},
-		&model.NotifyRoute{}, &model.NotifyRecord{},
+		&model.NotifyRoute{}, &model.NotifyRouteSnapshot{}, &model.NotifyRecord{},
 		&model.Announcement{}, &model.Message{}, &model.SysConfig{},
 		&model.Tag{}, &model.DBInstance{}, &model.FixedAsset{},
 		&model.SiteLink{}, &model.EmailTemplate{}, &model.ResourceGrant{},

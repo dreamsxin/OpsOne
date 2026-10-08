@@ -120,7 +120,9 @@ func (h *Handler) ingestAlert(source *model.AlertSource, item alertPayload) {
 
 	// 静默 / 维护窗口：只拦外发，不拦入库。放在聚合抑制之前，
 	// 因为它拦的是「这段时间别叫人」，与告警是不是噪音无关。
+	// 自动诊断照跑：静默的是通知，不是这条告警本身，人打开详情时结论应该已经在了。
 	if h.silencedForAlert(&alert) {
+		go h.maybeAutoDiagnose(&alert)
 		return
 	}
 
@@ -131,7 +133,8 @@ func (h *Handler) ingestAlert(source *model.AlertSource, item alertPayload) {
 		return
 	}
 
-	// 派发放到后台，避免拖慢接入方的请求
+	// 派发放到后台，避免拖慢接入方的请求；自动诊断同理
+	go h.maybeAutoDiagnose(&alert)
 	go h.dispatchAlert(alert)
 	if alert.Severity == "critical" {
 		go h.notifyCriticalAlert(alert)
@@ -188,7 +191,8 @@ func (h *Handler) ListAlerts(c *gin.Context) {
 	}
 	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
 		like := "%" + kw + "%"
-		q = q.Where("title LIKE ? OR summary LIKE ? OR labels LIKE ?", like, like, like)
+		// 指纹也要能搜：详情抽屉的「同指纹历史」就是拿 fingerprint 当关键字跳回来的
+		q = q.Where("title LIKE ? OR summary LIKE ? OR labels LIKE ? OR fingerprint LIKE ?", like, like, like, like)
 	}
 	if sourceID := c.Query("sourceId"); sourceID != "" && sourceID != "0" {
 		q = q.Where("source_id = ?", sourceID)

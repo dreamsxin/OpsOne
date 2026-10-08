@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import {
   createSiteLink,
@@ -12,6 +13,7 @@ import {
 const loading = ref(false)
 const rows = ref<SiteLink[]>([])
 const manageMode = ref(false)
+const router = useRouter()
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -23,7 +25,8 @@ const form = reactive({
   icon: 'Link',
   description: '',
   sort: 0,
-  enabled: true
+  enabled: true,
+  embed: false
 })
 
 const rules = {
@@ -61,14 +64,15 @@ function openCreate() {
     icon: 'Link',
     description: '',
     sort: 0,
-    enabled: true
+    enabled: true,
+    embed: false
   })
   dialogVisible.value = true
 }
 
 function openEdit(row: SiteLink) {
   editingId.value = row.id
-  Object.assign(form, { ...row })
+  Object.assign(form, { ...row, embed: !!row.embed })
   dialogVisible.value = true
 }
 
@@ -94,7 +98,12 @@ async function remove(row: SiteLink) {
   load()
 }
 
+/** 内嵌项在平台内打开（保留侧栏与多页签上下文），其余跳新窗口 */
 function open(row: SiteLink) {
+  if (row.embed) {
+    router.push(`/embed/site-link/${row.id}`)
+    return
+  }
   window.open(row.url, '_blank', 'noopener,noreferrer')
 }
 
@@ -157,7 +166,14 @@ onMounted(load)
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="打开方式" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.embed ? 'primary' : 'info'">
+              {{ row.embed ? '内嵌' : '新窗口' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="open(row)">打开</el-button>
             <el-button v-perm="'config:manage'" link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -189,6 +205,10 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
+        </el-form-item>
+        <el-form-item label="内嵌打开">
+          <el-switch v-model="form.embed" />
+          <span style="margin-left: 8px; color: #6b7280">在平台内以 iframe 呈现；对方站禁止内嵌（X-Frame-Options）时打不开，会提示改用新窗口</span>
         </el-form-item>
       </el-form>
       <template #footer>

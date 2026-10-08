@@ -52,6 +52,9 @@ var agentDataSources = map[string]struct {
 	"host_metric":     {"主机指标", true},
 	"exec_job":        {"执行作业结果", true},
 	"session_command": {"会话命令", true},
+	// alert_detail 单条告警深查：证据自动拼装（本条告警 + 同指纹历史 + 能对上的主机采样），
+	// 主要给「新告警自动诊断」用，手动从告警详情页触发也是它
+	"alert_detail": {"单条告警深查", true},
 }
 
 // ---------- 配置维护 ----------
@@ -67,6 +70,9 @@ type agentConfigReq struct {
 	MaxTokens      int      `json:"maxTokens"`
 	Enabled        *bool    `json:"enabled"`
 	Remark         string   `json:"remark"`
+	// AutoRun / AutoSeverity 事件触发（新告警自动诊断）：只对 alert_detail 来源有意义
+	AutoRun     *bool  `json:"autoRun"`
+	AutoSeverity string `json:"autoSeverity"`
 }
 
 func (r *agentConfigReq) normalize() error {
@@ -75,6 +81,7 @@ func (r *agentConfigReq) normalize() error {
 	r.DataSource = strings.ToLower(strings.TrimSpace(r.DataSource))
 	r.SystemPrompt = strings.TrimSpace(r.SystemPrompt)
 	r.PromptTemplate = strings.TrimSpace(r.PromptTemplate)
+	r.AutoSeverity = strings.TrimSpace(r.AutoSeverity)
 
 	if r.Name == "" {
 		return fmt.Errorf("名称不能为空")
@@ -98,6 +105,19 @@ func (r *agentConfigReq) normalize() error {
 	if r.DataSource != "none" && !strings.Contains(r.PromptTemplate, "{{.context}}") {
 		// 取了数据却没往提示词里放，是最容易犯的错：模型什么也看不到
 		return fmt.Errorf("选了数据来源，模板里要用 {{.context}} 把数据放进去")
+	}
+	// 自动诊断只对单条告警深查有意义：别的来源没有「新事件」可挂
+	if r.AutoRun != nil && *r.AutoRun && r.DataSource != "alert_detail" {
+		return fmt.Errorf("只有「单条告警深查」来源才支持新告警自动诊断")
+	}
+	if r.AutoSeverity != "" {
+		for _, item := range strings.Split(r.AutoSeverity, ",") {
+			switch strings.TrimSpace(item) {
+			case "critical", "warning", "info":
+			default:
+				return fmt.Errorf("自动诊断级别只能是 critical / warning / info 的逗号组合")
+			}
+		}
 	}
 	if r.MaxItems == 0 {
 		r.MaxItems = 20
@@ -178,6 +198,10 @@ func (h *Handler) CreateAgentConfig(c *gin.Context) {
 		wantEnabled = *req.Enabled
 	}
 	agent.Enabled = wantEnabled
+	if req.AutoRun != nil {
+		agent.AutoRun = *req.AutoRun
+	}
+	agent.AutoSeverity = req.AutoSeverity
 
 	if err := h.DB.Create(&agent).Error; err != nil {
 		response.Error(c, "创建失败")
@@ -217,13 +241,16 @@ func (h *Handler) UpdateAgentConfig(c *gin.Context) {
 		"name": req.Name, "alias": req.Alias, "data_source": req.DataSource,
 		"max_items": req.MaxItems, "system_prompt": req.SystemPrompt,
 		"prompt_template": req.PromptTemplate, "max_tokens": req.MaxTokens,
-		"remark": req.Remark,
+		"remark": req.Remark, "auto_severity": req.AutoSeverity,
 	}
 	if req.Temperature != nil {
 		updates["temperature"] = *req.Temperature
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	if req.AutoRun != nil {
+		updates["auto_run"] = *req.AutoRun
 	}
 	if err := h.DB.Model(&model.AgentConfig{}).Where("id = ?", agent.ID).
 		Updates(updates).Error; err != nil {
@@ -402,7 +429,7 @@ func (h *Handler) buildAgentContext(agent *model.AgentConfig, targetID uint,
 			if item.Risk != "normal" {
 				line += fmt.Sprintf("  <== %s", item.Risk)
 				if item.RuleDesc != "" {
-					line += "（命中规则：" + item.RuleDesc + "）"
+					line += fmt.Sprintf("（命中规则：%s）", item.RuleDesc)
 				}
 			}
 			buf.WriteString(line + "\n")
@@ -410,6 +437,84 @@ func (h *Handler) buildAgentContext(agent *model.AgentConfig, targetID uint,
 		return &agentContext{
 			Text: buf.String(), Items: len(commands), Truncated: truncated,
 			Summary: fmt.Sprintf("会话 #%d 的 %d 条命令", session.ID, len(commands)),
+		}, nil
+
+	case "alert_detail":
+		// 单条告警深查：证据拼装只做「查得到的」——本条告警全量字段、同指纹历史、
+		// 标签能对上纳管主机时的最近采样。对不上就明说，不猜。
+		var alert model.Alert
+		if err := h.DB.First(&alert, targetID).Error; err != nil {
+			return nil, fmt.Errorf("告警不存在")
+		}
+		var buf strings.Builder
+		buf.WriteString(fmt.Sprintf("需要分析的告警 #%d：[%s][%s] %s\n摘要: %s\n当前值: %s\n累计出现: %d 次\n首次: %s 最近: %s\n标签: %s\n来源: %s\n\n",
+			alert.ID, alert.Severity, alert.Status, alert.Title,
+			truncate(alert.Summary, 500), alert.Value, alert.Count,
+			alert.FirstSeenAt.Format("01-02 15:04:05"), alert.LastSeenAt.Format("01-02 15:04:05"),
+			truncate(alert.Labels, 600), alert.SourceName))
+
+		var history []model.Alert
+		if err := h.DB.Where("fingerprint = ? AND id <> ?", alert.Fingerprint, alert.ID).
+			Order("id desc").Limit(limit).Find(&history).Error; err == nil && len(history) > 0 {
+			buf.WriteString(fmt.Sprintf("同一指纹的历史告警（说明这不是第一次出现，最近的 %d 条）:\n", len(history)))
+			for i, item := range history {
+				buf.WriteString(fmt.Sprintf("%d. [%s][%s] %s 累计%d次，%s ~ %s\n",
+					i+1, item.Severity, item.Status, truncate(item.Title, 120), item.Count,
+					item.FirstSeenAt.Format("01-02 15:04"), item.LastSeenAt.Format("01-02 15:04")))
+			}
+			buf.WriteString("\n")
+		}
+
+		// 标签 → 纳管主机：instance 常带端口，hostname/host/target 可能就是主机名或地址
+		var labels map[string]string
+		_ = json.Unmarshal([]byte(alert.Labels), &labels)
+		candidates := make([]string, 0, 4)
+		for _, key := range []string{"hostname", "host", "instance", "target", "address"} {
+			if v := strings.TrimSpace(labels[key]); v != "" {
+				candidates = append(candidates, strings.Split(v, ":")[0])
+			}
+		}
+		seen := map[string]bool{}
+		matched := 0
+		for _, cand := range candidates {
+			if seen[cand] {
+				continue
+			}
+			seen[cand] = true
+			var host model.Host
+			if err := h.DB.Where("address = ? OR name = ?", cand, cand).First(&host).Error; err != nil {
+				continue
+			}
+			matched++
+			buf.WriteString(fmt.Sprintf("标签能对上的纳管主机：%s（%s，环境 %s，状态 %s）最近的采样：\n",
+				host.Name, host.Address, host.Env, host.Status))
+			var metrics []model.HostMetric
+			if err := h.DB.Where("host_id = ?", host.ID).
+				Order("id desc").Limit(10).Find(&metrics).Error; err == nil && len(metrics) > 0 {
+				buf.WriteString("时间 | CPU% | 内存% | 磁盘最高% | load1/5/15 | 状态\n")
+				for _, m := range metrics {
+					line := fmt.Sprintf("%s | %.1f | %.1f | %.1f(%s) | %.2f/%.2f/%.2f | %s",
+						m.CreatedAt.Format("01-02 15:04"), m.CPUPercent, m.MemPercent,
+						m.DiskMaxPercent, m.DiskMaxMount, m.Load1, m.Load5, m.Load15, m.Status)
+					if m.Error != "" {
+						line += " | 采集错误: " + truncate(m.Error, 120)
+					}
+					buf.WriteString(line + "\n")
+				}
+			} else {
+				buf.WriteString("（该主机还没有采集到指标）\n")
+			}
+			buf.WriteString("\n")
+			if matched >= 2 {
+				break
+			}
+		}
+		if matched == 0 {
+			buf.WriteString("（标签里没有能对上纳管主机的 hostname/instance，无法补充主机采样）\n")
+		}
+		return &agentContext{
+			Text: buf.String(), Items: 1 + len(history) + matched,
+			Summary: fmt.Sprintf("告警 #%d 的深查上下文（含同指纹历史 %d 条）", alert.ID, len(history)),
 		}, nil
 	}
 	return nil, fmt.Errorf("数据来源 %s 不支持", agent.DataSource)
@@ -494,6 +599,34 @@ func (h *Handler) RunAgent(c *gin.Context) {
 	}
 
 	operator := middleware.CurrentUser(c)
+	result, err := h.executeAgentRun(c.Request.Context(), &agent, req, operator, c.ClientIP())
+	if err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.OK(c, gin.H{
+		"run":            result.run,
+		"prompt":         result.prompt,
+		"upstreamName":   result.upstreamName,
+		"model":          result.upstreamModel,
+		"contextSummary": result.contextSummary,
+	})
+}
+
+// agentRunResult executeAgentRun 的产物：run 是落了库的记录，其余给调用方展示用
+type agentRunResult struct {
+	run            *model.AgentRun
+	prompt         string
+	upstreamName   string
+	upstreamModel  string
+	contextSummary string
+}
+
+// executeAgentRun 跑一次只读分析：拼上下文 → 渲染提示词 → 调模型 → 落一条运行记录。
+// HTTP 入口和新告警自动诊断共用这一段，保证两条路径的行为完全一致。
+func (h *Handler) executeAgentRun(ctx context.Context, agent *model.AgentConfig,
+	req agentRunReq, operator *model.User, clientIP string) (*agentRunResult, error) {
+
 	run := model.AgentRun{
 		AgentID: agent.ID, AgentName: agent.Name, Alias: agent.Alias,
 		DataSource: agent.DataSource, TargetID: req.TargetID,
@@ -501,16 +634,18 @@ func (h *Handler) RunAgent(c *gin.Context) {
 	}
 	if operator != nil {
 		run.UserID, run.Username = operator.ID, operator.Username
+	} else {
+		// 非 HTTP 入口（新告警自动诊断）调的：标成 auto，用量流水能和人工运行区分开
+		run.Username = "auto"
 	}
 
 	// 上下文取不到就直接失败并落一条记录：别让「跑了但没数据」变成静默的空结论
-	ctxData, err := h.buildAgentContext(&agent, req.TargetID, req.Severity)
+	ctxData, err := h.buildAgentContext(agent, req.TargetID, req.Severity)
 	if err != nil {
 		run.RunStatus = "failed"
 		run.ErrorMsg = truncate(err.Error(), 480)
 		h.DB.Create(&run)
-		response.BadRequest(c, err.Error())
-		return
+		return nil, fmt.Errorf("%s", run.ErrorMsg)
 	}
 	contextText := ctxData.Text
 	if len(contextText) > agentContextMaxChars {
@@ -526,8 +661,7 @@ func (h *Handler) RunAgent(c *gin.Context) {
 		run.RunStatus = "failed"
 		run.ErrorMsg = truncate(err.Error(), 480)
 		h.DB.Create(&run)
-		response.BadRequest(c, err.Error())
-		return
+		return nil, fmt.Errorf("%s", run.ErrorMsg)
 	}
 
 	messages := make([]chatMessage, 0, 2)
@@ -541,15 +675,14 @@ func (h *Handler) RunAgent(c *gin.Context) {
 		chatReq.Temperature = &temp
 	}
 
-	runCtx, cancel := context.WithTimeout(c.Request.Context(), agentRunTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, agentRunTimeout)
 	defer cancel()
-	outcome, err := h.dispatchChat(runCtx, chatReq, "agent", operator, c.ClientIP())
+	outcome, err := h.dispatchChat(runCtx, chatReq, "agent", operator, clientIP)
 	if err != nil {
 		run.RunStatus = "failed"
 		run.ErrorMsg = truncate(err.Error(), 480)
 		h.DB.Create(&run)
-		response.Error(c, err.Error())
-		return
+		return nil, fmt.Errorf("%s", run.ErrorMsg)
 	}
 
 	run.RunStatus = "success"
@@ -561,17 +694,66 @@ func (h *Handler) RunAgent(c *gin.Context) {
 	run.Cost = outcome.Record.Cost
 	run.LatencyMs = outcome.Result.LatencyMs
 	if err := h.DB.Create(&run).Error; err != nil {
-		response.Error(c, "结论落库失败")
-		return
+		return nil, fmt.Errorf("结论落库失败")
 	}
 
-	response.OK(c, gin.H{
-		"run":            run,
-		"prompt":         prompt,
-		"upstreamName":   outcome.Upstream.Name,
-		"model":          outcome.Upstream.Model,
-		"contextSummary": ctxData.Summary,
-	})
+	return &agentRunResult{
+		run: &run, prompt: prompt, upstreamName: outcome.Upstream.Name,
+		upstreamModel: outcome.Upstream.Model, contextSummary: ctxData.Summary,
+	}, nil
+}
+
+// ---------- 新告警自动诊断（事件触发，不是定时任务） ----------
+
+// autoDiagnoseSlots 同时在跑的自动诊断上限：告警风暴时宁可跳过也不把模型网关打爆
+var autoDiagnoseSlots = make(chan struct{}, 2)
+
+// maybeAutoDiagnose 落库一条新告警后触发：找开了自动诊断的 alert_detail Agent，
+// 级别匹配的逐个在后台跑。失败也会落运行记录，人打开告警详情能看到为什么没结论。
+func (h *Handler) maybeAutoDiagnose(alert *model.Alert) {
+	var agents []model.AgentConfig
+	if err := h.DB.Where("enabled = ? AND auto_run = ? AND data_source = ?",
+		true, true, "alert_detail").Find(&agents).Error; err != nil || len(agents) == 0 {
+		return
+	}
+	for i := range agents {
+		agent := agents[i]
+		if !severityMatched(agent.AutoSeverity, alert.Severity) {
+			continue
+		}
+		go func() {
+			select {
+			case autoDiagnoseSlots <- struct{}{}:
+				defer func() { <-autoDiagnoseSlots }()
+			default:
+				// 并发已满：落一条失败记录说明被跳过了，而不是悄悄没跑
+				h.DB.Create(&model.AgentRun{
+					AgentID: agent.ID, AgentName: agent.Name, Alias: agent.Alias,
+					DataSource: agent.DataSource, TargetID: alert.ID,
+					Input: "新告警自动诊断", RunStatus: "failed",
+					ErrorMsg: "自动诊断并发已达上限，本次跳过", Username: "auto",
+				})
+				return
+			}
+			// operator 传 nil：这是一次系统行为，用量归到系统而非某个具体用户
+			_, _ = h.executeAgentRun(context.Background(), &agent,
+				agentRunReq{TargetID: alert.ID, Input: "新告警自动诊断"}, nil, "auto")
+		}()
+	}
+}
+
+// severityMatched 告警级别是否落在自动诊断的级别过滤内；过滤为空表示不过滤
+func severityMatched(filter, severity string) bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return true
+	}
+	for _, item := range strings.Split(filter, ",") {
+		if strings.TrimSpace(item) == severity {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------- 运行记录 ----------
@@ -592,6 +774,15 @@ func (h *Handler) ListAgentRuns(c *gin.Context) {
 	}
 	if source := strings.TrimSpace(c.Query("dataSource")); source != "" {
 		q = q.Where("data_source = ?", source)
+	}
+	// targetId：告警详情页按目标对象拉该告警的诊断记录
+	if raw := strings.TrimSpace(c.Query("targetId")); raw != "" {
+		tid, err := strconv.Atoi(raw)
+		if err != nil || tid <= 0 {
+			response.BadRequest(c, "targetId 不合法")
+			return
+		}
+		q = q.Where("target_id = ?", tid)
 	}
 	if username := strings.TrimSpace(c.Query("username")); username != "" {
 		q = q.Where("username LIKE ?", "%"+username+"%")

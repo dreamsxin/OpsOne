@@ -167,6 +167,9 @@ type SiteLink struct {
 	Description string    `gorm:"size:255" json:"description"`
 	Sort        int       `gorm:"default:0" json:"sort"`
 	Enabled     bool      `json:"enabled"`
+	// Embed 内嵌打开：菜单里直接以 iframe 呈现，而不是跳新窗口。
+	// 对方站设了 X-Frame-Options / CSP frame-ancestors 时嵌不进去，前端会提示并给新窗口入口
+	Embed       bool      `gorm:"default:false" json:"embed"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -1145,6 +1148,21 @@ type NotifyRoute struct {
 	Enabled       bool      `json:"enabled"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+// NotifyRouteSnapshot 通知路由表的一次整表快照。
+//
+// 为什么是整表而不是单条：路由最常见的生产事故是「误删了兜底路由 / 改乱了优先级」，
+// 单条快照救不回被删的那条；整表快照一个版本就能完整还原当时的选路逻辑。
+// 每次增删改（含回滚本身）都会落一份，保留最近若干份，防止把表撑爆。
+type NotifyRouteSnapshot struct {
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Snapshot  string `gorm:"type:text" json:"-"` // JSON 数组，接口层展开
+	RouteCount int  `json:"routeCount"`
+	// Operation 产生这份快照的动作：create | update | delete | rollback
+	Operation string    `gorm:"size:16" json:"operation"`
+	Username  string    `gorm:"size:64" json:"username"`
+	CreatedAt time.Time `gorm:"index" json:"createdAt"`
 }
 
 // NotifyRecord 通知投递流水
@@ -2603,7 +2621,7 @@ type AgentConfig struct {
 	Name string `gorm:"size:64;not null" json:"name"`
 	// Alias 用模型资源池里的哪个逻辑模型（不是上游真实模型名）
 	Alias string `gorm:"size:64;not null" json:"alias"`
-	// DataSource 上下文取自哪类平台数据：none | alert | host_metric | exec_job | session_command
+	// DataSource 上下文取自哪类平台数据：none | alert | host_metric | exec_job | session_command | alert_detail
 	DataSource string `gorm:"size:24;default:none" json:"dataSource"`
 	// MaxItems 上下文最多取多少条，防止把几千条记录塞进提示词
 	MaxItems int `gorm:"default:20" json:"maxItems"`
@@ -2613,6 +2631,12 @@ type AgentConfig struct {
 	PromptTemplate string  `gorm:"type:text" json:"promptTemplate"`
 	Temperature    float64 `gorm:"default:0" json:"temperature"`
 	MaxTokens      int     `gorm:"default:800" json:"maxTokens"`
+
+	// AutoRun 事件触发（不是定时）：落库一条**新**告警时自动跑一次。
+	// 默认关——自动跑要花 token，必须由人显式打开。只读分析的边界不变。
+	AutoRun bool `gorm:"default:false" json:"autoRun"`
+	// AutoRun 触发的级别过滤，逗号分隔（如 critical,warning），空 = 不过滤
+	AutoSeverity string `gorm:"size:32" json:"autoSeverity"`
 
 	Enabled   bool      `json:"enabled"`
 	Remark    string    `gorm:"size:255" json:"remark"`

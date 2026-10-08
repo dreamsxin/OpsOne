@@ -46,6 +46,14 @@ ${'{'}${'{'}.context${'}'}${'}'}
 请判断当前最可能的问题、影响范围，并给出接下来该查什么。
 补充说明：${'{'}${'{'}.input${'}'}${'}'}`
 
+// 单条告警深查的默认模板：结论要短、要能直接行动，还要明说「证据不够」的地方
+const alertDetailTemplate = `下面是一条告警的完整上下文（含同指纹历史与能对上的主机采样）：
+
+${'{'}${'{'}.context${'}'}${'}'}
+
+请分析：1) 最可能的原因（按可能性排序，最多 3 条）；2) 建议的下一步排查动作（具体到命令或页面）。证据不足的地方直接说证据不足，不要猜。
+补充说明：${'{'}${'{'}.input${'}'}${'}'}`
+
 const form = reactive({
   visible: false,
   id: 0,
@@ -58,6 +66,8 @@ const form = reactive({
   temperature: 0,
   maxTokens: 800,
   enabled: true,
+  autoRun: false,
+  autoSeverity: [] as string[],
   remark: ''
 })
 
@@ -73,6 +83,8 @@ function openForm(row?: AgentConfig) {
   form.temperature = row?.temperature ?? 0
   form.maxTokens = row?.maxTokens ?? 800
   form.enabled = row?.enabled ?? true
+  form.autoRun = row?.autoRun ?? false
+  form.autoSeverity = row?.autoSeverity ? row.autoSeverity.split(',').map((s) => s.trim()) : []
   form.remark = row?.remark ?? ''
 }
 
@@ -89,6 +101,8 @@ async function submit() {
       temperature: form.temperature,
       maxTokens: form.maxTokens,
       enabled: form.enabled,
+      autoRun: form.dataSource === 'alert_detail' ? form.autoRun : false,
+      autoSeverity: form.dataSource === 'alert_detail' ? form.autoSeverity.join(',') : '',
       remark: form.remark
     }
     if (form.id) {
@@ -138,7 +152,8 @@ const needsTarget = computed(
 const targetHint: Record<string, string> = {
   host_metric: '填主机 ID（主机管理列表里那一列）',
   exec_job: '填执行记录的作业 ID',
-  session_command: '填会话 ID（会话审计里的 #编号）'
+  session_command: '填会话 ID（会话审计里的 #编号）',
+  alert_detail: '填告警 ID（告警池列表里那一列）'
 }
 
 function openRunner(row: AgentConfig) {
@@ -212,11 +227,12 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column label="模型" width="130" prop="alias" />
-        <el-table-column label="数据来源" width="150">
+        <el-table-column label="数据来源" width="170">
           <template #default="{ row }">
             <el-tag size="small" :type="row.dataSource === 'none' ? 'info' : 'success'">
               {{ sourceLabel(row.dataSource) }}
             </el-tag>
+            <el-tag v-if="row.autoRun" size="small" type="warning" style="margin-left: 4px">自动</el-tag>
             <div class="sub">最多 {{ row.maxItems }} 条</div>
           </template>
         </el-table-column>
@@ -273,6 +289,21 @@ onMounted(async () => {
           </el-select>
           <div class="hint">除「不取平台数据」外，模板里必须用 {{ ctxVar }} 把数据放进去。</div>
         </el-form-item>
+        <template v-if="form.dataSource === 'alert_detail'">
+          <el-form-item label="新告警自动诊断">
+            <el-switch v-model="form.autoRun" />
+            <span class="hint inline">
+              落库一条新告警时自动运行一次（事件触发，不是定时）；每次都真实消耗模型额度，最多同时 2 条
+            </span>
+          </el-form-item>
+          <el-form-item v-if="form.autoRun" label="触发级别">
+            <el-select v-model="form.autoSeverity" multiple style="width: 100%" placeholder="不选 = 全部级别">
+              <el-option label="严重 critical" value="critical" />
+              <el-option label="警告 warning" value="warning" />
+              <el-option label="提示 info" value="info" />
+            </el-select>
+          </el-form-item>
+        </template>
         <el-form-item label="上下文条数">
           <el-input-number v-model="form.maxItems" :min="1" :max="200" />
           <span class="hint inline">条数撞到上限时运行记录会标「上下文已截断」</span>
